@@ -46,7 +46,7 @@ Lo que le atrae al usuario es ver a un personaje que **empieza simple y se trans
 ## 4. Cómo se juega
 
 ### 4.1 Flujo de una sesión
-1. Un jugador crea una sala y recibe un código corto. Los demás entran con ese código.
+1. Un jugador crea una sala y recibe un código corto. Los demás entran con ese código. Cada uno escribe un nombre de usuario (sección 4.7). También se puede entrar a una run ya empezada.
 2. Cada jugador elige su clase en el lobby (se puede repetir clase **[decisión de Claude]**). Cuando todos marcan "listo", empieza la run.
 3. Todos aparecen en la sala de inicio del piso 1.
 4. Exploran, pelean, abren cofres y suben de nivel.
@@ -99,11 +99,26 @@ Pool inicial sugerido. Los nombres y detalles los ajusta quien construya:
 - Si todos están caídos al mismo tiempo, la run termina.
 - Si alguien juega solo, al caer termina la run.
 
-### 4.7 Desconexiones [decisión de Claude]
-- Si a un jugador se le cae la conexión o cierra la pestaña, tiene **60 s para volver** con el mismo personaje (clase, habilidades, nivel). El estado de cada jugador se guarda por una identidad estable (un id en el navegador), no por la conexión.
-- Mientras está desconectado su personaje desaparece del mapa y no cuenta para la derrota ni para el portal. Si pasan los 60 s, sale de la run.
-- **No se puede entrar a una run ya empezada.** Quien llega tarde espera en el lobby a la siguiente.
-- El escalado por cantidad de jugadores se fija al empezar cada piso.
+### 4.7 Reconexión y entrar a mitad de run
+
+Decidido con el usuario: desconectarse sin querer **no puede costar el progreso**, y se puede **entrar a una run ya empezada**.
+
+**Identidad**
+- Al entrar a una sala cada jugador escribe un **nombre de usuario**, que es único dentro de esa sala. No hay cuentas ni contraseñas (sigue siendo una no-meta).
+- El servidor guarda el estado de cada jugador (clase, habilidades con su rango, nivel, stats y vida) asociado a **sala + nombre**, no a la conexión.
+
+**Reconectar**
+- Quien se desconecta vuelve a entrar con el mismo código de sala y el mismo nombre, y recupera su personaje tal como estaba.
+- **No hay límite de tiempo** mientras la run siga viva **[decisión de Claude]**.
+- Mientras está desconectado, su personaje desaparece del mapa y no cuenta para la derrota ni para el portal. Al volver aparece junto a un aliado vivo.
+- Si alguien entra con un nombre que ya está conectado, se rechaza. Si el nombre está guardado pero desconectado, se le entrega ese personaje. Entre amigos eso basta. Robar un nombre no es un riesgo que este prototipo tenga que cubrir **[decisión de Claude]**.
+- El estado vive en la memoria del servidor: si el servidor se reinicia, la run se pierde. Se acepta así para el prototipo **[decisión de Claude]**.
+
+**Entrar a mitad de run [decisión de Claude, salvo que se puede entrar]**
+- Un jugador nuevo elige clase y aparece junto a un aliado vivo, siempre que haya menos de 4 personajes en la run (contando a los desconectados, que guardan su lugar).
+- No se puede entrar durante la pelea con un jefe: el jugador espera hasta que el jefe muera.
+- Para que no quede atrás, entra con el **nivel del grupo** (la XP es compartida) y recibe tantas elecciones de "1 entre 3" como habilidades tiene en promedio el resto del grupo, redondeando hacia abajo.
+- El escalado por cantidad de jugadores se fija al empezar cada piso. Alguien que entra o sale a mitad de piso se refleja recién en el siguiente.
 
 ### 4.8 Mazmorras
 - Cada piso se genera con una **semilla aleatoria** como un conjunto de salas conectadas por pasillos sobre una grilla. La referencia de idea es `ia-game/scripts/world/level_generator.gd`, pero no hay que reutilizar ese código.
