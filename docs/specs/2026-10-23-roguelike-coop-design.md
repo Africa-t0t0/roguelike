@@ -16,7 +16,7 @@ Lo que le atrae al usuario es ver a un personaje que **empieza simple y se trans
 ## 2. Metas, no-metas y anti-metas
 
 **Metas**
-- Que 1 a 4 jugadores **[decisión de Claude: máximo 4]** puedan entrar a una misma sala desde el navegador y jugar una run juntos.
+- Que 1 a 4 jugadores **[decisión de Claude: máximo 4]** puedan entrar a una misma sala desde el navegador y jugar una run juntos, **cada uno desde su casa, por internet** (decidido con el usuario).
 - Que cada una de las tres clases se sienta distinta desde el minuto uno y más distinta todavía tras conseguir habilidades.
 - Que las mazmorras sean nuevas en cada piso y en cada run.
 - Que el código sea fácil de modificar para iterar: agregar una habilidad, un enemigo o ajustar números no debería tocar más de un par de archivos.
@@ -26,7 +26,7 @@ Lo que le atrae al usuario es ver a un personaje que **empieza simple y se trans
 - Balance fino, contenido abundante, historia, música original.
 - Móvil o mando. Solo teclado y mouse.
 - Matchmaking público. Se entra con un código de sala.
-- Hosting en producción o anti-cheat.
+- Hosting a escala, alta disponibilidad o anti-cheat. Sí hace falta un servidor simple accesible por internet para jugar con amigos (sección 5.1).
 
 **Anti-metas (si pasa esto, el prototipo fracasó aunque "funcione")**
 - Que el proyecto se convierta en construir un motor: si algo ya lo resuelven Babylon, Colyseus o un asset, se usa eso.
@@ -76,9 +76,9 @@ Al inicio cada clase solo tiene su ataque básico y el esquive.
 
 - Cada clase tiene su **propio pool de habilidades**. En el prototipo son **6 por clase [decisión de Claude]**, y con 4 slots no se puede tener todo en una run, lo que obliga a elegir.
 - **Cómo se consiguen** (decidido con el usuario): abriendo **cofres** o matando **enemigos especiales** (élites, más grandes y con un brillo visible).
-- **Cómo se eligen [decisión de Claude]:** al abrir un cofre o matar un élite, el jugador ve **3 habilidades de su pool que aún no tiene** y elige una. Si tiene los 4 slots llenos, puede reemplazar una o descartar la nueva. Este estilo "elige 1 de 3" es lo que produce builds distintas.
+- **Cómo se eligen [decisión de Claude]:** al abrir un cofre o matar un élite, el jugador ve **3 opciones sacadas de su pool** y elige una. Cada opción puede ser una habilidad nueva o una **mejora de una que ya tiene** (si aún no llegó al rango 3). Si elige una nueva con los 4 slots llenos, puede reemplazar una o descartarla. Este estilo "elige 1 de 3" es lo que produce builds distintas: ir a lo ancho (más habilidades) o a lo profundo (pocas, muy mejoradas).
 - **En co-op [decisión de Claude]:** el botín es individual. Cuando alguien abre un cofre, cada jugador cercano recibe su propia elección. No hay peleas por el loot.
-- Una segunda copia de una habilidad que ya tienes la mejora (rango 2 y 3, con más daño o menos cooldown) **[decisión de Claude]**.
+- Las mejoras llevan una habilidad a rango 2 y 3, con más daño, menos cooldown o un efecto extra. Cada habilidad define sus valores por rango **[decisión de Claude]**.
 - Las habilidades se conservan durante toda la run.
 - Se definen como datos (id, clase, cooldown, parámetros) más una función de comportamiento, para que agregar una nueva sea un cambio localizado.
 
@@ -99,7 +99,13 @@ Pool inicial sugerido. Los nombres y detalles los ajusta quien construya:
 - Si todos están caídos al mismo tiempo, la run termina.
 - Si alguien juega solo, al caer termina la run.
 
-### 4.7 Mazmorras
+### 4.7 Desconexiones [decisión de Claude]
+- Si a un jugador se le cae la conexión o cierra la pestaña, tiene **60 s para volver** con el mismo personaje (clase, habilidades, nivel). El estado de cada jugador se guarda por una identidad estable (un id en el navegador), no por la conexión.
+- Mientras está desconectado su personaje desaparece del mapa y no cuenta para la derrota ni para el portal. Si pasan los 60 s, sale de la run.
+- **No se puede entrar a una run ya empezada.** Quien llega tarde espera en el lobby a la siguiente.
+- El escalado por cantidad de jugadores se fija al empezar cada piso.
+
+### 4.8 Mazmorras
 - Cada piso se genera con una **semilla aleatoria** como un conjunto de salas conectadas por pasillos sobre una grilla. La referencia de idea es `ia-game/scripts/world/level_generator.gd`, pero no hay que reutilizar ese código.
 - Tipos de sala: inicio, combate normal, cofre, élite y jefe (la más lejana al inicio, por distancia de grafo).
 - El tamaño del piso y la dificultad de los enemigos crecen con el número de piso y con la cantidad de jugadores.
@@ -110,17 +116,34 @@ Pool inicial sugerido. Los nombres y detalles los ajusta quien construya:
 
 - **Servidor autoritativo con Colyseus.** El servidor es la fuente de verdad de la mazmorra (manda solo la semilla y el layout), las posiciones, la vida, el daño, la XP, los cofres, los drops y los estados de jefe y run. Los clientes envían inputs y muestran el estado.
 - **Colisiones en el servidor** contra la grilla de la mazmorra, con colisión simple de círculos y celdas. No hace falta un motor de física en el servidor **[decisión de Claude]**.
-- **Cliente Babylon.js:** renderizado, animaciones, cámara, UI, efectos y sonido. Predice el movimiento del jugador propio e interpola a los demás jugadores y enemigos **[decisión de Claude]**.
+- **Cliente Babylon.js:** renderizado, animaciones, cámara, UI, efectos y sonido.
 - **Código compartido** entre cliente y servidor: tipos, definiciones de clases, habilidades y enemigos, y el generador de mazmorras (determinista por semilla).
 - **Un solo repo** con tres paquetes (`client`, `server`, `shared`), Vite para el cliente y npm workspaces **[decisión de Claude]**.
 - Para desarrollar se levanta todo en local con un comando. Varias pestañas del navegador sirven como varios jugadores.
+
+### 5.1 Jugar por internet
+
+Decidido con el usuario: se juega entre casas distintas, con unos 50–150 ms de retraso. Eso condiciona el netcode desde el primer paso, no se agrega al final.
+
+**Netcode [decisión de Claude, salvo lo indicado]**
+- **Movimiento y esquive propios con predicción y reconciliación:** el cliente aplica su input al instante, el servidor confirma, y si difieren el cliente corrige reaplicando los inputs pendientes. Moverse y rodar nunca deben sentirse con retraso.
+- **Los demás jugadores y los enemigos se interpolan** con un buffer pequeño (unos 100 ms) para que se vean fluidos.
+- **Los ataques del jugador favorecen a quien ataca:** el servidor valida los golpes cuerpo a cuerpo y los proyectiles contra las posiciones de los enemigos tal como ese jugador los veía (rebobinando hasta un tope, por ejemplo 200 ms). Si viste que le pegaste, le pegaste.
+- **El esquive cuenta desde que el jugador lo presionó**, dentro del mismo tope, para que la invulnerabilidad no llegue tarde.
+- **Los ataques de los enemigos se telegrafían** con una animación o un indicador en el suelo de al menos ~400 ms, para que se puedan esquivar aunque haya retraso.
+- **Herramienta de desarrollo:** un modo que simula retraso y pérdida de paquetes en local, para probar cómo se siente sin depender de amigos.
+
+**Cómo se conectan los amigos [decisión de Claude]**
+- El servidor Colyseus y el cliente (archivos estáticos) se despliegan juntos en **un solo servicio barato o gratuito con WebSocket seguro (wss)**, por ejemplo Fly.io o Railway. Quien construya elige el servicio.
+- Para pruebas rápidas sin desplegar, un túnel (por ejemplo Cloudflare Tunnel) expone el servidor local del usuario.
+- Un servidor en una sola región es suficiente. Se supone que los jugadores están en la misma zona (probablemente Chile, sin confirmar), así que conviene elegir la región más cercana.
 
 ## 6. Orden de construcción sugerido [decisión de Claude]
 
 El co-op entra temprano (anti-meta 2):
 
 1. Un personaje con cámara en tercera persona caminando por una mazmorra generada (un jugador, ya pasando por el servidor).
-2. Varios jugadores en la misma sala, viéndose moverse.
+2. Varios jugadores en la misma sala, viéndose moverse, con predicción e interpolación y el simulador de retraso. Al terminar este paso se despliega por primera vez, para probarlo de verdad entre dos casas.
 3. Combate: el guerrero con su ataque básico, un tipo de enemigo, vida, muerte y XP.
 4. Las otras dos clases, el lobby y la selección de clase.
 5. Cofres, élites y la elección de 1 entre 3 habilidades. Primero 2 habilidades por clase y después completar las 6.
@@ -135,5 +158,5 @@ Cada paso termina en algo jugable que el usuario puede probar.
 - Los números: vida, daño, cooldowns, curvas de XP, tamaño de los pisos.
 - El algoritmo concreto de generación de mazmorras.
 - El diseño de la UI (HUD, lobby, elección de habilidades), siempre que sea legible.
-- El detalle del netcode (tick rate, cómo se reconcilia la predicción), mientras se sienta fluido en local y en una red doméstica.
+- El detalle del netcode (tick rate, tamaño de los buffers, topes de rebobinado), mientras cumpla lo de la sección 5.1 y se sienta fluido con 150 ms de retraso.
 - Los nombres y efectos exactos de las habilidades, respetando que cada una cambie cómo se juega.
