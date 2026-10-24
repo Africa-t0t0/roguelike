@@ -1,0 +1,18 @@
+{
+  "name": "@roguelike/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@roguelike/shared": "*"
+  },
+  "devDependencies": {
+    "vite": "8.3.4"
+  }
+}

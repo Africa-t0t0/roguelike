@@ -1,0 +1,19 @@
+{
+  "name": "@roguelike/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --noEmit -p .",
+    "start": "tsx src/index.ts",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@roguelike/shared": "*"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}
