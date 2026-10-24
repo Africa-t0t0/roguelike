@@ -93,3 +93,7 @@ fly scale count 1
 - El chequeo de salud es `GET /health`. La URL pública queda en `https://<app>.fly.dev`.
 - Para verificar: entra con tu computadora y con otra persona (o un celular con datos móviles, fuera de tu
   Wi-Fi) a la misma sala y comprueben que se ven moverse.
+
+## Assets
+
+Los modelos KayKit (CC0) viven en `packages/client/public/assets/kaykit/`; `node scripts/fetch-kaykit.mjs` los vuelve a descargar desde commits fijos. Ver `CREDITS.md`.
