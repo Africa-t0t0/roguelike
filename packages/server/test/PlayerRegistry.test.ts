@@ -14,6 +14,14 @@ describe("normalizeName", () => {
       expect(normalizeName(bad)).toBeNull();
     }
   });
+  it("normaliza a NFC: 'José' compuesto y descompuesto dan la misma clave", () => {
+    const composed = normalizeName("Jos\u00e9");
+    const decomposed = normalizeName("Jose\u0301");
+    expect(composed).not.toBeNull();
+    expect(decomposed).not.toBeNull();
+    expect(decomposed?.key).toBe(composed?.key);
+    expect(decomposed?.display).toBe(composed?.display);
+  });
   it("acepta 16 caracteres", () => {
     expect(normalizeName("x".repeat(16))).not.toBeNull();
   });

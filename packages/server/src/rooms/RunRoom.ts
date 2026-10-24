@@ -23,14 +23,10 @@ import {
   type Dungeon,
   type KinematicState,
 } from "@roguelike/shared";
+import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
 import { PlayerRegistry, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
 import { PlayerState, RunState } from "./RunState";
-
-export interface RunRoomCreateOptions {
-  seed?: number;
-  emptyRoomTtlMs?: number;
-}
 
 const ROOM_CODE_ATTEMPTS = 5;
 const ALLY_SPAWN_RADIUS = 2;
@@ -50,8 +46,8 @@ export class RunRoom extends Room<{ state: RunState }> {
       if ((await matchMaker.query({ roomId: this.roomId })).length === 0) break;
     }
 
-    const seed = typeof options.seed === "number" ? options.seed : randomInt(2 ** 32);
-    if (typeof options.emptyRoomTtlMs === "number") this.emptyRoomTtlMs = options.emptyRoomTtlMs;
+    const { seed, emptyRoomTtlMs } = resolveCreateOptions(options, process.env.NODE_ENV);
+    this.emptyRoomTtlMs = emptyRoomTtlMs;
     this.dungeon = generateDungeon(seed, 1);
     this.state = new RunState({ seed, floor: 1 });
 
@@ -145,7 +141,7 @@ export class RunRoom extends Room<{ state: RunState }> {
 
   /**
    * Determinista según el estado actual (el registro puede llamarla más de una vez).
-   * Junto a un aliado: primera casilla caminable libre a distancia de Chebyshev ≤ 2 de su casilla.
+   * Junto a un aliado: casilla caminable libre más cercana (Chebyshev ≤ 2) a la suya.
    * Si no hay aliado (o no hay hueco), un punto libre de la sala inicial.
    */
   private spawnFor(joiningKey: string | undefined): KinematicState {
@@ -156,11 +152,14 @@ export class RunRoom extends Room<{ state: RunState }> {
     const ally = others[0];
     if (ally) {
       const [ax, az] = [tileOf(ally.kinematic.x), tileOf(ally.kinematic.z)];
+      // La casilla libre más cercana al aliado; a igual distancia, por dz y luego dx ascendentes.
+      const candidates: { dx: number; dz: number }[] = [];
       for (let dz = -ALLY_SPAWN_RADIUS; dz <= ALLY_SPAWN_RADIUS; dz++) {
-        for (let dx = -ALLY_SPAWN_RADIUS; dx <= ALLY_SPAWN_RADIUS; dx++) {
-          if (free(ax + dx, az + dz)) return still(tileCenter(ax + dx, az + dz));
-        }
+        for (let dx = -ALLY_SPAWN_RADIUS; dx <= ALLY_SPAWN_RADIUS; dx++) candidates.push({ dx, dz });
       }
+      candidates.sort((a, b) => a.dx ** 2 + a.dz ** 2 - (b.dx ** 2 + b.dz ** 2) || a.dz - b.dz || a.dx - b.dx);
+      const pick = candidates.find((c) => free(ax + c.dx, az + c.dz));
+      if (pick) return still(tileCenter(ax + pick.dx, az + pick.dz));
     }
     const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + 1);
     const point = points.find((p) => free(tileOf(p.x), tileOf(p.z))) ?? points[0]!;

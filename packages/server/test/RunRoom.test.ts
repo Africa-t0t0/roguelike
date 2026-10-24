@@ -94,6 +94,14 @@ describe("RunRoom", () => {
     expect(tileCenter(btx, btz)).toEqual({ x: b.x, z: b.z });
     expect(Math.max(Math.abs(btx - tileOf(a.x)), Math.abs(btz - tileOf(a.z)))).toBeLessThanOrEqual(2);
     expect([btx, btz]).not.toEqual([tileOf(a.x), tileOf(a.z)]);
+    // Es la casilla libre más cercana a Ana.
+    const [atx, atz] = [tileOf(a.x), tileOf(a.z)];
+    const dist2 = (x: number, z: number) => (x - atx) ** 2 + (z - atz) ** 2;
+    for (let z = atz - 2; z <= atz + 2; z++) {
+      for (let x = atx - 2; x <= atx + 2; x++) {
+        if (isWalkableTile(d, x, z) && (x !== atx || z !== atz)) expect(dist2(x, z)).toBeGreaterThanOrEqual(dist2(btx, btz));
+      }
+    }
   });
 
   it("30 inputs en 30 ticks mueven PLAYER_SPEED metros", async () => {
@@ -179,13 +187,13 @@ describe("RunRoom", () => {
     expect(room.state.players.has("beto")).toBe(true);
   });
 
-  it("rechaza nombres inválidos con 4001", async () => {
+  it("rechaza nombres inválidos con 4101", async () => {
     await expect(colyseus.sdk.joinById(room.roomId, { name: "   ", token: "t" })).rejects.toMatchObject({
       code: JOIN_ERROR_STATUS["invalid-name"],
     });
   });
 
-  it("con 4 jugadores, una quinta persona nueva es rechazada con 4003", async () => {
+  it("con 4 jugadores, una quinta persona nueva es rechazada con 4103", async () => {
     const all = await Promise.all(["Ana", "Beto", "Caro", "Dani"].map((n) => join(n, `t-${n}`)));
     await Promise.all(all.map((p) => p.welcome));
     await expect(colyseus.sdk.joinById(room.roomId, { name: "Eva", token: "t-eva" })).rejects.toMatchObject({
