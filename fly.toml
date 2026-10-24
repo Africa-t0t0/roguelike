@@ -1,0 +1,29 @@
+# Cambia "roguelike-coop" si el nombre ya está tomado en Fly.io (debe ser único).
+app = "roguelike-coop"
+primary_region = "scl"
+
+[build]
+
+[env]
+  PORT = "2567"
+  NODE_ENV = "production"
+
+# Una sola máquina: las runs viven en memoria, no se pueden repartir ni apagar.
+[http_service]
+  internal_port = 2567
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

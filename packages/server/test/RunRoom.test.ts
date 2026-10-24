@@ -227,3 +227,10 @@ describe("RunRoom", () => {
     expect(await matchMaker.query({ roomId: room.roomId })).toHaveLength(0);
   });
 });
+
+describe("HTTP", () => {
+  it("GET /health responde 200", async () => {
+    const res = await fetch("http://localhost:2568/health");
+    expect(res.status).toBe(200);
+  });
+});

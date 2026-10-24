@@ -60,3 +60,32 @@ npm test          # tests de todos los paquetes (Vitest)
 npm run typecheck # TypeScript en todos los paquetes
 npm run build     # compila el cliente en packages/client/dist
 ```
+
+## Jugar desde el build de producción
+
+```sh
+npm run build && npm start   # sirve el cliente y el WebSocket en http://localhost:2567
+```
+
+## Desplegar (Fly.io)
+
+El servidor entrega el cliente compilado y el WebSocket desde el mismo origen, así que basta una sola app.
+Necesitas una cuenta en Fly.io (con método de pago) y `flyctl` instalado (<https://fly.io/docs/flyctl/install/>).
+
+```sh
+fly auth login
+fly launch --no-deploy --copy-config   # usa el fly.toml del repo
+fly deploy
+fly scale count 1
+```
+
+- Si `roguelike-coop` ya está tomado, `fly launch` te pedirá otro nombre: elige uno único (también puedes
+  cambiar `app` en `fly.toml`).
+- **Debe haber exactamente una máquina.** Las runs viven en la memoria del proceso: con dos máquinas, los
+  jugadores de una misma sala podrían caer en servidores distintos, y si la máquina se apaga se pierde la
+  run. Por eso `fly.toml` fija `min_machines_running = 1` y `auto_stop_machines = "off"`; `fly scale count 1`
+  lo asegura.
+- La región `scl` (Santiago) es un supuesto; cámbiala en `fly.toml` (`primary_region`) si hay otra más cercana.
+- El chequeo de salud es `GET /health`. La URL pública queda en `https://<app>.fly.dev`.
+- Para verificar: entra con tu computadora y con otra persona (o un celular con datos móviles, fuera de tu
+  Wi-Fi) a la misma sala y comprueben que se ven moverse.
