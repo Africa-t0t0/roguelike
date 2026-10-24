@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roguelike co-op</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0d14; color: #eee;
+        font: 15px system-ui, sans-serif; }
+      #game { width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+      [hidden] { display: none !important; }
+      .panel { position: absolute; inset: 0; margin: auto; width: min(22rem, calc(100% - 2rem)); height: fit-content;
+        padding: 1.5rem; border-radius: 0.75rem; background: rgba(20, 20, 32, 0.92);
+        box-shadow: 0 0.5rem 2rem rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 0.75rem; }
+      .panel h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+      label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: #bbb; }
+      input { font: inherit; padding: 0.5rem 0.6rem; border-radius: 0.4rem; border: 1px solid #444;
+        background: #111; color: #eee; }
+      #code { text-transform: uppercase; letter-spacing: 0.15em; }
+      button { font: inherit; padding: 0.55rem 0.9rem; border-radius: 0.4rem; border: 0; cursor: pointer;
+        background: #e8a33a; color: #1a1206; font-weight: 600; }
+      button:disabled { opacity: 0.5; cursor: progress; }
+      .row { display: flex; gap: 0.5rem; align-items: flex-end; }
+      .row label { flex: 1; }
+      .divider { text-align: center; color: #777; font-size: 0.8rem; }
+      .error { min-height: 1.2em; margin: 0; color: #ff8a80; }
+      #hud { position: absolute; top: 0.75rem; right: 0.75rem; padding: 0.4rem 0.7rem; border-radius: 0.4rem;
+        background: rgba(0, 0, 0, 0.55); font-size: 0.9rem; }
+      #hud-code { font-weight: 700; letter-spacing: 0.15em; user-select: all; }
+      .hint { color: #999; font-size: 0.8rem; }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <form id="lobby" class="panel" autocomplete="off">
+      <h1>Roguelike co-op</h1>
+      <label>Tu nombre <input id="name" maxlength="16" /></label>
+      <button id="create" type="button">Crear sala</button>
+      <div class="divider">o</div>
+      <div class="row">
+        <label>Código de sala <input id="code" maxlength="5" /></label>
+        <button id="join" type="submit">Unirse</button>
+      </div>
+      <p id="lobby-error" class="error" role="alert"></p>
+    </form>
+
+    <div id="hud" hidden>
+      Sala <span id="hud-code"></span>
+      <div class="hint">Clic para mirar con el mouse · WASD · Espacio para esquivar</div>
+    </div>
+
+    <div id="lost" class="panel" hidden>
+      <p>Se perdió la conexión</p>
+      <button id="rejoin" type="button">Volver a entrar</button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
