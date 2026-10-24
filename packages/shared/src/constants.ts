@@ -6,7 +6,9 @@ export const MAX_INPUTS_PER_TICK = 3;
 export const MAX_QUEUED_INPUTS = 30;
 export const MAX_PENDING_INPUTS = 90;
 export const TILE_SIZE = 2; // metros
-export const CORRIDOR_WIDTH = 3; // casillas; impar para quedar centrado en la línea entre salas
+// Ancho de pasillos en casillas. Valores válidos: 1, 3 o 5 (impar para quedar centrado;
+// un par se redondea al impar siguiente, y 7+ choca con el borde del mapa).
+export const CORRIDOR_WIDTH = 3;
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_SPEED = 5; // m/s
 export const DODGE_SPEED = 12; // m/s
