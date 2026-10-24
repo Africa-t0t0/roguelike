@@ -1,4 +1,4 @@
-import { CORRIDOR_WIDTH, TILE_SIZE } from "./constants";
+import { CORRIDOR_WIDTHS, TILE_SIZE } from "./constants";
 import { createRng, type Rng } from "./rng";
 
 export type RoomKind = "start" | "combat" | "boss";
@@ -107,14 +107,14 @@ function carveBox(tiles: Uint8Array, width: number, x0: number, x1: number, z0: 
 }
 
 /**
- * Pasillo en L de CORRIDOR_WIDTH casillas, centrado en la línea entre centros:
+ * Pasillo en L de `corridorWidth` casillas, centrado en la línea entre centros:
  * horizontal en z de `a`, luego vertical en x de `b`. Cada tramo se alarga media
  * anchura en sus extremos para que la esquina quede completa.
  */
-function carveCorridor(tiles: Uint8Array, width: number, a: Rect, b: Rect): void {
+function carveCorridor(tiles: Uint8Array, width: number, a: Rect, b: Rect, corridorWidth: number): void {
   const ca = center(a);
   const cb = center(b);
-  const half = Math.floor(CORRIDOR_WIDTH / 2);
+  const half = Math.floor(corridorWidth / 2);
   const minX = Math.min(ca.x, cb.x);
   const maxX = Math.max(ca.x, cb.x);
   const minZ = Math.min(ca.z, cb.z);
@@ -146,7 +146,7 @@ export function generateDungeon(seed: number, floor: number): Dungeon {
 
   const tiles = new Uint8Array(size * size);
   for (const r of rects) carveRoom(tiles, size, r);
-  for (const [a, b] of edges) carveCorridor(tiles, size, rects[a]!, rects[b]!);
+  for (const [a, b] of edges) carveCorridor(tiles, size, rects[a]!, rects[b]!, rng.pick(CORRIDOR_WIDTHS));
 
   const rooms: DungeonRoom[] = rects.map((r, id) => ({ id, ...r, kind: "combat", neighbors: [] }));
   for (const [a, b] of edges) {

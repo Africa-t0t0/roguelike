@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CORRIDOR_WIDTH } from "../src/constants";
+import { CORRIDOR_WIDTHS } from "../src/constants";
 import { generateDungeon, isWalkableTile, roomSpawnPoints, type Dungeon } from "../src/dungeon";
 
 function roomCenter(d: Dungeon, id: number) {
@@ -32,9 +32,31 @@ describe("generateDungeon", () => {
     expect(generateDungeon(7, 1).tiles).not.toEqual(generateDungeon(8, 1).tiles);
   });
 
-  it(`no hay pasos más angostos que CORRIDOR_WIDTH (${CORRIDOR_WIDTH} casillas)`, () => {
-    // toda casilla de suelo pertenece a algún cuadrado de CORRIDOR_WIDTH×CORRIDOR_WIDTH todo suelo
-    const n = CORRIDOR_WIDTH;
+  it("hay pasillos de cada ancho de CORRIDOR_WIDTHS", () => {
+    // un cuadrado de w×w todo suelo y fuera de toda sala solo puede venir de un pasillo de ancho ≥ w
+    const inRoom = (d: Dungeon, x: number, z: number) =>
+      d.rooms.some((r) => x >= r.x && x < r.x + r.w && z >= r.z && z < r.z + r.h);
+    const corridorSquare = (d: Dungeon, w: number) => {
+      for (let z0 = 0; z0 + w <= d.height; z0++) {
+        for (let x0 = 0; x0 + w <= d.width; x0++) {
+          let ok = true;
+          for (let z = z0; z < z0 + w && ok; z++) {
+            for (let x = x0; x < x0 + w && ok; x++) ok = isWalkableTile(d, x, z) && !inRoom(d, x, z);
+          }
+          if (ok) return true;
+        }
+      }
+      return false;
+    };
+    const widest = Math.max(...CORRIDOR_WIDTHS);
+    let found = false;
+    for (let seed = 1; seed <= 20 && !found; seed++) found = corridorSquare(generateDungeon(seed, 1), widest);
+    expect(found).toBe(true);
+  });
+
+  it(`no hay pasos más angostos que el pasillo mínimo (${Math.min(...CORRIDOR_WIDTHS)} casillas)`, () => {
+    // toda casilla de suelo pertenece a algún cuadrado de n×n todo suelo
+    const n = Math.min(...CORRIDOR_WIDTHS);
     for (const floor of [1, 2, 3]) {
       for (let seed = 1; seed <= 50; seed++) {
         const d = generateDungeon(seed, floor);

@@ -6,11 +6,15 @@ export const MAX_INPUTS_PER_TICK = 3;
 export const MAX_QUEUED_INPUTS = 30;
 export const MAX_PENDING_INPUTS = 90;
 export const TILE_SIZE = 2; // metros
-// Ancho de pasillos en casillas. Valores válidos: 1, 3 o 5 (impar para quedar centrado;
-// un par se redondea al impar siguiente, y 7+ choca con el borde del mapa).
-export const CORRIDOR_WIDTH = 3;
+// Anchos posibles de pasillo en casillas; cada pasillo sortea uno con la semilla.
+// Valores válidos: 1, 3 o 5 (impar para quedar centrado; un par se redondea al impar
+// siguiente, y 7+ choca con el borde del mapa).
+export const CORRIDOR_WIDTHS: readonly number[] = [3, 5];
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_SPEED = 5; // m/s
+export const SPRINT_SPEED = 8; // m/s, con Shift; sin estamina por ahora
+export const JUMP_VELOCITY = 7; // m/s hacia arriba al saltar (~1,1 m de altura)
+export const GRAVITY = 20; // m/s² (~0,7 s en el aire)
 export const DODGE_SPEED = 12; // m/s
 export const DODGE_DURATION = 0.25; // s
 export const DODGE_COOLDOWN = 1.0; // s
