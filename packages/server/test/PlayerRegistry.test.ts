@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { KinematicState } from "@roguelike/shared";
-import { normalizeName } from "@roguelike/shared";
+import type { KinematicState, WeaponId } from "@roguelike/shared";
+import { newComboTimers, normalizeName } from "@roguelike/shared";
 import { PlayerRegistry } from "../src/rooms/PlayerRegistry";
 import { newCombatState } from "../src/sim/CombatSystem";
 
@@ -101,6 +101,56 @@ describe("PlayerRegistry", () => {
     if (!back.ok) throw new Error();
     expect(back.kind).toBe("reconnect");
     expect(back.record.combat.pendingHits).toEqual([]);
+  });
+
+  it("reconnect y takeover reinician el combo (sin impacto pendiente) y conservan arma, vida y muerte", () => {
+    const r = new PlayerRegistry();
+    const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
+    if (!first.ok) throw new Error();
+    const c = first.record.combat;
+    const swingMidway = () => Object.assign(c, { comboStep: 2, swingTimer: 0.2, comboTimer: 0.8, impactTimer: 0.05, impactPending: true });
+    Object.assign(c, { weaponId: "great-sword", hp: 40, dead: true, respawnIn: 2 });
+    swingMidway();
+    const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn);
+    if (!taken.ok) throw new Error();
+    expect(taken.kind).toBe("takeover");
+    expect(c).toMatchObject({ ...newComboTimers(), weaponId: "great-sword", hp: 40, dead: true, respawnIn: 2 });
+
+    swingMidway();
+    r.leave("s2");
+    const back = r.join({ name: "Jorge", token: "otro", sessionId: "s3" }, spawn);
+    if (!back.ok) throw new Error();
+    expect(back.kind).toBe("reconnect");
+    expect(c).toMatchObject({ ...newComboTimers(), weaponId: "great-sword", hp: 40, dead: true, respawnIn: 2 });
+  });
+
+  it("las armas del suelo se crean una vez con el arma equipada y se conservan al volver", () => {
+    const r = new PlayerRegistry();
+    const seen: string[] = [];
+    const floor = (equipped: WeaponId) => {
+      seen.push(equipped);
+      return [{ weaponId: "great-sword" as const, x: 3, z: 5 }];
+    };
+    const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn, undefined, floor);
+    if (!first.ok) throw new Error();
+    expect(seen).toEqual(["kingslayer-sword"]);
+    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", x: 3, z: 5 }]);
+    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", x: 3, z: 5 };
+
+    const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn, undefined, floor);
+    if (!taken.ok) throw new Error();
+    r.leave("s2");
+    const back = r.join({ name: "Jorge", token: "x", sessionId: "s3" }, spawn, undefined, floor);
+    if (!back.ok) throw new Error();
+    expect(seen).toEqual(["kingslayer-sword"]);
+    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", x: 3, z: 5 }]);
+  });
+
+  it("sin fábrica, un registro nuevo no tiene armas del suelo", () => {
+    const r = new PlayerRegistry();
+    const res = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
+    if (!res.ok) throw new Error();
+    expect(res.record.floorWeapons).toEqual([]);
   });
 
   it("all() incluye a los desconectados", () => {

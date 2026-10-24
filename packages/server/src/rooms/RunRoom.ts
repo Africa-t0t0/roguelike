@@ -10,8 +10,10 @@ import {
   MAX_PLAYERS,
   MAX_QUEUED_INPUTS,
   MSG,
+  newComboTimers,
   normalizeName,
   PATCH_RATE_MS,
+  PICKUP_RANGE,
   PROTOCOL_VERSION,
   roomSpawnPoints,
   sanitizeInput,
@@ -21,16 +23,18 @@ import {
   TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
   tileCenter,
+  WEAPONS,
   type CombatEvent,
   type Dungeon,
   type KinematicState,
   type PlayerInput,
+  type WeaponId,
 } from "@roguelike/shared";
 import { CombatSystem, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
 import { PositionHistory } from "../sim/PositionHistory";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
-import { PlayerRegistry, type PlayerRecord } from "./PlayerRegistry";
+import { PlayerRegistry, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
 import { PlayerState, RunState } from "./RunState";
 import { syncPlayer, syncWorld } from "./syncState";
@@ -96,6 +100,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       { name: options.name, token: options.token, sessionId: client.sessionId },
       () => this.spawnFor(key),
       () => newCombatState("warrior", this.combat.level),
+      (equipped) => this.initialFloorWeapons(equipped),
     );
     if (!result.ok) throw new ServerError(JOIN_ERROR_STATUS[result.code], result.code);
 
@@ -113,6 +118,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     ps.name = record.displayName;
     syncPlayer(ps, record);
     client.send(MSG.welcome, { key: record.key });
+    // Nuevo, reconexión o toma de control: sus armas del suelo, solo a él.
+    this.sendFloorWeapons(client, record);
 
     this.emptyTimer?.clear();
     this.emptyTimer = undefined;
@@ -170,6 +177,8 @@ export class RunRoom extends Room<{ state: RunState }> {
         );
         if (res.impact) this.impact(record, res.impact, allStates);
         if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
+        // Antes del ataque de este input: con un swing en curso no se cambia de arma.
+        if (input.interact && !record.combat.dead && record.combat.swingTimer === 0) this.tryPickup(record);
         if (input.attack) {
           const swing = this.combat.attack(record.combat, record.kinematic, input);
           if (swing.swung) this.emit({ type: "swing", key: record.key, step: swing.step });
@@ -223,6 +232,39 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
     // Todos los registros (también los desconectados) suben su vida máxima con el nivel del grupo.
     for (const level of this.combat.grantXp(allStates, res.xpGained)) this.emit({ type: "levelUp", level });
+  }
+
+  /**
+   * Todas las armas menos la equipada, en el orden de WEAPONS, sobre puntos fijos de la sala inicial
+   * que siguen a los MAX_PLAYERS primeros (reservados para aparecer).
+   */
+  private initialFloorWeapons(equipped: WeaponId): FloorWeapon[] {
+    const ids = (Object.keys(WEAPONS) as WeaponId[]).filter((id) => id !== equipped);
+    const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + ids.length).slice(MAX_PLAYERS);
+    if (points.length < ids.length) throw new Error("la sala inicial no tiene sitio para las armas del suelo");
+    return ids.map((weaponId, i) => ({ weaponId, x: points[i]!.x, z: points[i]!.z }));
+  }
+
+  private sendFloorWeapons(client: Client, record: PlayerRecord): void {
+    client.send(MSG.floorWeapons, { items: record.floorWeapons.map(({ weaponId, x, z }) => ({ weaponId, x, z })) });
+  }
+
+  /** Intercambia el arma equipada por la propia del suelo más cercana a ≤ PICKUP_RANGE, si la hay. */
+  private tryPickup(record: PlayerRecord): void {
+    const { x, z } = record.kinematic;
+    let best = -1;
+    let bestD2 = Infinity;
+    record.floorWeapons.forEach((f, i) => {
+      const d2 = (f.x - x) ** 2 + (f.z - z) ** 2;
+      if (d2 <= PICKUP_RANGE ** 2 && d2 < bestD2) [best, bestD2] = [i, d2];
+    });
+    if (best === -1) return;
+    const taken = record.floorWeapons[best]!;
+    record.floorWeapons[best] = { weaponId: record.combat.weaponId, x: taken.x, z: taken.z };
+    record.combat.weaponId = taken.weaponId;
+    Object.assign(record.combat, newComboTimers());
+    const client = this.clients.find((c) => c.sessionId === record.sessionId);
+    if (client) this.sendFloorWeapons(client, record);
   }
 
   /**

@@ -19,6 +19,8 @@ export const PlayerState = schema(
     respawnIn: t.number(),
     comboStep: t.number(),
     swingTimer: t.number(),
+    /** WeaponId del arma equipada */
+    weaponId: t.string(),
   },
   "PlayerState",
 );

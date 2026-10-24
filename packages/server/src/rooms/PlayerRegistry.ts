@@ -1,11 +1,20 @@
 import {
   MAX_PLAYERS,
+  newComboTimers,
   normalizeName,
   type JoinErrorCode,
   type KinematicState,
   type PlayerInput,
+  type WeaponId,
 } from "@roguelike/shared";
 import { newCombatState, type CombatState } from "../sim/CombatSystem";
+
+/** Arma del suelo propia de un jugador (cada uno ve y toma solo las suyas). */
+export interface FloorWeapon {
+  weaponId: WeaponId;
+  x: number;
+  z: number;
+}
 
 export interface PlayerRecord {
   key: string;
@@ -15,8 +24,13 @@ export interface PlayerRecord {
   kinematic: KinematicState;
   lastSeq: number;
   inputQueue: PlayerInput[];
-  /** Se crea una sola vez; attach() (reconnect/takeover) ni cura ni revive: solo vacía los golpes pendientes. */
+  /**
+   * Se crea una sola vez; attach() (reconnect/takeover) ni cura ni revive ni cambia el arma: solo vacía los
+   * golpes pendientes y reinicia el combo (ningún impacto sobrevive a una desconexión).
+   */
   combat: CombatState;
+  /** Se crean con el registro; reconnect y takeover las conservan. */
+  floorWeapons: FloorWeapon[];
 }
 
 export type JoinResult =
@@ -32,6 +46,7 @@ export class PlayerRegistry {
     opts: { name: unknown; token: unknown; sessionId: string },
     spawn: () => KinematicState,
     makeCombat: () => CombatState = () => newCombatState("warrior", 1),
+    makeFloorWeapons: (equipped: WeaponId) => FloorWeapon[] = () => [],
   ): JoinResult {
     const name = normalizeName(opts.name);
     if (!name) return { ok: false, code: "invalid-name" };
@@ -66,7 +81,9 @@ export class PlayerRegistry {
       lastSeq: 0,
       inputQueue: [],
       combat: makeCombat(),
+      floorWeapons: [],
     };
+    record.floorWeapons = makeFloorWeapons(record.combat.weaponId);
     this.records.set(record.key, record);
     this.attach(record, opts.sessionId, spawn);
     return { ok: true, kind: "new", record };
@@ -104,5 +121,6 @@ export class PlayerRegistry {
     record.inputQueue = [];
     // Al volver no caen golpes recibidos antes de irse.
     record.combat.pendingHits = [];
+    Object.assign(record.combat, newComboTimers());
   }
 }

@@ -23,6 +23,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord): void {
   ps.respawnIn = c.respawnIn;
   ps.comboStep = c.comboStep;
   ps.swingTimer = c.swingTimer;
+  ps.weaponId = c.weaponId;
 }
 
 /** Agrega, actualiza y elimina por id las entradas de `enemies` y `projectiles`. */

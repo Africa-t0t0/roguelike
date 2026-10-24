@@ -8,6 +8,9 @@ import {
   roomSpawnPoints,
   JOIN_ERROR_STATUS,
   MAX_INPUTS_PER_TICK,
+  MAX_PLAYERS,
+  PICKUP_RANGE,
+  strikeOf,
   MAX_QUEUED_INPUTS,
   MSG,
   PLAYER_SPEED,
@@ -50,11 +53,18 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function join(name: string, token: string): Promise<{ client: ClientRoom; welcome: Promise<unknown> }> {
+type FloorMsg = { items: { weaponId: string; x: number; z: number }[] };
+
+async function join(
+  name: string,
+  token: string,
+): Promise<{ client: ClientRoom; welcome: Promise<unknown>; floors: FloorMsg[] }> {
   const client = await colyseus.sdk.joinById(room.roomId, { name, token, version: PROTOCOL_VERSION });
   // Sin reconexión automática del SDK: la reconexión del juego es por nombre.
   client.reconnection.enabled = false;
-  return { client, welcome: client.waitForMessage(MSG.welcome) };
+  const floors: FloorMsg[] = [];
+  client.onMessage(MSG.floorWeapons, (m: FloorMsg) => floors.push(m));
+  return { client, welcome: client.waitForMessage(MSG.welcome), floors };
 }
 
 async function ticksUntil(cond: () => boolean, maxTicks = 90): Promise<void> {
@@ -457,6 +467,177 @@ describe("RunRoom: combate", () => {
     ana.client.send(MSG.input, input(1));
     await ticksUntil(() => player("ana").lastSeq === 1, 5);
     expect(player("ana").x).toBe(x0);
+  });
+});
+
+describe("RunRoom: armas", () => {
+  const d = generateDungeon(SEED, 1);
+  // Puntos de la sala inicial: los primeros MAX_PLAYERS son de aparición; luego, guardia y mandoble.
+  const starts = roomSpawnPoints(d, d.startRoomId, MAX_PLAYERS + 2);
+  const guardAt = starts[MAX_PLAYERS]!;
+  const greatAt = starts[MAX_PLAYERS + 1]!;
+  const initialFloor = [
+    { weaponId: "guard-sword", x: guardAt.x, z: guardAt.z },
+    { weaponId: "great-sword", x: greatAt.x, z: greatAt.z },
+  ];
+  const idle = (seq: number, extra: Partial<ReturnType<typeof attackInput>> = {}) => ({
+    ...attackInput(seq, 0, room.state.tick),
+    attack: false,
+    ...extra,
+  });
+  const floorsUntil = (floors: FloorMsg[], n: number) => ticksUntil(() => floors.length >= n, 10);
+
+  /** Teletransporta a Ana junto al mandoble y lo toma; devuelve el próximo seq. */
+  async function takeGreatSword(ana: Awaited<ReturnType<typeof join>>, seq: number): Promise<number> {
+    const before = ana.floors.length;
+    teleport("ana", greatAt);
+    ana.client.send(MSG.input, idle(seq, { interact: true }));
+    await ticksUntil(() => player("ana").lastSeq === seq, 5);
+    await floorsUntil(ana.floors, before + 1);
+    return seq + 1;
+  }
+
+  it("un jugador nuevo lleva la espada del Kingslayer y recibe sus 2 armas del suelo en la sala de inicio", async () => {
+    expect(PICKUP_RANGE).toBe(1.5);
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    expect(player("ana").weaponId).toBe("kingslayer-sword");
+    await floorsUntil(ana.floors, 1);
+    expect(ana.floors).toEqual([{ items: initialFloor }]);
+    const start = d.rooms[d.startRoomId]!;
+    for (const it of ana.floors[0]!.items) {
+      const [tx, tz] = [tileOf(it.x), tileOf(it.z)];
+      expect(tx >= start.x && tx < start.x + start.w && tz >= start.z && tz < start.z + start.h).toBe(true);
+      expect(isWalkableTile(d, tx, tz)).toBe(true);
+    }
+    expect(record("ana").floorWeapons).toEqual(initialFloor);
+    await ticksUntil(() => ana.client.state.players.get("ana")?.weaponId === "kingslayer-sword", 5);
+  });
+
+  it("interact junto al mandoble lo equipa y deja la espada del Kingslayer en su lugar", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await floorsUntil(ana.floors, 1);
+    // Combo a medias pero sin swing en curso: el cambio lo reinicia.
+    Object.assign(record("ana").combat, { comboStep: 1, comboTimer: 0.3 });
+    await takeGreatSword(ana, 1);
+    expect(player("ana").weaponId).toBe("great-sword");
+    expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", comboStep: 0, comboTimer: 0, swingTimer: 0, impactPending: false });
+    expect(ana.floors).toHaveLength(2);
+    expect(ana.floors[1]).toEqual({
+      items: [initialFloor[0], { weaponId: "kingslayer-sword", x: greatAt.x, z: greatAt.z }],
+    });
+    await ticksUntil(() => ana.client.state.players.get("ana")?.weaponId === "great-sword", 5);
+  });
+
+  it("interact a más de 1,5 m de toda arma no cambia nada", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await floorsUntil(ana.floors, 1);
+    // Otra casilla de la sala: su centro queda a ≥ 2 m de cualquier arma.
+    teleport("ana", starts[0]!);
+    ana.client.send(MSG.input, idle(1, { interact: true }));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
+    expect(player("ana").weaponId).toBe("kingslayer-sword");
+    expect(record("ana").floorWeapons).toEqual(initialFloor);
+    expect(ana.floors).toHaveLength(1);
+  });
+
+  it("Foco 3: interact con un swing en curso se ignora y el combo sigue sano", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    collect(ana.client); // el swing se difunde; sin handler el SDK avisa por consola
+    await floorsUntil(ana.floors, 1);
+    teleport("ana", greatAt);
+    ana.client.send(MSG.input, { ...attackInput(1, 0, room.state.tick) });
+    ana.client.send(MSG.input, idle(2, { interact: true }));
+    await ticksUntil(() => player("ana").lastSeq === 2, 5);
+    const c = record("ana").combat;
+    expect(c.weaponId).toBe("kingslayer-sword");
+    expect(c.comboStep).toBe(1);
+    expect(c.swingTimer).toBeGreaterThan(0);
+    expect(record("ana").floorWeapons).toEqual(initialFloor);
+    expect(ana.floors).toHaveLength(1);
+
+    // El swing termina tras ceil(duración / SIM_DT) inputs posteriores al clic; luego el mismo interact sí funciona.
+    const swingInputs = Math.ceil(strikeOf("kingslayer-sword", 1).duration / SIM_DT);
+    let seq = 2;
+    while (seq < 1 + swingInputs) ana.client.send(MSG.input, idle(++seq));
+    await ticksUntil(() => player("ana").lastSeq === seq, 10);
+    expect(record("ana").combat.swingTimer).toBe(0);
+    await takeGreatSword(ana, seq + 1);
+    expect(player("ana").weaponId).toBe("great-sword");
+    expect(record("ana").combat).toMatchObject({ comboStep: 0, swingTimer: 0, impactPending: false });
+  });
+
+  it("Foco 4: salir y volver, o tomar el control, conserva el arma y reenvía las armas del suelo", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await floorsUntil(ana.floors, 1);
+    await takeGreatSword(ana, 1);
+    const swapped = ana.floors[1]!;
+
+    await ana.client.leave();
+    await ticksUntil(() => !room.state.players.has("ana"));
+    const back = await join("Ana", "t-otro");
+    await back.welcome;
+    expect(player("ana").weaponId).toBe("great-sword");
+    await floorsUntil(back.floors, 1);
+    expect(back.floors).toEqual([swapped]);
+
+    const again = await join("Ana", "t-otro");
+    await again.welcome;
+    expect(player("ana").weaponId).toBe("great-sword");
+    await floorsUntil(again.floors, 1);
+    expect(again.floors).toEqual([swapped]);
+    await ticksUntil(() => again.client.state.players.get("ana")?.weaponId === "great-sword", 5);
+  });
+
+  it("las armas del suelo de un jugador no le llegan a otro", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await Promise.all([ana.welcome, beto.welcome]);
+    await floorsUntil(beto.floors, 1);
+    await floorsUntil(ana.floors, 1);
+    await takeGreatSword(ana, 1);
+    for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
+    expect(beto.floors).toEqual([{ items: initialFloor }]);
+    expect(record("beto").floorWeapons).toEqual(initialFloor);
+    expect(player("beto").weaponId).toBe("kingslayer-sword");
+  });
+
+  it("el daño contra un enemigo llega en el impacto, no en el tick del clic", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    // Tick del servidor en el momento en que el cliente recibe cada evento.
+    const seen: { e: CombatEvent; tick: number }[] = [];
+    ana.client.onMessage(MSG.combat, (e: CombatEvent) => seen.push({ e, tick: room.state.tick }));
+    const { d: dd, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(dd, cr.id, 1)[0]!);
+    await ticksUntil(() => room.state.enemies.size === 4, 5);
+    const sys = room["enemySystem"];
+    const sides = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
+    const target = sys.enemies.find((e) => sides.some(([dx, dz]) => isWalkableTile(dd, tileOf(e.x) + dx, tileOf(e.z) + dz)))!;
+    const [dx, dz] = sides.find(([dx, dz]) => isWalkableTile(dd, tileOf(target.x) + dx, tileOf(target.z) + dz))!;
+    teleport("ana", tileCenter(tileOf(target.x) + dx, tileOf(target.z) + dz));
+
+    const me = record("ana").kinematic;
+    const facing = Math.atan2(target.x - me.x, target.z - me.z);
+    // Un input por tick, para que el swing avance en ticks reales.
+    const strike = strikeOf("kingslayer-sword", 1);
+    const total = Math.ceil(strike.duration / SIM_DT);
+    for (let seq = 1; seq <= total; seq++) {
+      ana.client.send(MSG.input, { ...attackInput(seq, facing, room.state.tick), attack: seq === 1 });
+      await ticksUntil(() => player("ana").lastSeq === seq, 5);
+    }
+    await ticksUntil(() => seen.some((s) => s.e.type === "damage" && s.e.targetKind === "enemy"), 10);
+    const swingIdx = seen.findIndex((s) => s.e.type === "swing");
+    const dmgIdx = seen.findIndex((s) => s.e.type === "damage" && s.e.targetKind === "enemy");
+    expect(swingIdx).toBeGreaterThanOrEqual(0);
+    expect(dmgIdx).toBeGreaterThan(swingIdx);
+    const minTicks = Math.ceil((strike.impactAt * strike.duration) / SIM_DT) - 1;
+    expect(seen[dmgIdx]!.tick - seen[swingIdx]!.tick).toBeGreaterThanOrEqual(minTicks);
   });
 });
 

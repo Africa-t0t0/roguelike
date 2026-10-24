@@ -19,6 +19,7 @@ export const DODGE_SPEED = 12; // m/s
 export const DODGE_DURATION = 0.25; // s
 export const DODGE_COOLDOWN = 1.0; // s
 export const MAX_PLAYERS = 4;
+export const PICKUP_RANGE = 1.5; // m, para tomar un arma del suelo
 export const EMPTY_ROOM_TTL_MS = 600_000;
 export const NAME_MAX_LEN = 16;
 export const ROOM_CODE_LENGTH = 5;
