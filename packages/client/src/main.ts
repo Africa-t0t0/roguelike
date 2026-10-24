@@ -15,11 +15,14 @@ import { connect, type GameConnection, type PlayerSnapshot } from "./net/connect
 import { parseLagParams } from "./net/LagSimulator";
 import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
+import { RecentHits } from "./render/animState";
 import { loadAssets, type Assets } from "./render/assets";
 import { createScene } from "./render/createScene";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
+import { EnemyViews } from "./render/enemyViews";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
 import { PlayerViews } from "./render/playerViews";
+import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
 import { joinErrorMessage } from "./ui/errors";
 import { Lobby } from "./ui/lobby";
@@ -104,7 +107,10 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
 function startSession(conn: GameConnection, scene: Scene, assets: Assets): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
   const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
-  const views = new PlayerViews(scene, conn.myKey);
+  const views = new PlayerViews(scene, assets);
+  const enemies = new EnemyViews(scene, assets);
+  const projectiles = new ProjectileViews(scene);
+  const hits = new RecentHits();
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
   const input = new InputState();
@@ -112,6 +118,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
 
   const remotes = new Map<string, SnapshotBuffer<PlayerSnapshot>>();
   const smoother = new CorrectionSmoother();
+  let mine: PlayerSnapshot | undefined; // último estado del servidor para el propio jugador
   let predictor: Predictor | undefined;
   let prev: KinematicState | undefined; // estado antes del último paso, para dibujar entre pasos
   let seq = 0;
@@ -125,7 +132,10 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
         let buffer = remotes.get(key);
         if (!buffer) remotes.set(key, (buffer = new SnapshotBuffer(lerpSnapshot)));
         buffer.push(receivedAt, p);
-      } else if (!predictor || !prev) {
+        continue;
+      }
+      mine = p;
+      if (!predictor || !prev) {
         predictor = new Predictor(p, dungeon);
         prev = { ...p };
         seq = p.lastSeq; // el servidor descarta seq ≤ lastSeq
@@ -137,6 +147,21 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
       }
     }
     for (const key of remotes.keys()) if (!players.has(key)) remotes.delete(key);
+  });
+
+  conn.onWorld((world, receivedAt) => {
+    enemies.push(world, receivedAt);
+    projectiles.push(world, receivedAt);
+  });
+
+  // Los eventos se marcan en el reloj de recepción; lo remoto se dibuja INTERP_DELAY_MS después.
+  conn.onCombat((event) => {
+    const now = performance.now();
+    if (event.type === "swing") {
+      if (event.key !== conn.myKey) views.swing(event.key, event.step, now);
+    } else if (event.type === "damage") {
+      hits.hit(`${event.targetKind}:${event.targetId}`, now);
+    }
   });
 
   const frame = () => {
@@ -161,16 +186,26 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
       const x = prev.x + (cur.x - prev.x) * a + smoother.x;
       const z = prev.z + (cur.z - prev.z) * a + smoother.z;
       const y = prev.y + (cur.y - prev.y) * a;
+      const pose = { x, y, z, facing: lerpAngle(prev.facing, cur.facing, a) };
+      // La esquiva es predicha; el combo y la muerte, por ahora, vienen del servidor.
+      const state = {
+        dodgeTime: cur.dodgeTime,
+        comboStep: mine?.comboStep ?? 0,
+        swingTimer: mine?.swingTimer ?? 0,
+        dead: mine?.dead ?? false,
+      };
+      views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
-      views.place(conn.myKey, x, y, z, lerpAngle(prev.facing, cur.facing, a));
       camera.follow(x, z);
     }
 
     const renderAt = now - INTERP_DELAY_MS;
     for (const [key, buffer] of remotes) {
       const s = buffer.sample(renderAt);
-      if (s) views.place(key, s.x, s.y, s.z, s.facing);
+      if (s) views.render(key, s, s, hits.recently(`player:${key}`, renderAt), renderAt, dt);
     }
+    enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
+    projectiles.render(renderAt);
     scene.render();
   };
   engine.runRenderLoop(frame);
@@ -180,6 +215,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
     detachInput();
     camera.dispose();
     views.dispose();
+    enemies.dispose();
+    projectiles.dispose();
     dungeonMeshes.dispose();
     scene.dispose();
   };

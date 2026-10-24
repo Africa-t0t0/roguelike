@@ -1,28 +1,35 @@
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
-import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
-import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { PLAYER_RADIUS } from "@roguelike/shared";
+import { CLASS_DEFS } from "@roguelike/shared";
+import { chooseHeroAnim, SpeedMeter } from "./animState";
+import type { Assets } from "./assets";
+import { CHARACTER_HEIGHT, CharacterView } from "./characterView";
 
-const BODY_HEIGHT = 1.8;
 const LABEL_W = 2;
 const LABEL_H = 0.5;
+const AIRBORNE_Y = 0.05; // m
+const KNIGHT_SHOWN = ["1H_Sword", "Round_Shield"];
+const KNIGHT_HIDDEN = ["1H_Sword_Offhand", "2H_Sword", "Badge_Shield", "Rectangle_Shield", "Spike_Shield"];
 
-interface PlayerView {
-  root: TransformNode;
-  dispose(): void;
+/** Lo que el servidor dice del jugador y que decide su animación (además de la pose dibujada). */
+export interface HeroState {
+  dodgeTime: number;
+  comboStep: number;
+  swingTimer: number;
+  dead: boolean;
 }
 
-function bodyMaterial(scene: Scene, name: string, color: Color3): StandardMaterial {
-  const m = new StandardMaterial(name, scene);
-  m.diffuseColor = color;
-  m.specularColor = new Color3(0.1, 0.1, 0.1);
-  return m;
+interface PlayerView {
+  character: CharacterView;
+  speed: SpeedMeter;
+  /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
+  swing?: { step: number; startMs: number; restart: boolean };
+  dispose(): void;
 }
 
 function createLabel(scene: Scene, key: string, text: string, parent: TransformNode): Mesh {
@@ -40,23 +47,18 @@ function createLabel(scene: Scene, key: string, text: string, parent: TransformN
   plane.material = mat;
   plane.billboardMode = Mesh.BILLBOARDMODE_ALL;
   plane.parent = parent;
-  plane.position.y = BODY_HEIGHT + 0.4;
+  plane.position.y = CHARACTER_HEIGHT + 0.4;
   return plane;
 }
 
-/** Una cápsula con nombre por jugador; el propio en otro color. */
+/** Un caballero KayKit animado con su nombre encima por jugador. */
 export class PlayerViews {
   private readonly views = new Map<string, PlayerView>();
-  private readonly mine: StandardMaterial;
-  private readonly others: StandardMaterial;
 
   constructor(
     private readonly scene: Scene,
-    private readonly myKey: string,
-  ) {
-    this.mine = bodyMaterial(scene, "playerMine", new Color3(0.95, 0.65, 0.2));
-    this.others = bodyMaterial(scene, "playerOther", new Color3(0.3, 0.6, 0.95));
-  }
+    private readonly assets: Assets,
+  ) {}
 
   /** Crea las vistas de los que entraron y destruye las de los que salieron. */
   sync(players: Map<string, { name: string }>): void {
@@ -71,11 +73,53 @@ export class PlayerViews {
     }
   }
 
-  place(key: string, x: number, y: number, z: number, facing: number): void {
+  /** Otro jugador empezó un golpe del combo en `startMs` (mismo reloj que se pasa a `render`). */
+  swing(key: string, step: number, startMs: number): void {
+    const view = this.views.get(key);
+    if (view) view.swing = { step, startMs, restart: true };
+  }
+
+  /**
+   * Dibuja al jugador en la pose dada y elige su animación. `nowMs` es el instante que representa la
+   * pose (ahora para el propio, ahora − retardo de interpolación para los remotos).
+   */
+  render(
+    key: string,
+    pose: { x: number; y: number; z: number; facing: number },
+    state: HeroState,
+    hurtRecently: boolean,
+    nowMs: number,
+    dtS: number,
+  ): void {
     const view = this.views.get(key);
     if (!view) return;
-    view.root.position.set(x, y, z);
-    view.root.rotation.y = facing;
+    view.character.setPose(pose.x, pose.y, pose.z, pose.facing);
+    let { comboStep, swingTimer } = state;
+    let restart = false;
+    const s = view.swing;
+    if (s) {
+      const left = (CLASS_DEFS.warrior.combo[s.step - 1]?.duration ?? 0) - (nowMs - s.startMs) / 1000;
+      if (left <= 0) view.swing = undefined;
+      else if (nowMs >= s.startMs) {
+        comboStep = s.step;
+        swingTimer = left;
+        restart = s.restart;
+        s.restart = false;
+      }
+    }
+    const choice = chooseHeroAnim(
+      {
+        speed: view.speed.sample(pose.x, pose.z, dtS),
+        airborne: pose.y > AIRBORNE_Y,
+        dodging: state.dodgeTime > 0,
+        comboStep,
+        swingTimer,
+        dead: state.dead,
+        hurtRecently,
+      },
+      view.character.clipLengths,
+    );
+    view.character.play(choice, restart && choice.clip !== "Death_A" && choice.clip !== "Dodge_Forward");
   }
 
   dispose(): void {
@@ -84,28 +128,18 @@ export class PlayerViews {
   }
 
   private create(key: string, name: string): PlayerView {
-    const scene = this.scene;
-    const root = new TransformNode(`player-${key}`, scene);
-    const material = key === this.myKey ? this.mine : this.others;
-
-    const body = CreateCapsule(`body-${key}`, { height: BODY_HEIGHT, radius: PLAYER_RADIUS }, scene);
-    body.material = material;
-    body.parent = root;
-    body.position.y = BODY_HEIGHT / 2;
-
-    // Una "nariz" hacia +Z local para ver hacia dónde mira.
-    const nose = CreateBox(`nose-${key}`, { width: 0.2, height: 0.2, depth: 0.3 }, scene);
-    nose.material = material;
-    nose.parent = root;
-    nose.position.set(0, BODY_HEIGHT * 0.75, PLAYER_RADIUS + 0.1);
-
-    const label = createLabel(scene, key, name, root);
+    const character = new CharacterView(this.scene, this.assets, "knight", {
+      showMeshes: KNIGHT_SHOWN,
+      hideMeshes: KNIGHT_HIDDEN,
+    });
+    const label = createLabel(this.scene, key, name, character.root);
     return {
-      root,
+      character,
+      speed: new SpeedMeter(),
       dispose() {
         label.material?.getActiveTextures().forEach((t) => t.dispose());
         label.material?.dispose();
-        root.dispose();
+        character.dispose();
       },
     };
   }

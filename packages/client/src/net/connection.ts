@@ -3,6 +3,8 @@ import {
   MSG,
   PROTOCOL_VERSION,
   TAKEOVER_CLOSE_CODE,
+  type CombatEvent,
+  type EnemyKind,
   type JoinOptions,
   type KinematicState,
   type PlayerInput,
@@ -10,8 +12,45 @@ import {
 import { generateToken } from "./token";
 import { LagSimulator, type LagConfig } from "./LagSimulator";
 
-export type PlayerSnapshot = KinematicState & { name: string; lastSeq: number };
+export type PlayerSnapshot = KinematicState & {
+  name: string;
+  lastSeq: number;
+  hp: number;
+  maxHp: number;
+  dead: boolean;
+  respawnIn: number;
+  comboStep: number;
+  swingTimer: number;
+};
 export type PlayerSnapshots = Map<string, PlayerSnapshot>;
+
+export interface EnemySnapshot {
+  kind: EnemyKind;
+  x: number;
+  z: number;
+  facing: number;
+  hp: number;
+  maxHp: number;
+  ai: string;
+  aiTime: number;
+}
+
+export interface ProjectileSnapshot {
+  x: number;
+  z: number;
+}
+
+/** Todo lo del estado que no son jugadores. */
+export interface WorldSnapshot {
+  tick: number;
+  level: number;
+  xp: number;
+  xpToNext: number;
+  enemies: Map<string, EnemySnapshot>;
+  projectiles: Map<string, ProjectileSnapshot>;
+}
+
+export type { CombatEvent };
 
 /** `takeover`: otra pestaña tomó el control del jugador. `lost`: cualquier otro corte no pedido. */
 export type DisconnectReason = "takeover" | "lost";
@@ -23,6 +62,8 @@ export interface GameConnection {
   floor: number;
   sendInput(i: PlayerInput): void;
   onPlayers(cb: (players: PlayerSnapshots, receivedAtMs: number) => void): void;
+  onWorld(cb: (world: WorldSnapshot, receivedAtMs: number) => void): void;
+  onCombat(cb: (event: CombatEvent) => void): void;
   onDisconnect(cb: (reason: DisconnectReason) => void): void;
   leave(): void;
 }
@@ -70,9 +111,37 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       y: p.y,
       vy: p.vy,
       lastSeq: p.lastSeq,
+      hp: p.hp,
+      maxHp: p.maxHp,
+      dead: p.dead,
+      respawnIn: p.respawnIn,
+      comboStep: p.comboStep,
+      swingTimer: p.swingTimer,
     });
   });
   return out;
+}
+
+function snapshotWorld(room: Room): WorldSnapshot {
+  const enemies = new Map<string, EnemySnapshot>();
+  room.state.enemies.forEach((e: EnemySnapshot, id: string) => {
+    enemies.set(id, {
+      kind: e.kind,
+      x: e.x,
+      z: e.z,
+      facing: e.facing,
+      hp: e.hp,
+      maxHp: e.maxHp,
+      ai: e.ai,
+      aiTime: e.aiTime,
+    });
+  });
+  const projectiles = new Map<string, ProjectileSnapshot>();
+  room.state.projectiles.forEach((p: ProjectileSnapshot, id: string) => {
+    projectiles.set(id, { x: p.x, z: p.z });
+  });
+  const st = room.state;
+  return { tick: st.tick, level: st.level, xp: st.xp, xpToNext: st.xpToNext, enemies, projectiles };
 }
 
 /** Crea una sala (sin `code`) o entra a una existente. Rechaza con el `MatchMakeError` del SDK. */
@@ -81,7 +150,21 @@ export async function connect(opts: { code?: string; name: string; lag: LagConfi
   const joinOptions: JoinOptions = { name: opts.name, token: browserToken(), version: PROTOCOL_VERSION };
   const code = opts.code?.trim().toUpperCase();
   const room = code ? await client.joinById(code, joinOptions) : await client.create(ROOM_NAME, joinOptions);
-  // Antes de cualquier otro await: `welcome` llega justo después del estado inicial.
+  const lag = new LagSimulator(opts.lag);
+  // LagSimulator no se puede cancelar: tras salir, sus entregas pendientes no hacen nada.
+  let closed = false;
+  let playersCb: ((players: PlayerSnapshots, receivedAtMs: number) => void) | undefined;
+  let worldCb: ((world: WorldSnapshot, receivedAtMs: number) => void) | undefined;
+  let combatCb: ((event: CombatEvent) => void) | undefined;
+  let disconnectCb: ((reason: DisconnectReason) => void) | undefined;
+
+  // Antes de cualquier otro await: `welcome` llega justo después del estado inicial, y los eventos
+  // de combate pueden llegar en cualquier momento (sin manejador el SDK avisa en consola).
+  room.onMessage(MSG.combat, (event: CombatEvent) => {
+    lag.inbound(() => {
+      if (!closed) combatCb?.(event);
+    });
+  });
   const welcome = new Promise<string>((resolve, reject) => {
     room.onMessage(MSG.welcome, (msg: { key: string }) => resolve(msg.key));
     room.onLeave.once((leaveCode) => reject(new Error(`la sala se cerró antes de entrar (${leaveCode})`)));
@@ -90,19 +173,22 @@ export async function connect(opts: { code?: string; name: string; lag: LagConfi
   room.reconnection.enabled = false;
   const myKey = await welcome;
 
-  const lag = new LagSimulator(opts.lag);
-  // LagSimulator no se puede cancelar: tras salir, sus entregas pendientes no hacen nada.
-  let closed = false;
-  let playersCb: ((players: PlayerSnapshots, receivedAtMs: number) => void) | undefined;
-  let disconnectCb: ((reason: DisconnectReason) => void) | undefined;
-
-  const deliverState = () => {
+  const deliverPlayers = () => {
     const players = snapshotPlayers(room);
     lag.inbound(() => {
       if (!closed) playersCb?.(players, performance.now());
     });
   };
-  room.onStateChange(deliverState);
+  const deliverWorld = () => {
+    const world = snapshotWorld(room);
+    lag.inbound(() => {
+      if (!closed) worldCb?.(world, performance.now());
+    });
+  };
+  room.onStateChange(() => {
+    deliverPlayers();
+    deliverWorld();
+  });
   room.onLeave((leaveCode) => {
     if (closed) return;
     closed = true;
@@ -122,7 +208,14 @@ export async function connect(opts: { code?: string; name: string; lag: LagConfi
     onPlayers(cb) {
       playersCb = cb;
       // El estado inicial llegó antes de `welcome`; sin cambios no habría otro parche.
-      deliverState();
+      deliverPlayers();
+    },
+    onWorld(cb) {
+      worldCb = cb;
+      deliverWorld();
+    },
+    onCombat(cb) {
+      combatCb = cb;
     },
     onDisconnect(cb) {
       disconnectCb = cb;
