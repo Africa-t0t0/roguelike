@@ -1,19 +1,9 @@
 export type ClassId = "warrior";
 
-export interface ComboStep {
-  duration: number;
-  damageMult: number;
-  range: number;
-  arcDeg: number;
-}
-
 export interface ClassDef {
   baseHp: number;
   hpPerLevel: number;
-  baseDamage: number;
   damagePerLevel: number;
-  combo: readonly ComboStep[];
-  comboResetS: number;
 }
 
 export type EnemyKind = "minion" | "brute" | "mage";
@@ -40,24 +30,17 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   warrior: {
     baseHp: 120,
     hpPerLevel: 12,
-    baseDamage: 12,
     damagePerLevel: 2,
-    combo: [
-      { duration: 0.35, damageMult: 1, range: 2.2, arcDeg: 120 },
-      { duration: 0.35, damageMult: 1, range: 2.2, arcDeg: 120 },
-      { duration: 0.5, damageMult: 1.5, range: 2.6, arcDeg: 160 },
-    ],
-    comboResetS: 0.6,
   },
 };
 
 export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
   minion: { hp: 20, speed: 6, radius: 0.4, damage: 6, attackRange: 1.2, telegraphS: 0.4, cooldownS: 1.2, xp: 4 },
-  brute: { hp: 45, speed: 3.5, radius: 0.5, damage: 12, attackRange: 1.6, telegraphS: 0.6, cooldownS: 1.6, xp: 8 },
+  brute: { hp: 45, speed: 3.5, radius: 0.6, damage: 12, attackRange: 1.6, telegraphS: 0.6, cooldownS: 1.6, xp: 8 },
   mage: {
     hp: 30,
     speed: 3,
-    radius: 0.45,
+    radius: 0.5,
     damage: 10,
     attackRange: 0,
     telegraphS: 0.7,
@@ -67,47 +50,14 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
   },
 };
 
-/** Temporizadores del combo; los usan igual el servidor y el `LocalCombo` del cliente. */
-export interface ComboTimers {
-  /** paso del último golpe aceptado: 0 = ninguno, 1..n */
-  comboStep: number;
-  swingTimer: number;
-  comboTimer: number;
-}
-
-const COMBO_EPS = 1e-9;
-
-/**
- * Avanza el combo un input (`dt` = SIM_DT). Lo que queda por debajo de COMBO_EPS cuenta como 0, así un
- * golpe de `duration` s libera el siguiente tras exactamente ceil(duration / dt) avances.
- */
-export function advanceCombo(c: ComboTimers, dt: number): void {
-  c.swingTimer = c.swingTimer - dt > COMBO_EPS ? c.swingTimer - dt : 0;
-  c.comboTimer = c.comboTimer - dt > COMBO_EPS ? c.comboTimer - dt : 0;
-  if (c.comboTimer === 0) c.comboStep = 0;
-}
-
-/** Arranca el siguiente golpe del combo si no hay uno en curso. Devuelve el paso (1..n) o 0. */
-export function tryStartSwing(c: ComboTimers, cls: ClassId): number {
-  if (c.swingTimer > 0) return 0;
-  const def = CLASS_DEFS[cls];
-  const step = c.comboTimer > 0 ? (c.comboStep % def.combo.length) + 1 : 1;
-  const duration = def.combo[step - 1]!.duration;
-  c.comboStep = step;
-  c.swingTimer = duration;
-  c.comboTimer = duration + def.comboResetS;
-  return step;
-}
-
 export function xpToNext(level: number): number {
   return 10 + 10 * level;
 }
 
-export function playerStats(cls: ClassId, level: number): { maxHp: number; damage: number } {
+export function playerStats(cls: ClassId, level: number): { maxHp: number } {
   const c = CLASS_DEFS[cls];
   return {
     maxHp: c.baseHp + c.hpPerLevel * (level - 1),
-    damage: c.baseDamage + c.damagePerLevel * (level - 1),
   };
 }
 

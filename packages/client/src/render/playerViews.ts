@@ -5,7 +5,7 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { CLASS_DEFS } from "@roguelike/shared";
+import { STARTING_WEAPON, MOVESETS, WEAPONS, strikeOf } from "@roguelike/shared";
 import { chooseHeroAnim, SpeedMeter } from "./animState";
 import type { Assets } from "./assets";
 import { CHARACTER_HEIGHT, CharacterView } from "./characterView";
@@ -98,7 +98,7 @@ export class PlayerViews {
     let restart = false;
     const s = view.swing;
     if (s) {
-      const left = (CLASS_DEFS.warrior.combo[s.step - 1]?.duration ?? 0) - (nowMs - s.startMs) / 1000;
+      const left = (s.step >= 1 && s.step <= MOVESETS[WEAPONS[STARTING_WEAPON].movesetId].combo.length ? strikeOf(STARTING_WEAPON, s.step).duration : 0) - (nowMs - s.startMs) / 1000;
       if (left <= 0) view.swing = undefined;
       else if (nowMs >= s.startMs) {
         comboStep = s.step;

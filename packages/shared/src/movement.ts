@@ -35,6 +35,7 @@ export interface PlayerInput {
   sprint: boolean;
   jump: boolean;
   attack: boolean;
+  interact: boolean;
   /** tick del servidor que el cliente estaba viendo al atacar (para rebobinar) */
   viewTick: number;
 }
@@ -65,6 +66,7 @@ export function sanitizeInput(raw: unknown): PlayerInput | null {
     sprint: r.sprint === true,
     jump: r.jump === true,
     attack: r.attack === true,
+    interact: r.interact === true,
     viewTick: typeof r.viewTick === "number" && Number.isFinite(r.viewTick) && r.viewTick >= 0 ? r.viewTick : 0,
   };
 }

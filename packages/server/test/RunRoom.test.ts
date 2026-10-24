@@ -262,12 +262,12 @@ const collect = (client: ClientRoom) => {
   return events;
 };
 const attackInput = (seq: number, facing: number, viewTick: number) => ({
-  seq, moveX: 0, moveZ: 0, facing, dodge: false, sprint: false, jump: false, attack: true, viewTick,
+  seq, moveX: 0, moveZ: 0, facing, dodge: false, sprint: false, jump: false, attack: true, interact: false, viewTick,
 });
 
 describe("RunRoom: combate", () => {
   it("rechaza una versión de protocolo distinta con 4104", async () => {
-    expect(PROTOCOL_VERSION).toBe(3); // 3: los daños a enemigos llevan sourceKey
+    expect(PROTOCOL_VERSION).toBe(4); // 4: armas (interact, floorWeapons)
     await expect(colyseus.sdk.joinById(room.roomId, { name: "Ana", token: "t", version: PROTOCOL_VERSION - 1 })).rejects.toMatchObject({
       code: JOIN_ERROR_STATUS["version-mismatch"],
     });

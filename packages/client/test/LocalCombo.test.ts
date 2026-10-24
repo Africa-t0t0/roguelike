@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CLASS_DEFS, SIM_DT } from "@roguelike/shared";
+import { MOVESETS, SIM_DT } from "@roguelike/shared";
 import { LocalCombo } from "../src/net/LocalCombo";
 
-const [c1, c2, c3] = CLASS_DEFS.warrior.combo;
+const [c1, c2, c3] = MOVESETS["one-hand-sword"].combo;
 const free = { dead: false, dodging: false };
 
 /** Avanza `seconds` de simulación con el clic en `attack`; devuelve los pasos que arrancaron. */
@@ -32,7 +32,7 @@ describe("LocalCombo", () => {
 
   it("acepta cada golpe exactamente ceil(duration / SIM_DT) inputs después del anterior, como el servidor", () => {
     const combo = new LocalCombo();
-    for (const [k, step] of CLASS_DEFS.warrior.combo.entries()) {
+    for (const [k, step] of MOVESETS["one-hand-sword"].combo.entries()) {
       expect(combo.tick(true, free, 0)).toBe(k + 1);
       const n = Math.ceil(step.duration / SIM_DT - 1e-9);
       for (let i = 0; i < n - 2; i++) combo.tick(false, free, 0);
@@ -44,7 +44,7 @@ describe("LocalCombo", () => {
   it("tras comboResetS sin atacar, el combo vuelve al golpe 1", () => {
     const combo = new LocalCombo();
     expect(combo.tick(true, free, 0)).toBe(1);
-    run(combo, c1!.duration + CLASS_DEFS.warrior.comboResetS + SIM_DT, false);
+    run(combo, c1!.duration + MOVESETS["one-hand-sword"].comboResetS + SIM_DT, false);
     expect(combo.tick(true, free, 0)).toBe(1);
   });
 

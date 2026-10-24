@@ -1,5 +1,8 @@
 import {
-  CLASS_DEFS,
+  STARTING_WEAPON,
+  newComboTimers,
+  strikeOf,
+  strikeDamage,
   ENEMY_DEFS,
   REWIND_MAX_TICKS,
   RESPAWN_INVULN_S,
@@ -45,9 +48,7 @@ export function newCombatState(cls: ClassId, level: number): CombatState {
     dead: false,
     respawnIn: 0,
     invulnFor: 0,
-    comboStep: 0,
-    swingTimer: 0,
-    comboTimer: 0,
+    ...newComboTimers(),
     pendingHits: [],
   };
 }
@@ -91,12 +92,12 @@ export class CombatSystem {
   ): AttackResult {
     const none: AttackResult = { swung: false, step: 0, hits: [], xpGained: 0 };
     if (!input.attack || c.dead || isInvulnerable(k)) return none;
-    const step = tryStartSwing(c, c.cls);
+    const step = tryStartSwing(c, STARTING_WEAPON);
     if (step === 0) return none;
-    const cs = CLASS_DEFS[c.cls].combo[step - 1]!;
+    const cs = strikeOf(STARTING_WEAPON, step);
 
     const t = Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(input.viewTick)));
-    const amount = Math.round(playerStats(c.cls, this.level).damage * cs.damageMult);
+    const amount = strikeDamage(STARTING_WEAPON, c.cls, this.level, step);
     const origin = { x: k.x, z: k.z, facing: input.facing };
     const result: AttackResult = { swung: true, step, hits: [], xpGained: 0 };
 

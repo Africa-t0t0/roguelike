@@ -1,4 +1,4 @@
-import { CLASS_DEFS, ENEMY_DEFS, type EnemyKind } from "@roguelike/shared";
+import { ENEMY_DEFS, MOVESETS, STARTING_WEAPON, WEAPONS, strikeOf, type EnemyKind } from "@roguelike/shared";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
 export interface AnimChoice {
@@ -47,10 +47,10 @@ const looped = (clip: string, speed = 1): AnimChoice => ({ clip, loop: true, spe
 export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ReadonlyMap<string, number>): AnimChoice {
   if (a.dead) return once("Death_A");
   if (a.dodging) return once("Dodge_Forward");
-  const combo = CLASS_DEFS.warrior.combo;
+  const combo = MOVESETS[WEAPONS[STARTING_WEAPON].movesetId].combo;
   if (a.swingTimer > 0 && a.comboStep >= 1 && a.comboStep <= combo.length) {
     const clip = HERO_ATTACK_CLIPS[a.comboStep - 1]!;
-    return once(clip, fitTo(clip, combo[a.comboStep - 1]!.duration, clipLengths));
+    return once(clip, fitTo(clip, strikeOf(STARTING_WEAPON, a.comboStep).duration, clipLengths));
   }
   if (a.airborne) return looped("Jump_Idle");
   if (a.hurtRecently) return once("Hit_A");

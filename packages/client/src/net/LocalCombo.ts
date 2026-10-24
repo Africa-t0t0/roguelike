@@ -1,4 +1,4 @@
-import { advanceCombo, SIM_DT, tryStartSwing, type ComboTimers } from "@roguelike/shared";
+import { advanceCombo, newComboTimers, SIM_DT, STARTING_WEAPON, tryStartSwing, type ComboTimers } from "@roguelike/shared";
 
 /**
  * Tras terminar el último golpe local, cuánto tiempo el combo que informa el servidor se toma como eco
@@ -17,7 +17,7 @@ export interface ComboView {
  * arranque al hacer clic. Solo es visual: el daño lo decide el servidor.
  */
 export class LocalCombo {
-  private readonly c: ComboTimers = { comboStep: 0, swingTimer: 0, comboTimer: 0 };
+  private readonly c: ComboTimers = newComboTimers();
   /** Cuándo termina (o terminó) el último golpe local, en el reloj de `tick`. */
   private lastEndMs: number | undefined;
 
@@ -25,7 +25,7 @@ export class LocalCombo {
   tick(attack: boolean, blocked: { dead: boolean; dodging: boolean }, nowMs: number): number {
     advanceCombo(this.c, SIM_DT);
     if (!attack || blocked.dead || blocked.dodging) return 0;
-    const started = tryStartSwing(this.c, "warrior");
+    const started = tryStartSwing(this.c, STARTING_WEAPON);
     if (started) this.lastEndMs = nowMs + this.c.swingTimer * 1000;
     return started;
   }

@@ -1,7 +1,7 @@
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export interface JoinOptions {
   name: string;
@@ -22,7 +22,7 @@ export const JOIN_ERROR_STATUS: Record<JoinErrorCode, number> = {
 export const TAKEOVER_CLOSE_CODE = 4005;
 
 /** Mensajes cliente/servidor. `welcome` lleva `{ key: string }`. */
-export const MSG = { input: "input", welcome: "welcome", combat: "combat" } as const;
+export const MSG = { input: "input", welcome: "welcome", combat: "combat", floorWeapons: "floorWeapons" } as const;
 
 const NAME_CHARS = /^[\p{L}\p{N} _-]+$/u;
 

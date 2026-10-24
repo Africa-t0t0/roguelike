@@ -59,7 +59,7 @@ export class InputState {
     this.dodgeQueued = false;
     this.jumpQueued = false;
     const sprint = this.held.has("ShiftLeft") || this.held.has("ShiftRight");
-    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump, attack, viewTick };
+    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump, attack, interact: false, viewTick };
   }
 
   private axis(positive: string, negative: string): number {
@@ -69,5 +69,5 @@ export class InputState {
 
 /** El mismo input sin acciones (p. ej. muerto): sin moverse, saltar, esquivar, correr ni atacar. */
 export function withoutActions(input: PlayerInput): PlayerInput {
-  return { ...input, moveX: 0, moveZ: 0, dodge: false, sprint: false, jump: false, attack: false };
+  return { ...input, moveX: 0, moveZ: 0, dodge: false, sprint: false, jump: false, attack: false, interact: false };
 }

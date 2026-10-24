@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLASS_DEFS,
+  MOVESETS,
   ENEMY_DEFS,
   REWIND_MAX_TICKS,
   SIM_DT,
@@ -46,7 +46,7 @@ const kin = (over: Partial<KinematicState> = {}): KinematicState => ({
   x: 0, z: 0, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0, y: 0, vy: 0, ...over,
 });
 const input = (over: Partial<PlayerInput> = {}): PlayerInput => ({
-  seq: 1, moveX: 0, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false, attack: true, viewTick: 0, ...over,
+  seq: 1, moveX: 0, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false, attack: true, interact: false, viewTick: 0, ...over,
 });
 
 /** Un input procesado y, si trae `attack`, su ataque (como hace RunRoom). */
@@ -91,7 +91,7 @@ describe("combo", () => {
     ["con ticks vacíos en medio", [1, 0, 2, 0, 0, 3]],
   ] as const) {
     it(`un ataque exactamente duration/SIM_DT inputs después del anterior se acepta ${name}`, () => {
-      for (const [k, step] of CLASS_DEFS.warrior.combo.entries()) {
+      for (const [k, step] of MOVESETS["one-hand-sword"].combo.entries()) {
         const n = inputsFor(step.duration);
         for (const gap of [n - 1, n]) {
           const { sys } = world(0, 1, 9999);
@@ -101,7 +101,7 @@ describe("combo", () => {
           // Lleva el combo al golpe k+1.
           for (let s = 0; s < k; s++) {
             press(cs, c, sys, h, true);
-            for (let j = 0; j < inputsFor(CLASS_DEFS.warrior.combo[s]!.duration) - 1; j++) press(cs, c, sys, h, false);
+            for (let j = 0; j < inputsFor(MOVESETS["one-hand-sword"].combo[s]!.duration) - 1; j++) press(cs, c, sys, h, false);
           }
           expect(press(cs, c, sys, h, true)!.step).toBe(k + 1);
           let sent = 0;
@@ -235,7 +235,7 @@ describe("golpes de enemigos", () => {
     const tick = (t: number, k = kin()) => cs.step(states, new Map([["a", k]]), t, SIM_DT);
     return { states, cs, tick };
   }
-  const idle = (viewTick: number) => input({ attack: false, viewTick });
+  const idle = (viewTick: number) => input({ attack: false, interact: false, viewTick });
 
   it("se aplica en cuanto llega un input con viewTick >= H sin esquivar", () => {
     const c = newCombatState("warrior", 1);
@@ -315,7 +315,7 @@ describe("muerte y reaparición", () => {
     expect(c.invulnFor).toBe(1);
 
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
-    expect(cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 })).damage).toBe(0);
+    expect(cs.onInputProcessed(c, kin(), input({ attack: false, interact: false, viewTick: 100 })).damage).toBe(0);
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
     cs.step(states, kins, 100 + REWIND_MAX_TICKS, 0.2);
     expect(c.hp).toBe(120);

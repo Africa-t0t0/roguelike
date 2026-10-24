@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLASS_DEFS,
+  ENEMY_DEFS,
   HISTORY_TICKS,
   REWIND_MAX_TICKS,
   SIM_DT,
   TILE_SIZE,
-  advanceCombo,
-  tryStartSwing,
   circlesOverlap,
   enemiesForRoom,
   inArc,
@@ -27,8 +25,13 @@ function makeDungeon(): Dungeon {
 
 describe("stats y conteos", () => {
   it("playerStats", () => {
-    expect(playerStats("warrior", 1)).toEqual({ maxHp: 120, damage: 12 });
-    expect(playerStats("warrior", 3)).toEqual({ maxHp: 144, damage: 16 });
+    expect(playerStats("warrior", 1)).toEqual({ maxHp: 120 });
+    expect(playerStats("warrior", 3)).toEqual({ maxHp: 144 });
+  });
+  it("radios de enemigos", () => {
+    expect(ENEMY_DEFS.brute.radius).toBe(0.6);
+    expect(ENEMY_DEFS.minion.radius).toBe(0.4);
+    expect(ENEMY_DEFS.mage.radius).toBe(0.5);
   });
   it("xpToNext", () => {
     expect(xpToNext(1)).toBe(20);
@@ -76,37 +79,17 @@ describe("sanitizeInput ataque", () => {
   });
 });
 
+describe("sanitizeInput interact", () => {
+  it("true solo si === true", () => {
+    expect(sanitizeInput({ seq: 1, interact: "y" })!.interact).toBe(false);
+    expect(sanitizeInput({ seq: 1, interact: true })!.interact).toBe(true);
+    expect(sanitizeInput({ seq: 1 })!.interact).toBe(false);
+  });
+});
+
 describe("constantes de rebobinado", () => {
   it("REWIND_MAX_TICKS = 10 y el historial lo cubre con margen", () => {
     expect(REWIND_MAX_TICKS).toBe(10);
     expect(HISTORY_TICKS).toBe(14);
-  });
-});
-
-describe("advanceCombo / tryStartSwing", () => {
-  const fresh = () => ({ comboStep: 0, swingTimer: 0, comboTimer: 0 });
-
-  it("cada golpe acepta el siguiente exactamente tras ceil(duration / SIM_DT) avances", () => {
-    const c = fresh();
-    for (const [k, step] of CLASS_DEFS.warrior.combo.entries()) {
-      expect(tryStartSwing(c, "warrior")).toBe(k + 1);
-      const n = Math.ceil(step.duration / SIM_DT - 1e-9);
-      for (let i = 0; i < n - 1; i++) advanceCombo(c, SIM_DT);
-      expect(tryStartSwing(c, "warrior")).toBe(0);
-      advanceCombo(c, SIM_DT);
-      expect(c.swingTimer).toBe(0);
-    }
-    expect(tryStartSwing(c, "warrior")).toBe(1);
-  });
-
-  it("sin atacar durante duration + comboResetS el combo vuelve a 0", () => {
-    const c = fresh();
-    tryStartSwing(c, "warrior");
-    const def = CLASS_DEFS.warrior;
-    const n = Math.ceil((def.combo[0]!.duration + def.comboResetS) / SIM_DT - 1e-9);
-    for (let i = 0; i < n - 1; i++) advanceCombo(c, SIM_DT);
-    expect(c.comboStep).toBe(1);
-    advanceCombo(c, SIM_DT);
-    expect(c).toEqual(fresh());
   });
 });

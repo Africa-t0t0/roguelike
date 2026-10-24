@@ -131,7 +131,7 @@ describe("withoutActions", () => {
     for (const k of ["KeyW", "Space", "KeyC", "ShiftLeft", "Mouse0"]) input.keyDown(k);
     const s = withoutActions(input.sample(7, 0.5, 12));
     expect(s).toEqual({
-      seq: 7, moveX: 0, moveZ: 0, facing: 0.5, dodge: false, sprint: false, jump: false, attack: false, viewTick: 12,
+      seq: 7, moveX: 0, moveZ: 0, facing: 0.5, dodge: false, sprint: false, jump: false, attack: false, interact: false, viewTick: 12,
     });
   });
 });

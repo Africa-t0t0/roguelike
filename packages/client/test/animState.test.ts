@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLASS_DEFS, ENEMY_DEFS } from "@roguelike/shared";
+import { MOVESETS, ENEMY_DEFS } from "@roguelike/shared";
 import {
   chooseEnemyAnim,
   chooseHeroAnim,
@@ -66,7 +66,7 @@ describe("chooseHeroAnim", () => {
       ["1H_Melee_Attack_Slice_Diagonal", 0.7],
       ["1H_Melee_Attack_Stab", 1.25],
     ]);
-    const combo = CLASS_DEFS.warrior.combo;
+    const combo = MOVESETS["one-hand-sword"].combo;
     for (const step of [1, 2, 3]) {
       const c = chooseHeroAnim(hero({ comboStep: step, swingTimer: 0.05 }), lengths);
       expect(lengths.get(c.clip)! / c.speed).toBeCloseTo(combo[step - 1]!.duration);

@@ -55,6 +55,7 @@ const input = (p: Partial<PlayerInput> = {}): PlayerInput => ({
   sprint: false,
   jump: false,
   attack: false,
+  interact: false,
   viewTick: 0,
   ...p,
 });
@@ -199,6 +200,7 @@ describe("sanitizeInput", () => {
       sprint: false,
       jump: false,
       attack: false,
+      interact: false,
       viewTick: 0,
     });
   });

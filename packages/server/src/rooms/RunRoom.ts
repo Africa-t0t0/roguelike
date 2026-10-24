@@ -52,6 +52,7 @@ const deadInput = (input: PlayerInput, k: KinematicState): PlayerInput => ({
   sprint: false,
   jump: false,
   attack: false,
+  interact: false,
 });
 
 export class RunRoom extends Room<{ state: RunState }> {
