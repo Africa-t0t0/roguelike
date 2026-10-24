@@ -213,15 +213,15 @@ export class RunRoom extends Room<{ state: RunState }> {
 
   /**
    * Determinista según el estado actual (el registro puede llamarla más de una vez).
-   * Junto a un aliado: casilla caminable libre más cercana (Chebyshev ≤ 2) a la suya.
-   * Si no hay aliado (o no hay hueco), un punto libre de la sala inicial.
+   * Junto a un aliado conectado y vivo: casilla caminable libre más cercana (Chebyshev ≤ 2) a la suya.
+   * Si no hay aliado vivo (o no hay hueco), un punto libre de la sala inicial.
    */
   private spawnFor(joiningKey: string | undefined): KinematicState {
     const others = this.registry.connected().filter((r) => r.key !== joiningKey);
     const occupied = new Set(others.map((r) => `${tileOf(r.kinematic.x)},${tileOf(r.kinematic.z)}`));
     const free = (tx: number, tz: number) => isWalkableTile(this.dungeon, tx, tz) && !occupied.has(`${tx},${tz}`);
 
-    const ally = others[0];
+    const ally = others.find((r) => !r.combat.dead);
     if (ally) {
       const [ax, az] = [tileOf(ally.kinematic.x), tileOf(ally.kinematic.z)];
       // La casilla libre más cercana al aliado; a igual distancia, por dz y luego dx ascendentes.

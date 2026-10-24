@@ -12,6 +12,7 @@ import {
   MSG,
   PLAYER_SPEED,
   PROTOCOL_VERSION,
+  REWIND_MAX_TICKS,
   SIM_DT,
   TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
@@ -381,6 +382,67 @@ describe("RunRoom: combate", () => {
     await ana3.welcome;
     expect(player("ana").dead).toBe(true);
     expect(player("ana").respawnIn).toBeGreaterThan(2.5);
+  });
+
+  /** Mata a `key` con un golpe pendiente ya vencido; devuelve los eventos vistos por `client`. */
+  async function killByHit(key: string, client: ClientRoom): Promise<CombatEvent[]> {
+    const events = collect(client);
+    record(key).combat.pendingHits.push({ damage: 999, resolveTick: -REWIND_MAX_TICKS });
+    await ticksUntil(() => player(key).dead, 5);
+    return events;
+  }
+  async function respawnNow(key: string): Promise<void> {
+    record(key).combat.respawnIn = SIM_DT;
+    await ticksUntil(() => !player(key).dead, 5);
+  }
+  const chebyshevTiles = (a: { x: number; z: number }, b: { x: number; z: number }) =>
+    Math.max(Math.abs(tileOf(a.x) - tileOf(b.x)), Math.abs(tileOf(a.z) - tileOf(b.z)));
+  const kill = (key: string) => {
+    const c = record(key).combat;
+    c.hp = 0;
+    c.dead = true;
+    c.respawnIn = 999;
+  };
+
+  it("daño → muerte → cuenta atrás → reaparece en la sala inicial si no hay aliados vivos", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await Promise.all([ana.welcome, beto.welcome]);
+    const d = generateDungeon(SEED, 1);
+    const boss = roomSpawnPoints(d, d.bossRoomId, 2);
+    // Beto, muerto y lejos; Ana, también lejos de la sala inicial.
+    teleport("beto", boss[0]!);
+    kill("beto");
+    teleport("ana", boss[1]!);
+
+    const events = await killByHit("ana", ana.client);
+    await ticksUntil(() => events.some((e) => e.type === "damage" && e.targetKind === "player" && e.targetId === "ana"), 5);
+    const r0 = player("ana").respawnIn;
+    expect(r0).toBeGreaterThan(4.5);
+    for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
+    expect(player("ana").respawnIn).toBeLessThan(r0);
+
+    await respawnNow("ana");
+    expect(player("ana").hp).toBe(120);
+    const start = d.rooms.find((r) => r.id === d.startRoomId)!;
+    const [tx, tz] = [tileOf(player("ana").x), tileOf(player("ana").z)];
+    expect(tx >= start.x && tx < start.x + start.w && tz >= start.z && tz < start.z + start.h).toBe(true);
+  });
+
+  it("reaparece junto a un aliado vivo, no junto a uno muerto", async () => {
+    // En orden: Beto queda antes que Caro en la lista de conectados.
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    const caro = await join("Caro", "t-caro");
+    await Promise.all([ana.welcome, beto.welcome, caro.welcome]);
+    const d = generateDungeon(SEED, 1);
+    // Beto (primero en la lista) está muerto en la sala inicial; Caro, viva en la del jefe.
+    kill("beto");
+    teleport("caro", roomSpawnPoints(d, d.bossRoomId, 1)[0]!);
+
+    await killByHit("ana", ana.client);
+    await respawnNow("ana");
+    expect(chebyshevTiles(player("ana"), player("caro"))).toBeLessThanOrEqual(2);
   });
 
   it("un jugador muerto no se mueve, pero su seq se confirma", async () => {
