@@ -198,6 +198,14 @@ describe("RunRoom", () => {
     });
   });
 
+  it("una sala a la que nunca entra nadie se cierra tras emptyRoomTtlMs", async () => {
+    const deadline = Date.now() + 1000;
+    while ((await matchMaker.query({ roomId: room.roomId })).length > 0) {
+      if (Date.now() > deadline) throw new Error("la sala sigue viva");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  });
+
   it("la sala vacía se cierra tras emptyRoomTtlMs, salvo que alguien vuelva antes", async () => {
     const ana = await join("Ana", "t-ana");
     const beto = await join("Beto", "t-beto");

@@ -61,6 +61,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.setPatchRate(PATCH_RATE_MS);
     this.setTimestep(() => this.tick(), 1000 / SIM_HZ);
     this.onMessage(MSG.input, (client, raw) => this.enqueueInput(client, raw));
+    // Una sala creada a la que nadie llega a entrar (reserva vencida) no pasa por onLeave.
+    this.armEmptyTimer();
   }
 
   onJoin(client: Client, options: { name?: unknown; token?: unknown } = {}): void {
@@ -97,10 +99,12 @@ export class RunRoom extends Room<{ state: RunState }> {
     // Si fue reemplazado por takeover, el registro ya apunta a la sesión nueva y no se toca.
     if (record) this.state.players.delete(record.key);
 
-    if (this.registry.connected().length === 0) {
-      this.emptyTimer?.clear();
-      this.emptyTimer = this.clock.setTimeout(() => void this.disconnect(), this.emptyRoomTtlMs);
-    }
+    if (this.registry.connected().length === 0) this.armEmptyTimer();
+  }
+
+  private armEmptyTimer(): void {
+    this.emptyTimer?.clear();
+    this.emptyTimer = this.clock.setTimeout(() => void this.disconnect(), this.emptyRoomTtlMs);
   }
 
   private enqueueInput(client: Client, raw: unknown): void {
