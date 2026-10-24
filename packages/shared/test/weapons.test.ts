@@ -38,6 +38,14 @@ describe("strikeOf / strikeDamage", () => {
     expect(MOVESETS["great-sword"].combo).toHaveLength(2);
     expect(WEAPONS["guard-sword"].speedMult).toBe(1.15);
   });
+  it("todo impactAt de los estilos de las armas está en (0, 1)", () => {
+    for (const w of Object.values(WEAPONS)) {
+      for (const s of MOVESETS[w.movesetId].combo) {
+        expect(s.impactAt, `${w.id} ${s.clip}`).toBeGreaterThan(0);
+        expect(s.impactAt, `${w.id} ${s.clip}`).toBeLessThan(1);
+      }
+    }
+  });
 });
 
 describe("combo con impacto", () => {

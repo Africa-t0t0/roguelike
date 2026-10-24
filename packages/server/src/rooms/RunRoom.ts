@@ -26,7 +26,7 @@ import {
   type KinematicState,
   type PlayerInput,
 } from "@roguelike/shared";
-import { CombatSystem, newCombatState, type CombatState } from "../sim/CombatSystem";
+import { CombatSystem, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
 import { PositionHistory } from "../sim/PositionHistory";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
@@ -164,10 +164,16 @@ export class RunRoom extends Room<{ state: RunState }> {
         const input = record.combat.dead ? deadInput(raw, record.kinematic) : raw;
         record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT);
         record.lastSeq = input.seq;
-        // Combo y golpes pendientes avanzan por input, antes de resolver el ataque de ese input.
-        const hit = this.combat.onInputProcessed(record.combat, record.kinematic, input);
-        if (hit.damage > 0) this.emitPlayerDamage(record.key, hit.damage, record.kinematic);
-        if (input.attack) this.attack(record, input, allStates);
+        // Combo, impacto y golpes pendientes avanzan por input, antes de empezar el swing de ese input.
+        const res = this.combat.onInputProcessed(
+          record.combat, record.kinematic, input, this.state.tick, this.enemySystem, this.history,
+        );
+        if (res.impact) this.impact(record, res.impact, allStates);
+        if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
+        if (input.attack) {
+          const swing = this.combat.attack(record.combat, record.kinematic, input);
+          if (swing.swung) this.emit({ type: "swing", key: record.key, step: swing.step });
+        }
       }
     }
 
@@ -202,9 +208,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat);
   }
 
-  private attack(record: PlayerRecord, input: PlayerInput, allStates: Map<string, CombatState>): void {
-    const res = this.combat.attack(record.combat, record.kinematic, input, this.state.tick, this.enemySystem, this.history);
-    if (res.swung) this.emit({ type: "swing", key: record.key, step: res.step });
+  /** Daño contra enemigos, xp y subidas de nivel: llegan en el impacto del swing, no en el clic. */
+  private impact(record: PlayerRecord, res: ImpactResult, allStates: Map<string, CombatState>): void {
     for (const h of res.hits) {
       this.emit({
         type: "damage",
