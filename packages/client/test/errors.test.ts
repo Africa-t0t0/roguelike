@@ -4,17 +4,17 @@ import { JOIN_ERROR_STATUS } from "@roguelike/shared";
 import { joinErrorMessage } from "../src/ui/errors";
 
 describe("joinErrorMessage", () => {
-  it("nombre en uso (4002)", () => {
+  it("nombre en uso (4102)", () => {
     const err = new MatchMakeError("name-taken", JOIN_ERROR_STATUS["name-taken"]);
     expect(joinErrorMessage(err)).toBe("Ese nombre ya está en uso en esta sala");
   });
 
-  it("sala llena (4003)", () => {
+  it("sala llena (4103)", () => {
     const err = new MatchMakeError("room-full", JOIN_ERROR_STATUS["room-full"]);
     expect(joinErrorMessage(err)).toBe("La sala está llena (máximo 4)");
   });
 
-  it("nombre inválido (4001)", () => {
+  it("nombre inválido (4101)", () => {
     const err = new MatchMakeError("invalid-name", JOIN_ERROR_STATUS["invalid-name"]);
     expect(joinErrorMessage(err)).toBe("Nombre inválido: usa de 1 a 16 letras, números, espacios, _ o -");
   });

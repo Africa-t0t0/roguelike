@@ -12,7 +12,7 @@ recorren la misma mazmorra; el servidor es autoritativo y el cliente predice su 
 
 ## Instalar
 
-Requiere Node 22.12 o más nuevo.
+Requiere Node 24 o más nuevo.
 
 ```sh
 npm install
@@ -75,10 +75,11 @@ Necesitas una cuenta en Fly.io (con método de pago) y `flyctl` instalado (<http
 ```sh
 fly auth login
 fly launch --no-deploy --copy-config   # usa el fly.toml del repo
-fly deploy
+fly deploy --ha=false
 fly scale count 1
 ```
 
+- `--ha=false` evita que el primer despliegue cree dos máquinas.
 - Si `roguelike-coop` ya está tomado, `fly launch` te pedirá otro nombre: elige uno único (también puedes
   cambiar `app` en `fly.toml`).
 - **Debe haber exactamente una máquina.** Las runs viven en la memoria del proceso: con dos máquinas, los

@@ -2,6 +2,9 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import {
   generateDungeon,
   INTERP_DELAY_MS,
+  JOIN_ERROR_STATUS,
+  normalizeName,
+  sanitizeInput,
   SIM_DT,
   type KinematicState,
 } from "@roguelike/shared";
@@ -34,6 +37,11 @@ const lobby = new Lobby(
 lobby.showLobby();
 
 async function join(opts: { name: string; code?: string }): Promise<void> {
+  // Mismo criterio que el servidor, sin tocarlo: así no queda viva una sala vacía por un nombre inválido.
+  if (!normalizeName(opts.name)) {
+    lobby.showLobby(joinErrorMessage({ code: JOIN_ERROR_STATUS["invalid-name"] }));
+    return;
+  }
   let conn: GameConnection;
   try {
     conn = await connect({ ...opts, lag });
@@ -101,7 +109,9 @@ function startSession(conn: GameConnection): () => void {
       acc += dt;
       while (acc >= SIM_DT) {
         acc -= SIM_DT;
-        const sampled = input.sample(++seq, camera.yaw);
+        // Se predice y se envía lo mismo que el servidor va a simular (ya saneado).
+        const sampled = sanitizeInput(input.sample(++seq, camera.yaw));
+        if (!sampled) continue;
         prev = predictor.current;
         predictor.applyLocal(sampled);
         conn.sendInput(sampled);

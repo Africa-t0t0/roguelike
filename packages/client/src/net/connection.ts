@@ -6,6 +6,7 @@ import {
   type KinematicState,
   type PlayerInput,
 } from "@roguelike/shared";
+import { generateToken } from "./token";
 import { LagSimulator, type LagConfig } from "./LagSimulator";
 
 export type PlayerSnapshot = KinematicState & { name: string; lastSeq: number };
@@ -42,12 +43,12 @@ function browserToken(): string {
   try {
     let token = localStorage.getItem(TOKEN_KEY);
     if (!token) {
-      token = crypto.randomUUID();
+      token = generateToken();
       localStorage.setItem(TOKEN_KEY, token);
     }
     return token;
   } catch {
-    sessionToken ??= crypto.randomUUID();
+    sessionToken ??= generateToken();
     return sessionToken;
   }
 }

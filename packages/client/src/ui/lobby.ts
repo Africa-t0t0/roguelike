@@ -1,4 +1,5 @@
 const NAME_KEY = "roguelike.name";
+const CODE_KEY = "roguelike.room";
 
 function el<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -25,7 +26,8 @@ export class Lobby {
   private readonly rejoin = el<HTMLButtonElement>("rejoin");
 
   constructor(handlers: LobbyHandlers, onRejoin: () => void) {
-    this.name.value = readName();
+    this.name.value = readStored(NAME_KEY);
+    this.code.value = initialCode();
     this.createBtn.addEventListener("click", () => {
       this.begin();
       handlers.onCreate(this.name.value);
@@ -60,6 +62,7 @@ export class Lobby {
   }
 
   showGame(roomCode: string): void {
+    writeStored(CODE_KEY, roomCode);
     this.lobby.hidden = true;
     this.lost.hidden = true;
     this.hud.hidden = false;
@@ -74,23 +77,29 @@ export class Lobby {
 
   private begin(): void {
     this.error.textContent = "";
-    writeName(this.name.value.trim());
+    writeStored(NAME_KEY, this.name.value.trim());
     this.setBusy(true);
   }
 }
 
-function readName(): string {
+/** `?sala=CODE` en la URL manda; si no, el último código usado en este navegador. */
+function initialCode(): string {
+  const fromUrl = new URLSearchParams(location.search).get("sala");
+  return (fromUrl ?? readStored(CODE_KEY)).trim().toUpperCase().slice(0, 5);
+}
+
+function readStored(key: string): string {
   try {
-    return localStorage.getItem(NAME_KEY) ?? "";
+    return localStorage.getItem(key) ?? "";
   } catch {
     return "";
   }
 }
 
-function writeName(name: string): void {
+function writeStored(key: string, value: string): void {
   try {
-    localStorage.setItem(NAME_KEY, name);
+    localStorage.setItem(key, value);
   } catch {
-    // sin almacenamiento solo se pierde el recordatorio del nombre
+    // sin almacenamiento solo se pierde el recordatorio
   }
 }
