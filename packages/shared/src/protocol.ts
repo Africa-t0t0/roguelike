@@ -1,23 +1,28 @@
 import { NAME_MAX_LEN } from "./constants";
 
+/** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
+export const PROTOCOL_VERSION = 2;
+
 export interface JoinOptions {
   name: string;
   token: string;
+  version: number;
 }
 
-export type JoinErrorCode = "invalid-name" | "name-taken" | "room-full";
+export type JoinErrorCode = "invalid-name" | "name-taken" | "room-full" | "version-mismatch";
 
 export const JOIN_ERROR_STATUS: Record<JoinErrorCode, number> = {
   "invalid-name": 4101,
   "name-taken": 4102,
   "room-full": 4103,
+  "version-mismatch": 4104,
 };
 
 /** Código de cierre que recibe la conexión vieja cuando otra pestaña toma el control del jugador. */
 export const TAKEOVER_CLOSE_CODE = 4005;
 
 /** Mensajes cliente/servidor. `welcome` lleva `{ key: string }`. */
-export const MSG = { input: "input", welcome: "welcome" } as const;
+export const MSG = { input: "input", welcome: "welcome", combat: "combat" } as const;
 
 const NAME_CHARS = /^[\p{L}\p{N} _-]+$/u;
 
@@ -29,3 +34,8 @@ export function normalizeName(raw: unknown): { display: string; key: string } | 
   if (!NAME_CHARS.test(display)) return null;
   return { display, key: display.toLowerCase() };
 }
+
+export type CombatEvent =
+  | { type: "damage"; targetKind: "enemy" | "player"; targetId: string; amount: number; x: number; z: number }
+  | { type: "swing"; key: string; step: number }
+  | { type: "levelUp"; level: number };

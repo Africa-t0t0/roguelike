@@ -1,6 +1,7 @@
 import { Client, type Room } from "@colyseus/sdk";
 import {
   MSG,
+  PROTOCOL_VERSION,
   TAKEOVER_CLOSE_CODE,
   type JoinOptions,
   type KinematicState,
@@ -77,7 +78,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
 /** Crea una sala (sin `code`) o entra a una existente. Rechaza con el `MatchMakeError` del SDK. */
 export async function connect(opts: { code?: string; name: string; lag: LagConfig }): Promise<GameConnection> {
   const client = new Client(serverUrl());
-  const joinOptions: JoinOptions = { name: opts.name, token: browserToken() };
+  const joinOptions: JoinOptions = { name: opts.name, token: browserToken(), version: PROTOCOL_VERSION };
   const code = opts.code?.trim().toUpperCase();
   const room = code ? await client.joinById(code, joinOptions) : await client.create(ROOM_NAME, joinOptions);
   // Antes de cualquier otro await: `welcome` llega justo después del estado inicial.

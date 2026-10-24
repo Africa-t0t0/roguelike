@@ -33,7 +33,7 @@ const initial: KinematicState = {
   vy: 0,
 };
 
-const input = (seq: number): PlayerInput => ({ seq, moveX: 1, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false });
+const input = (seq: number): PlayerInput => ({ seq, moveX: 1, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false, attack: false, viewTick: 0 });
 
 function setup() {
   const p = new Predictor(initial, dungeon);

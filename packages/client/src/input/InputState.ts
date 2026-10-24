@@ -48,7 +48,7 @@ export class InputState {
     this.dodgeQueued = false;
     this.jumpQueued = false;
     const sprint = this.held.has("ShiftLeft") || this.held.has("ShiftRight");
-    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump };
+    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump, attack: false, viewTick: 0 };
   }
 
   private axis(positive: string, negative: string): number {

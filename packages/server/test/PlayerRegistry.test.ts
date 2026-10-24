@@ -51,7 +51,7 @@ describe("PlayerRegistry", () => {
     const r = new PlayerRegistry();
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
     if (!first.ok) throw new Error();
-    first.record.inputQueue.push({ seq: 5, moveX: 0, moveZ: 1, facing: 0, dodge: false, sprint: false, jump: false });
+    first.record.inputQueue.push({ seq: 5, moveX: 0, moveZ: 1, facing: 0, dodge: false, sprint: false, jump: false, attack: false, viewTick: 0 });
     first.record.lastSeq = 5;
     first.record.kinematic.x = 99;
     const res = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn);

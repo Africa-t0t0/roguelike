@@ -10,6 +10,7 @@ import {
   MAX_QUEUED_INPUTS,
   MSG,
   PLAYER_SPEED,
+  PROTOCOL_VERSION,
   SIM_DT,
   TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
@@ -47,7 +48,7 @@ afterEach(async () => {
 });
 
 async function join(name: string, token: string): Promise<{ client: ClientRoom; welcome: Promise<unknown> }> {
-  const client = await colyseus.sdk.joinById(room.roomId, { name, token });
+  const client = await colyseus.sdk.joinById(room.roomId, { name, token, version: PROTOCOL_VERSION });
   // Sin reconexión automática del SDK: la reconexión del juego es por nombre.
   client.reconnection.enabled = false;
   return { client, welcome: client.waitForMessage(MSG.welcome) };
@@ -147,7 +148,7 @@ describe("RunRoom", () => {
   it("mismo nombre con otro token es rechazado; con el mismo token toma el control", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
-    await expect(colyseus.sdk.joinById(room.roomId, { name: "ANA", token: "otro" })).rejects.toMatchObject({
+    await expect(colyseus.sdk.joinById(room.roomId, { name: "ANA", token: "otro", version: PROTOCOL_VERSION })).rejects.toMatchObject({
       code: JOIN_ERROR_STATUS["name-taken"],
     });
 
@@ -188,7 +189,7 @@ describe("RunRoom", () => {
   });
 
   it("rechaza nombres inválidos con 4101", async () => {
-    await expect(colyseus.sdk.joinById(room.roomId, { name: "   ", token: "t" })).rejects.toMatchObject({
+    await expect(colyseus.sdk.joinById(room.roomId, { name: "   ", token: "t", version: PROTOCOL_VERSION })).rejects.toMatchObject({
       code: JOIN_ERROR_STATUS["invalid-name"],
     });
   });
@@ -196,13 +197,13 @@ describe("RunRoom", () => {
   it("con 4 jugadores, una quinta persona nueva es rechazada con 4103", async () => {
     const all = await Promise.all(["Ana", "Beto", "Caro", "Dani"].map((n) => join(n, `t-${n}`)));
     await Promise.all(all.map((p) => p.welcome));
-    await expect(colyseus.sdk.joinById(room.roomId, { name: "Eva", token: "t-eva" })).rejects.toMatchObject({
+    await expect(colyseus.sdk.joinById(room.roomId, { name: "Eva", token: "t-eva", version: PROTOCOL_VERSION })).rejects.toMatchObject({
       code: JOIN_ERROR_STATUS["room-full"],
     });
   });
 
   it("rechaza un código de sala inexistente", async () => {
-    await expect(colyseus.sdk.joinById("ZZZZZ", { name: "Ana", token: "t" })).rejects.toMatchObject({
+    await expect(colyseus.sdk.joinById("ZZZZZ", { name: "Ana", token: "t", version: PROTOCOL_VERSION })).rejects.toMatchObject({
       code: ErrorCode.MATCHMAKE_INVALID_ROOM_ID,
     });
   });

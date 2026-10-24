@@ -34,6 +34,9 @@ export interface PlayerInput {
   dodge: boolean;
   sprint: boolean;
   jump: boolean;
+  attack: boolean;
+  /** tick del servidor que el cliente estaba viendo al atacar (para rebobinar) */
+  viewTick: number;
 }
 
 const EPS = 1e-6;
@@ -61,6 +64,8 @@ export function sanitizeInput(raw: unknown): PlayerInput | null {
     dodge: r.dodge === true,
     sprint: r.sprint === true,
     jump: r.jump === true,
+    attack: r.attack === true,
+    viewTick: typeof r.viewTick === "number" && Number.isFinite(r.viewTick) && r.viewTick >= 0 ? r.viewTick : 0,
   };
 }
 
@@ -75,9 +80,9 @@ function moveAxis(
   z: number,
   delta: number,
   axis: "x" | "z",
+  r: number,
 ): number {
   if (delta === 0) return axis === "x" ? x : z;
-  const r = PLAYER_RADIUS;
   const start = axis === "x" ? x : z;
   const other = axis === "x" ? z : x;
   let pos = start + delta;
@@ -104,6 +109,20 @@ function moveAxis(
     }
   }
   return pos;
+}
+
+/** Mueve un círculo de radio `radius` por (dx, dz) contra los muros: primero X y después Z. */
+export function moveCircle(
+  d: Dungeon,
+  x: number,
+  z: number,
+  dx: number,
+  dz: number,
+  radius: number,
+): { x: number; z: number } {
+  const nx = moveAxis(d, x, z, dx, "x", radius);
+  const nz = moveAxis(d, nx, z, dz, "z", radius);
+  return { x: nx, z: nz };
 }
 
 export function stepPlayer(
@@ -156,7 +175,6 @@ export function stepPlayer(
     }
   }
 
-  const x = moveAxis(d, s.x, s.z, dx, "x");
-  const z = moveAxis(d, x, s.z, dz, "z");
+  const { x, z } = moveCircle(d, s.x, s.z, dx, dz, PLAYER_RADIUS);
   return { x, z, facing, dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ, y, vy };
 }

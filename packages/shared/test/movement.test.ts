@@ -54,6 +54,8 @@ const input = (p: Partial<PlayerInput> = {}): PlayerInput => ({
   dodge: false,
   sprint: false,
   jump: false,
+  attack: false,
+  viewTick: 0,
   ...p,
 });
 
@@ -196,6 +198,8 @@ describe("sanitizeInput", () => {
       dodge: false,
       sprint: false,
       jump: false,
+      attack: false,
+      viewTick: 0,
     });
   });
   it("rechaza entradas que no son input", () => {
