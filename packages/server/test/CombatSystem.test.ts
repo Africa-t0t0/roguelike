@@ -139,8 +139,9 @@ describe("daño", () => {
 });
 
 describe("rebobinado", () => {
-  function setup() {
-    const { sys, e } = world(0, 8, 100); // posición actual fuera del arco
+  // currentZ: posición actual (la usada como respaldo cuando el historial no tiene el tick).
+  function setup(currentZ = 8) {
+    const { sys, e } = world(0, currentZ, 100);
     const h = new PositionHistory();
     for (let t = 95; t <= 104; t++) h.record(t, [{ id: e.id, x: 0, z: t === 100 ? 1.5 : 8 }]);
     return { sys, e, h };
@@ -150,14 +151,14 @@ describe("rebobinado", () => {
     const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 100 }), 104, sys, h);
     expect(r.hits).toHaveLength(1);
   });
-  it("viewTick 90 con nowTick 104 se limita a 98 y no golpea", () => {
-    const { sys, h } = setup();
+  it("viewTick 90 con nowTick 104 se limita a 98 y no golpea (el respaldo actual estaría en el arco)", () => {
+    const { sys, h } = setup(1.5);
     const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 90 }), 104, sys, h);
     expect(r.swung).toBe(true);
     expect(r.hits).toHaveLength(0);
   });
-  it("un viewTick enorme se limita a nowTick", () => {
-    const { sys, h } = setup();
+  it("un viewTick enorme se limita a nowTick (el respaldo actual estaría en el arco)", () => {
+    const { sys, h } = setup(1.5);
     const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 1e9 }), 104, sys, h);
     expect(r.hits).toHaveLength(0);
   });
