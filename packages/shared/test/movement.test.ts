@@ -6,6 +6,7 @@ import {
   PLAYER_RADIUS,
   PLAYER_SPEED,
   SIM_DT,
+  SPRINT_SPEED,
   TILE_SIZE,
   isInvulnerable,
   sanitizeInput,
@@ -42,6 +43,8 @@ const initial = (): KinematicState => ({
   dodgeCooldown: 0,
   dodgeDirX: 0,
   dodgeDirZ: 0,
+  y: 0,
+  vy: 0,
 });
 const input = (p: Partial<PlayerInput> = {}): PlayerInput => ({
   seq: 0,
@@ -49,7 +52,66 @@ const input = (p: Partial<PlayerInput> = {}): PlayerInput => ({
   moveZ: 0,
   facing: 0,
   dodge: false,
+  sprint: false,
+  jump: false,
   ...p,
+});
+
+describe("correr y saltar", () => {
+  const d = makeDungeon();
+
+  it("con sprint, 30 pasos avanzan SPRINT_SPEED * 1s", () => {
+    let s = initial();
+    for (let i = 0; i < 30; i++) s = stepPlayer(s, input({ moveX: 1, sprint: true }), d, SIM_DT);
+    expect(s.x - center).toBeCloseTo(SPRINT_SPEED, 6);
+  });
+
+  it("el salto sube ~1,2 m y vuelve al suelo en ~0,7 s", () => {
+    let s = stepPlayer(initial(), input({ jump: true }), d, SIM_DT);
+    let apex = s.y;
+    let steps = 1;
+    while (s.y > 0 && steps < 100) {
+      s = stepPlayer(s, input(), d, SIM_DT);
+      apex = Math.max(apex, s.y);
+      steps++;
+    }
+    expect(apex).toBeGreaterThan(1.0);
+    expect(apex).toBeLessThan(1.3);
+    expect(steps * SIM_DT).toBeGreaterThan(0.6);
+    expect(steps * SIM_DT).toBeLessThan(0.8);
+    expect(s.y).toBe(0);
+    expect(s.vy).toBe(0);
+  });
+
+  it("no se puede saltar en el aire (sin doble salto)", () => {
+    let s = stepPlayer(initial(), input({ jump: true }), d, SIM_DT);
+    for (let i = 0; i < 5; i++) s = stepPlayer(s, input(), d, SIM_DT);
+    const vyBefore = s.vy;
+    s = stepPlayer(s, input({ jump: true }), d, SIM_DT);
+    expect(s.vy).toBeLessThan(vyBefore); // solo la gravedad, sin nuevo impulso
+  });
+
+  it("no se puede esquivar en el aire ni saltar durante un esquive", () => {
+    let air = stepPlayer(initial(), input({ jump: true }), d, SIM_DT);
+    air = stepPlayer(air, input({ moveX: 1, dodge: true }), d, SIM_DT);
+    expect(air.dodgeTime).toBe(0);
+
+    let dodging = stepPlayer(initial(), input({ moveX: 1, dodge: true }), d, SIM_DT);
+    dodging = stepPlayer(dodging, input({ moveX: 1, jump: true }), d, SIM_DT);
+    expect(dodging.y).toBe(0);
+  });
+
+  it("se puede saltar corriendo y moverse en el aire", () => {
+    let s = initial();
+    for (let i = 0; i < 10; i++) s = stepPlayer(s, input({ moveX: 1, sprint: true, jump: i === 0 }), d, SIM_DT);
+    expect(s.y).toBeGreaterThan(0);
+    expect(s.x - center).toBeCloseTo(SPRINT_SPEED * 10 * SIM_DT, 6);
+  });
+
+  it("sanitizeInput solo acepta sprint/jump === true", () => {
+    expect(sanitizeInput({ seq: 1, sprint: "yes", jump: 1 })).toMatchObject({ sprint: false, jump: false });
+    expect(sanitizeInput({ seq: 1, sprint: true, jump: true })).toMatchObject({ sprint: true, jump: true });
+  });
 });
 
 describe("stepPlayer", () => {
@@ -132,6 +194,8 @@ describe("sanitizeInput", () => {
       moveZ: 1,
       facing: 0,
       dodge: false,
+      sprint: false,
+      jump: false,
     });
   });
   it("rechaza entradas que no son input", () => {

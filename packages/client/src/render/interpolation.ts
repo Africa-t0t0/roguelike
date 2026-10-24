@@ -16,6 +16,7 @@ export function lerpSnapshot(a: PlayerSnapshot, b: PlayerSnapshot, t: number): P
     ...b,
     x: a.x + (b.x - a.x) * t,
     z: a.z + (b.z - a.z) * t,
+    y: a.y + (b.y - a.y) * t,
     facing: lerpAngle(a.facing, b.facing, t),
   };
 }

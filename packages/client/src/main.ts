@@ -121,14 +121,16 @@ function startSession(conn: GameConnection): () => void {
       const cur = predictor.current;
       const x = prev.x + (cur.x - prev.x) * a + smoother.x;
       const z = prev.z + (cur.z - prev.z) * a + smoother.z;
-      views.place(conn.myKey, x, z, lerpAngle(prev.facing, cur.facing, a));
+      const y = prev.y + (cur.y - prev.y) * a;
+      // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
+      views.place(conn.myKey, x, y, z, lerpAngle(prev.facing, cur.facing, a));
       camera.follow(x, z);
     }
 
     const renderAt = now - INTERP_DELAY_MS;
     for (const [key, buffer] of remotes) {
       const s = buffer.sample(renderAt);
-      if (s) views.place(key, s.x, s.z, s.facing);
+      if (s) views.place(key, s.x, s.y, s.z, s.facing);
     }
     scene.render();
   };

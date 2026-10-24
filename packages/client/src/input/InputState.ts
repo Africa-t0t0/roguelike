@@ -4,11 +4,15 @@ import type { PlayerInput } from "@roguelike/shared";
 export class InputState {
   private readonly held = new Set<string>();
   private dodgeQueued = false;
+  private jumpQueued = false;
   private facing = 0;
 
   keyDown(code: string): void {
-    // La autorepetición del teclado no vuelve a disparar el esquive.
-    if (code === "Space" && !this.held.has(code)) this.dodgeQueued = true;
+    // La autorepetición del teclado no vuelve a disparar el esquive ni el salto.
+    if (!this.held.has(code)) {
+      if (code === "KeyC") this.dodgeQueued = true;
+      if (code === "Space") this.jumpQueued = true;
+    }
     this.held.add(code);
   }
 
@@ -20,6 +24,7 @@ export class InputState {
   blur(): void {
     this.held.clear();
     this.dodgeQueued = false;
+    this.jumpQueued = false;
   }
 
   sample(seq: number, cameraYaw: number): PlayerInput {
@@ -39,8 +44,11 @@ export class InputState {
       moveZ = 0;
     }
     const dodge = this.dodgeQueued;
+    const jump = this.jumpQueued;
     this.dodgeQueued = false;
-    return { seq, moveX, moveZ, facing: this.facing, dodge };
+    this.jumpQueued = false;
+    const sprint = this.held.has("ShiftLeft") || this.held.has("ShiftRight");
+    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump };
   }
 
   private axis(positive: string, negative: string): number {

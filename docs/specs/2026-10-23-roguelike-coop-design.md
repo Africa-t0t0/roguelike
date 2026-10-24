@@ -56,7 +56,7 @@ Lo que le atrae al usuario es ver a un personaje que **empieza simple y se trans
 
 ### 4.2 Control y cámara [decisión de Claude]
 - Cámara en tercera persona detrás del hombro que orbita con el mouse (puntero bloqueado).
-- `WASD` para moverse, `Espacio` para rodar/esquivar con invulnerabilidad breve y cooldown.
+- `WASD` para moverse, `Shift` (mantener) para correr sin límite por ahora, `Espacio` para saltar (~1,1 m; sin doble salto, no se esquiva en el aire) y `C` para rodar/esquivar con invulnerabilidad breve y cooldown. Decidido con el usuario el 2026-10-23 tras probar el Plan 1.
 - Clic izquierdo: ataque básico de la clase.
 - `1` `2` `3` `4`: habilidades activas (máximo 4 slots).
 - `E`: interactuar (abrir cofres, revivir a un aliado).
@@ -121,7 +121,7 @@ Decidido con el usuario: desconectarse sin querer **no puede costar el progreso*
 - El escalado por cantidad de jugadores se fija al empezar cada piso. Alguien que entra o sale a mitad de piso se refleja recién en el siguiente.
 
 ### 4.8 Mazmorras
-- Cada piso se genera con una **semilla aleatoria** como un conjunto de salas conectadas por pasillos sobre una grilla. La referencia de idea es `ia-game/scripts/world/level_generator.gd`, pero no hay que reutilizar ese código.
+- Cada piso se genera con una **semilla aleatoria** como un conjunto de salas conectadas por pasillos sobre una grilla. Cada pasillo sortea su ancho entre 6 m y 10 m (decidido con el usuario el 2026-10-23). La referencia de idea es `ia-game/scripts/world/level_generator.gd`, pero no hay que reutilizar ese código.
 - Tipos de sala: inicio, combate normal, cofre, élite y jefe (la más lejana al inicio, por distancia de grafo).
 - El tamaño del piso y la dificultad de los enemigos crecen con el número de piso y con la cantidad de jugadores.
 - Los enemigos aparecen al entrar a cada sala, y las puertas se cierran hasta limpiarla **[decisión de Claude]**.

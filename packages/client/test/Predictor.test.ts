@@ -29,9 +29,11 @@ const initial: KinematicState = {
   dodgeCooldown: 0,
   dodgeDirX: 0,
   dodgeDirZ: 0,
+  y: 0,
+  vy: 0,
 };
 
-const input = (seq: number): PlayerInput => ({ seq, moveX: 1, moveZ: 0, facing: 0, dodge: false });
+const input = (seq: number): PlayerInput => ({ seq, moveX: 1, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false });
 
 function setup() {
   const p = new Predictor(initial, dungeon);

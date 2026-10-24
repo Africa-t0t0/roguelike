@@ -3,7 +3,7 @@ import type { KinematicState } from "@roguelike/shared";
 import { normalizeName } from "@roguelike/shared";
 import { PlayerRegistry } from "../src/rooms/PlayerRegistry";
 
-const spawn = (): KinematicState => ({ x: 1, z: 2, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0 });
+const spawn = (): KinematicState => ({ x: 1, z: 2, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0, y: 0, vy: 0 });
 
 describe("normalizeName", () => {
   it("recorta, colapsa espacios y baja a minúsculas para la clave", () => {
@@ -51,7 +51,7 @@ describe("PlayerRegistry", () => {
     const r = new PlayerRegistry();
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
     if (!first.ok) throw new Error();
-    first.record.inputQueue.push({ seq: 5, moveX: 0, moveZ: 1, facing: 0, dodge: false });
+    first.record.inputQueue.push({ seq: 5, moveX: 0, moveZ: 1, facing: 0, dodge: false, sprint: false, jump: false });
     first.record.lastSeq = 5;
     first.record.kinematic.x = 99;
     const res = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn);

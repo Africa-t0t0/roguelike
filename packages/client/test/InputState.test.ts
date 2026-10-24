@@ -49,15 +49,37 @@ describe("InputState", () => {
     expect(s.moveZ).toBe(0);
   });
 
-  it("Space da dodge=true una sola vez por pulsación, aunque la tecla se repita", () => {
+  it("C da dodge=true una sola vez por pulsación, aunque la tecla se repita", () => {
+    const input = new InputState();
+    input.keyDown("KeyC");
+    expect(input.sample(1, 0).dodge).toBe(true);
+    input.keyDown("KeyC"); // autorepetición del teclado
+    expect(input.sample(2, 0).dodge).toBe(false);
+    input.keyUp("KeyC");
+    input.keyDown("KeyC");
+    expect(input.sample(3, 0).dodge).toBe(true);
+  });
+
+  it("Space da jump=true una sola vez por pulsación y no esquiva", () => {
     const input = new InputState();
     input.keyDown("Space");
-    expect(input.sample(1, 0).dodge).toBe(true);
-    input.keyDown("Space"); // autorepetición del teclado
-    expect(input.sample(2, 0).dodge).toBe(false);
-    input.keyUp("Space");
-    input.keyDown("Space");
-    expect(input.sample(3, 0).dodge).toBe(true);
+    const s = input.sample(1, 0);
+    expect(s.jump).toBe(true);
+    expect(s.dodge).toBe(false);
+    input.keyDown("Space"); // autorepetición
+    expect(input.sample(2, 0).jump).toBe(false);
+  });
+
+  it("sprint mientras se mantiene Shift (izquierdo o derecho) y se suelta con blur", () => {
+    const input = new InputState();
+    expect(input.sample(1, 0).sprint).toBe(false);
+    input.keyDown("ShiftLeft");
+    expect(input.sample(2, 0).sprint).toBe(true);
+    input.keyUp("ShiftLeft");
+    input.keyDown("ShiftRight");
+    expect(input.sample(3, 0).sprint).toBe(true);
+    input.blur();
+    expect(input.sample(4, 0).sprint).toBe(false);
   });
 
   it("facing sigue al yaw mientras hay movimiento y se conserva al detenerse", () => {

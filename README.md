@@ -28,8 +28,11 @@ Levanta el servidor (`ws://localhost:2567`) y el cliente. Abre <http://localhost
 pulsa **Crear sala**. El código de la sala aparece arriba a la derecha: compártelo para que otros entren
 con **Unirse**.
 
-Controles: haz clic en el juego para mirar con el mouse (Esc suelta el puntero), WASD para caminar y
-Espacio para esquivar.
+Controles: haz clic en el juego para mirar con el mouse (Esc suelta el puntero), WASD para caminar,
+Shift (mantener) para correr, Espacio para saltar y C para esquivar.
+
+En desarrollo abre siempre `http://localhost:5173` (Vite). El servidor (`:2567`) solo sirve el cliente
+compilado en producción.
 
 ## Probar con varias pestañas
 

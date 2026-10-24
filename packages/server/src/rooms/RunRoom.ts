@@ -136,6 +136,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     ps.dodgeCooldown = k.dodgeCooldown;
     ps.dodgeDirX = k.dodgeDirX;
     ps.dodgeDirZ = k.dodgeDirZ;
+    ps.y = k.y;
+    ps.vy = k.vy;
     ps.lastSeq = record.lastSeq;
   }
 
@@ -168,5 +170,5 @@ export class RunRoom extends Room<{ state: RunState }> {
 }
 
 function still(p: { x: number; z: number }): KinematicState {
-  return { x: p.x, z: p.z, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0 };
+  return { x: p.x, z: p.z, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0, y: 0, vy: 0 };
 }

@@ -2,8 +2,11 @@ import {
   DODGE_COOLDOWN,
   DODGE_DURATION,
   DODGE_SPEED,
+  GRAVITY,
+  JUMP_VELOCITY,
   PLAYER_RADIUS,
   PLAYER_SPEED,
+  SPRINT_SPEED,
   TILE_SIZE,
 } from "./constants";
 import { isWalkableTile, type Dungeon } from "./dungeon";
@@ -17,6 +20,10 @@ export interface KinematicState {
   dodgeCooldown: number;
   dodgeDirX: number;
   dodgeDirZ: number;
+  /** altura sobre el suelo (m); 0 = en el suelo */
+  y: number;
+  /** velocidad vertical (m/s) */
+  vy: number;
 }
 
 export interface PlayerInput {
@@ -25,6 +32,8 @@ export interface PlayerInput {
   moveZ: number;
   facing: number;
   dodge: boolean;
+  sprint: boolean;
+  jump: boolean;
 }
 
 const EPS = 1e-6;
@@ -50,6 +59,8 @@ export function sanitizeInput(raw: unknown): PlayerInput | null {
     moveZ,
     facing: finiteOrZero(r.facing),
     dodge: r.dodge === true,
+    sprint: r.sprint === true,
+    jump: r.jump === true,
   };
 }
 
@@ -101,11 +112,14 @@ export function stepPlayer(
   d: Dungeon,
   dt: number,
 ): KinematicState {
-  let { dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ } = s;
+  let { dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ, y, vy } = s;
+  const grounded = y <= 0;
   const cooldownReady = dodgeCooldown <= 0;
   dodgeCooldown = Math.max(0, dodgeCooldown - dt);
 
-  if (input.dodge && cooldownReady && dodgeTime <= 0) {
+  // Salto: solo desde el suelo y fuera de un esquive. Esquive: solo en el suelo.
+  if (input.jump && grounded && dodgeTime <= 0) vy = JUMP_VELOCITY;
+  if (input.dodge && grounded && vy === 0 && cooldownReady && dodgeTime <= 0) {
     const len = Math.hypot(input.moveX, input.moveZ);
     if (len > 0) {
       dodgeDirX = input.moveX / len;
@@ -127,11 +141,22 @@ export function stepPlayer(
   } else {
     const len = Math.hypot(input.moveX, input.moveZ);
     const k = len > 1 ? 1 / len : 1;
-    dx = input.moveX * k * PLAYER_SPEED * dt;
-    dz = input.moveZ * k * PLAYER_SPEED * dt;
+    const speed = input.sprint ? SPRINT_SPEED : PLAYER_SPEED;
+    dx = input.moveX * k * speed * dt;
+    dz = input.moveZ * k * speed * dt;
+  }
+
+  // Euler semi-implícito; el suelo es plano (y = 0) y los muros se resuelven solo en XZ.
+  if (vy !== 0 || y > 0) {
+    vy -= GRAVITY * dt;
+    y += vy * dt;
+    if (y <= 0) {
+      y = 0;
+      vy = 0;
+    }
   }
 
   const x = moveAxis(d, s.x, s.z, dx, "x");
   const z = moveAxis(d, x, s.z, dz, "z");
-  return { x, z, facing, dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ };
+  return { x, z, facing, dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ, y, vy };
 }

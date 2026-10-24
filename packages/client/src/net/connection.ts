@@ -66,6 +66,8 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       dodgeCooldown: p.dodgeCooldown,
       dodgeDirX: p.dodgeDirX,
       dodgeDirZ: p.dodgeDirZ,
+      y: p.y,
+      vy: p.vy,
       lastSeq: p.lastSeq,
     });
   });

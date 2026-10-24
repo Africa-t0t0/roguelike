@@ -71,10 +71,10 @@ export class PlayerViews {
     }
   }
 
-  place(key: string, x: number, z: number, facing: number): void {
+  place(key: string, x: number, y: number, z: number, facing: number): void {
     const view = this.views.get(key);
     if (!view) return;
-    view.root.position.set(x, 0, z);
+    view.root.position.set(x, y, z);
     view.root.rotation.y = facing;
   }
 

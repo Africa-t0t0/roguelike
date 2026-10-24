@@ -10,6 +10,8 @@ export const PlayerState = schema(
     dodgeCooldown: t.number(),
     dodgeDirX: t.number(),
     dodgeDirZ: t.number(),
+    y: t.number(),
+    vy: t.number(),
     lastSeq: t.number(),
   },
   "PlayerState",
