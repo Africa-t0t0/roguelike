@@ -57,10 +57,16 @@ Lo que le atrae al usuario es ver a un personaje que **empieza simple y se trans
 ### 4.2 Control y cámara [decisión de Claude]
 - Cámara en tercera persona detrás del hombro que orbita con el mouse (puntero bloqueado).
 - `WASD` para moverse, `Shift` (mantener) para correr sin límite por ahora, `Espacio` para saltar (~1,1 m; sin doble salto, no se esquiva en el aire) y `C` para rodar/esquivar con invulnerabilidad breve y cooldown. Decidido con el usuario el 2026-10-23 tras probar el Plan 1.
-- Clic izquierdo: ataque básico de la clase.
+- Clic izquierdo: ataque básico de la clase. Mantenerlo encadena el combo; al atacar, el personaje se gira hacia donde mira la cámara.
 - `1` `2` `3` `4`: habilidades activas (máximo 4 slots).
 - `E`: interactuar (abrir cofres, revivir a un aliado).
 - Apuntado: los ataques a distancia van hacia el centro de la pantalla, y los cuerpo a cuerpo hacia donde mira el personaje.
+
+> **Decisiones del Plan 2 (combate), 2026-10-24** [decisión de Claude, provisorias hasta probarlas]:
+> las puertas que se cierran al entrar a una sala pasan a un plan posterior; al morir se reaparece a
+> los 5 s (provisorio hasta el Plan 6, que trae caídos y revivir); los enemigos no bloquean a los
+> jugadores (solo se separan entre ellos); atacar no frena el movimiento; los stats por nivel en este
+> plan son solo vida y daño.
 
 ### 4.3 Las tres clases
 

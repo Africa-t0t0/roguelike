@@ -24,6 +24,12 @@ describe("joinErrorMessage", () => {
     expect(joinErrorMessage(err)).toBe("No existe una sala con ese código");
   });
 
+  it("versión vieja del cliente (4104)", () => {
+    const err = new MatchMakeError("version-mismatch", JOIN_ERROR_STATUS["version-mismatch"]);
+    expect(joinErrorMessage(err)).toBe("Hay una versión nueva del juego: recarga la página (Cmd+Shift+R)");
+    expect(joinErrorMessage({ code: 4104 })).toBe("Hay una versión nueva del juego: recarga la página (Cmd+Shift+R)");
+  });
+
   it("cualquier otro error", () => {
     const generic = "No se pudo conectar. Revisa tu conexión e inténtalo de nuevo";
     expect(joinErrorMessage(new TypeError("Failed to fetch"))).toBe(generic);

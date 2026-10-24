@@ -9,22 +9,26 @@ import {
   SIM_DT,
   type KinematicState,
 } from "@roguelike/shared";
-import { InputState } from "./input/InputState";
+import { InputState, withoutActions } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
 import { connect, type GameConnection, type PlayerSnapshot } from "./net/connection";
 import { parseLagParams } from "./net/LagSimulator";
+import { LocalCombo } from "./net/LocalCombo";
 import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
+import { createTickClock } from "./net/tickClock";
 import { RecentHits } from "./render/animState";
 import { loadAssets, type Assets } from "./render/assets";
 import { createScene } from "./render/createScene";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
 import { EnemyViews } from "./render/enemyViews";
+import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
 import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
 import { joinErrorMessage } from "./ui/errors";
+import { Hud } from "./ui/hud";
 import { Lobby } from "./ui/lobby";
 
 const MAX_FRAME_S = 0.25; // tras un tirón no se simulan más de ~7 pasos de golpe
@@ -115,6 +119,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
   scene.activeCamera = camera.camera;
   const input = new InputState();
   const detachInput = attachBrowserInput(input, canvas);
+  const hud = new Hud();
+  const damageNumbers = new DamageNumbers(scene, canvas);
+  const hurtFlash = new HurtFlash();
+  const tickClock = createTickClock(); // tick del servidor que se está viendo → viewTick
+  const combo = new LocalCombo();
 
   const remotes = new Map<string, SnapshotBuffer<PlayerSnapshot>>();
   const smoother = new CorrectionSmoother();
@@ -135,6 +144,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
         continue;
       }
       mine = p;
+      hud.setPlayer(p);
       if (!predictor || !prev) {
         predictor = new Predictor(p, dungeon);
         prev = { ...p };
@@ -150,17 +160,26 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
   });
 
   conn.onWorld((world, receivedAt) => {
+    tickClock.push(receivedAt, world.tick);
+    hud.setWorld(world);
     enemies.push(world, receivedAt);
     projectiles.push(world, receivedAt);
   });
 
   // Los eventos se marcan en el reloj de recepción; lo remoto se dibuja INTERP_DELAY_MS después.
+  // El propio jugador se dibuja en el presente: sus eventos se ven sin ese retardo.
   conn.onCombat((event) => {
     const now = performance.now();
     if (event.type === "swing") {
       if (event.key !== conn.myKey) views.swing(event.key, event.step, now);
     } else if (event.type === "damage") {
       hits.hit(`${event.targetKind}:${event.targetId}`, now);
+      const own = event.targetKind === "player" && event.targetId === conn.myKey;
+      const shownAt = own ? now : now + INTERP_DELAY_MS;
+      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, shownAt);
+      if (own) hurtFlash.flash();
+    } else if (event.type === "levelUp") {
+      hud.levelUp(event.level);
     }
   });
 
@@ -173,11 +192,16 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
       acc += dt;
       while (acc >= SIM_DT) {
         acc -= SIM_DT;
-        // Se predice y se envía lo mismo que el servidor va a simular (ya saneado).
-        const sampled = sanitizeInput(input.sample(++seq, camera.yaw));
+        // Se predice y se envía lo mismo que el servidor va a simular (ya saneado). Muerto, nada
+        // de acciones (el servidor igual las ignora).
+        const dead = mine?.dead ?? false;
+        const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS));
+        const sampled = sanitizeInput(dead ? withoutActions(raw) : raw);
         if (!sampled) continue;
         prev = predictor.current;
         predictor.applyLocal(sampled);
+        // El golpe propio arranca su clip ya (como el servidor: tras moverse); el daño lo decide él.
+        combo.tick(sampled.attack, { dead, dodging: predictor.current.dodgeTime > 0 }, now);
         conn.sendInput(sampled);
       }
       smoother.decay(dt);
@@ -187,13 +211,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
       const z = prev.z + (cur.z - prev.z) * a + smoother.z;
       const y = prev.y + (cur.y - prev.y) * a;
       const pose = { x, y, z, facing: lerpAngle(prev.facing, cur.facing, a) };
-      // La esquiva es predicha; el combo y la muerte, por ahora, vienen del servidor.
-      const state = {
-        dodgeTime: cur.dodgeTime,
-        comboStep: mine?.comboStep ?? 0,
-        swingTimer: mine?.swingTimer ?? 0,
-        dead: mine?.dead ?? false,
-      };
+      // La esquiva y el arranque del golpe son predichos; la muerte viene del servidor.
+      const swing = combo.heroCombat({ comboStep: mine?.comboStep ?? 0, swingTimer: mine?.swingTimer ?? 0 }, now);
+      const state = { dodgeTime: cur.dodgeTime, ...swing, dead: mine?.dead ?? false };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
       camera.follow(x, z);
@@ -207,12 +227,16 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
     scene.render();
+    damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame
   };
   engine.runRenderLoop(frame);
 
   return () => {
     engine.stopRenderLoop(frame);
     detachInput();
+    hud.dispose();
+    damageNumbers.dispose();
+    hurtFlash.dispose();
     camera.dispose();
     views.dispose();
     enemies.dispose();

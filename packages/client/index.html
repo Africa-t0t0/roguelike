@@ -29,6 +29,29 @@
         background: rgba(0, 0, 0, 0.55); font-size: 0.9rem; }
       #hud-code { font-weight: 700; letter-spacing: 0.15em; user-select: all; }
       .hint { color: #999; font-size: 0.8rem; }
+      .combat-hud { position: absolute; inset: 0; pointer-events: none; }
+      .hud-bars { position: absolute; left: 0.75rem; bottom: 0.75rem; width: min(16rem, calc(100% - 1.5rem));
+        display: flex; flex-direction: column; gap: 0.35rem; }
+      .hud-bar { position: relative; height: 1.3rem; border-radius: 0.3rem; overflow: hidden;
+        background: rgba(0, 0, 0, 0.6); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+      .hud-xp { height: 1rem; }
+      .hud-fill { position: absolute; inset: 0 auto 0 0; width: 0; transition: width 0.15s; }
+      .hud-hp .hud-fill { background: linear-gradient(#d9473c, #a52a22); }
+      .hud-xp .hud-fill { background: linear-gradient(#e8c25a, #b8892a); }
+      .hud-text { position: relative; padding: 0 0.5rem; line-height: 1.3rem; font-size: 0.8rem; font-weight: 600;
+        text-shadow: 0 1px 2px #000; }
+      .hud-xp .hud-text { line-height: 1rem; font-size: 0.72rem; }
+      .hud-banner { position: absolute; left: 0; right: 0; top: 18%; text-align: center; font-size: 2.6rem;
+        font-weight: 800; color: #ffd36b; text-shadow: 0 2px 8px #000; }
+      .hud-death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        background: rgba(40, 0, 0, 0.45); font-size: 1.8rem; font-weight: 700; text-shadow: 0 2px 6px #000; }
+      .fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      .fx-number { position: absolute; left: 0; top: 0; font-weight: 800; font-size: 1.5rem;
+        text-shadow: 0 1px 3px #000, 0 0 2px #000; will-change: transform, opacity; }
+      .fx-enemy { color: #fff; }
+      .fx-player { color: #ff4a3d; }
+      .fx-hurt { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+        box-shadow: inset 0 0 6rem 1.5rem rgba(220, 20, 10, 0.75); }
     </style>
   </head>
   <body>
@@ -48,7 +71,7 @@
 
     <div id="hud" hidden>
       Sala <span id="hud-code"></span>
-      <div class="hint">Clic para mirar con el mouse · WASD · Espacio para esquivar</div>
+      <div class="hint">Clic para mirar · WASD moverse · Shift correr · Espacio saltar · C esquivar · Clic izq. atacar</div>
     </div>
 
     <div id="lost" class="panel" hidden>

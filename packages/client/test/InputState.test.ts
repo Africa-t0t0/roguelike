@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InputState } from "../src/input/InputState";
+import { InputState, withoutActions } from "../src/input/InputState";
 
 describe("InputState", () => {
   it("W con yaw 0 avanza hacia +Z", () => {
@@ -89,5 +89,49 @@ describe("InputState", () => {
     expect(input.sample(2, 0.7).facing).toBe(0.7);
     input.keyUp("KeyW");
     expect(input.sample(3, 2.5).facing).toBe(0.7);
+  });
+
+  it("un clic izquierdo (Mouse0) da attack=true en el siguiente sample", () => {
+    const input = new InputState();
+    expect(input.sample(1, 0).attack).toBe(false);
+    input.keyDown("Mouse0");
+    input.keyUp("Mouse0"); // clic corto, entre dos samples
+    expect(input.sample(2, 0).attack).toBe(true);
+    expect(input.sample(3, 0).attack).toBe(false);
+  });
+
+  it("mantener el clic da attack=true en samples sucesivos, y blur lo suelta", () => {
+    const input = new InputState();
+    input.keyDown("Mouse0");
+    expect(input.sample(1, 0).attack).toBe(true);
+    expect(input.sample(2, 0).attack).toBe(true);
+    expect(input.sample(3, 0).attack).toBe(true);
+    input.blur();
+    expect(input.sample(4, 0).attack).toBe(false);
+  });
+
+  it("al atacar el facing pasa a mirar hacia donde mira la cámara", () => {
+    const input = new InputState();
+    input.keyDown("Mouse0");
+    expect(input.sample(1, 1.1).facing).toBe(1.1);
+    input.keyUp("Mouse0");
+    expect(input.sample(2, 2).facing).toBe(1.1);
+  });
+
+  it("sample lleva el viewTick que se le pasa (0 si no)", () => {
+    const input = new InputState();
+    expect(input.sample(1, 0).viewTick).toBe(0);
+    expect(input.sample(2, 0, 41.5).viewTick).toBe(41.5);
+  });
+});
+
+describe("withoutActions", () => {
+  it("anula movimiento, salto, esquiva, sprint y ataque; conserva seq, facing y viewTick", () => {
+    const input = new InputState();
+    for (const k of ["KeyW", "Space", "KeyC", "ShiftLeft", "Mouse0"]) input.keyDown(k);
+    const s = withoutActions(input.sample(7, 0.5, 12));
+    expect(s).toEqual({
+      seq: 7, moveX: 0, moveZ: 0, facing: 0.5, dodge: false, sprint: false, jump: false, attack: false, viewTick: 12,
+    });
   });
 });

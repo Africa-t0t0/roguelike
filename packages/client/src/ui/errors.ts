@@ -5,6 +5,7 @@ const MESSAGES: Record<number, string> = {
   [JOIN_ERROR_STATUS["name-taken"]]: "Ese nombre ya está en uso en esta sala",
   [JOIN_ERROR_STATUS["room-full"]]: `La sala está llena (máximo ${MAX_PLAYERS})`,
   [JOIN_ERROR_STATUS["invalid-name"]]: `Nombre inválido: usa de 1 a ${NAME_MAX_LEN} letras, números, espacios, _ o -`,
+  [JOIN_ERROR_STATUS["version-mismatch"]]: "Hay una versión nueva del juego: recarga la página (Cmd+Shift+R)",
   [ErrorCode.MATCHMAKE_INVALID_ROOM_ID]: "No existe una sala con ese código",
 };
 
