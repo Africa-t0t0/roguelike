@@ -12,6 +12,7 @@ import {
   MSG,
   normalizeName,
   PATCH_RATE_MS,
+  PROTOCOL_VERSION,
   roomSpawnPoints,
   sanitizeInput,
   SIM_DT,
@@ -20,24 +21,47 @@ import {
   TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
   tileCenter,
+  type CombatEvent,
   type Dungeon,
   type KinematicState,
+  type PlayerInput,
 } from "@roguelike/shared";
+import { CombatSystem, newCombatState, type CombatState } from "../sim/CombatSystem";
+import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
+import { PositionHistory } from "../sim/PositionHistory";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
 import { PlayerRegistry, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
 import { PlayerState, RunState } from "./RunState";
+import { syncPlayer, syncWorld } from "./syncState";
 
 const ROOM_CODE_ATTEMPTS = 5;
 const ALLY_SPAWN_RADIUS = 2;
 
+const ENEMY_RNG_SALT = 0x5eed;
+
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
+
+/** Un muerto no se mueve, no salta, no esquiva ni ataca; se conserva su orientación. */
+const deadInput = (input: PlayerInput, k: KinematicState): PlayerInput => ({
+  ...input,
+  moveX: 0,
+  moveZ: 0,
+  facing: k.facing,
+  dodge: false,
+  sprint: false,
+  jump: false,
+  attack: false,
+});
 
 export class RunRoom extends Room<{ state: RunState }> {
   private readonly registry = new PlayerRegistry();
   private dungeon!: Dungeon;
   private emptyRoomTtlMs = EMPTY_ROOM_TTL_MS;
   private emptyTimer: { clear(): void } | undefined;
+  private enemySystem!: EnemySystem;
+  private readonly history = new PositionHistory();
+  private readonly combat = new CombatSystem();
 
   async onCreate(options: RunRoomCreateOptions = {}): Promise<void> {
     const rng = createRng(randomInt(2 ** 32));
@@ -49,7 +73,9 @@ export class RunRoom extends Room<{ state: RunState }> {
     const { seed, emptyRoomTtlMs } = resolveCreateOptions(options, process.env.NODE_ENV);
     this.emptyRoomTtlMs = emptyRoomTtlMs;
     this.dungeon = generateDungeon(seed, 1);
-    this.state = new RunState({ seed, floor: 1 });
+    this.enemySystem = new EnemySystem(this.dungeon, createRng(seed ^ ENEMY_RNG_SALT));
+    this.state = new RunState({ seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0 });
+    syncWorld(this.state, [], [], this.combat);
 
     this.autoDispose = false;
     this.setPatchRate(PATCH_RATE_MS);
@@ -59,11 +85,16 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.armEmptyTimer();
   }
 
-  onJoin(client: Client, options: { name?: unknown; token?: unknown } = {}): void {
+  onJoin(client: Client, options: { name?: unknown; token?: unknown; version?: unknown } = {}): void {
+    // Una pestaña con código viejo se rechaza antes de tocar el registro.
+    if (options.version !== PROTOCOL_VERSION) {
+      throw new ServerError(JOIN_ERROR_STATUS["version-mismatch"], "version-mismatch");
+    }
     const key = normalizeName(options.name)?.key;
     const result = this.registry.join(
       { name: options.name, token: options.token, sessionId: client.sessionId },
       () => this.spawnFor(key),
+      () => newCombatState("warrior", this.combat.level),
     );
     if (!result.ok) throw new ServerError(JOIN_ERROR_STATUS[result.code], result.code);
 
@@ -79,7 +110,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       this.state.players.set(record.key, ps);
     }
     ps.name = record.displayName;
-    this.syncPlayer(ps, record);
+    syncPlayer(ps, record);
     client.send(MSG.welcome, { key: record.key });
 
     this.emptyTimer?.clear();
@@ -114,31 +145,67 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
   }
 
-  private tick(): void {
-    for (const record of this.registry.connected()) {
-      const batch = record.inputQueue.splice(0, MAX_INPUTS_PER_TICK);
-      if (batch.length === 0) continue;
-      for (const input of batch) {
-        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT);
-        record.lastSeq = input.seq;
-      }
-      const ps = this.state.players.get(record.key);
-      if (ps) this.syncPlayer(ps, record);
-    }
+  private emit(event: CombatEvent): void {
+    this.broadcast(MSG.combat, event);
   }
 
-  private syncPlayer(ps: PlayerState, record: PlayerRecord): void {
-    const k = record.kinematic;
-    ps.x = k.x;
-    ps.z = k.z;
-    ps.facing = k.facing;
-    ps.dodgeTime = k.dodgeTime;
-    ps.dodgeCooldown = k.dodgeCooldown;
-    ps.dodgeDirX = k.dodgeDirX;
-    ps.dodgeDirZ = k.dodgeDirZ;
-    ps.y = k.y;
-    ps.vy = k.vy;
-    ps.lastSeq = record.lastSeq;
+  private tick(): void {
+    const connected = this.registry.connected();
+    const allStates = new Map(this.registry.all().map((r) => [r.key, r.combat] as const));
+
+    // 1. Inputs (y ataques) de cada jugador conectado.
+    for (const record of connected) {
+      for (const raw of record.inputQueue.splice(0, MAX_INPUTS_PER_TICK)) {
+        const input = record.combat.dead ? deadInput(raw, record.kinematic) : raw;
+        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT);
+        record.lastSeq = input.seq;
+        if (input.attack) this.attack(record, input, allStates);
+      }
+    }
+
+    // 2.
+    this.state.tick++;
+    const nowS = this.state.tick * SIM_DT;
+
+    // 3-4. Enemigos (solo ven a los conectados vivos).
+    const alive: SimPlayer[] = connected
+      .filter((r) => !r.combat.dead)
+      .map((r) => ({ key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true }));
+    this.enemySystem.activateRooms(alive, this.registry.size());
+    const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
+    this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), nowS);
+
+    // 5. Daño, muertes y reapariciones (los desconectados quedan congelados).
+    const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
+    const { damaged, respawned } = this.combat.step(states, kin, nowS, SIM_DT);
+    for (const d of damaged) {
+      const k = kin.get(d.key)!;
+      this.emit({ type: "damage", targetKind: "player", targetId: d.key, amount: d.amount, x: k.x, z: k.z });
+    }
+    for (const key of respawned) {
+      const r = connected.find((x) => x.key === key)!;
+      r.kinematic = this.spawnFor(key);
+    }
+
+    // 6.
+    this.history.record(this.state.tick, this.enemySystem.enemies);
+
+    // 7. Schema.
+    for (const record of connected) {
+      const ps = this.state.players.get(record.key);
+      if (ps) syncPlayer(ps, record);
+    }
+    syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat);
+  }
+
+  private attack(record: PlayerRecord, input: PlayerInput, allStates: Map<string, CombatState>): void {
+    const res = this.combat.attack(record.combat, record.kinematic, input, this.state.tick, this.enemySystem, this.history);
+    if (res.swung) this.emit({ type: "swing", key: record.key, step: res.step });
+    for (const h of res.hits) {
+      this.emit({ type: "damage", targetKind: "enemy", targetId: h.enemyId, amount: h.amount, x: h.x, z: h.z });
+    }
+    // Todos los registros (también los desconectados) suben su vida máxima con el nivel del grupo.
+    for (const level of this.combat.grantXp(allStates, res.xpGained)) this.emit({ type: "levelUp", level });
   }
 
   /**

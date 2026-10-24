@@ -5,6 +5,7 @@ import {
   type KinematicState,
   type PlayerInput,
 } from "@roguelike/shared";
+import { newCombatState, type CombatState } from "../sim/CombatSystem";
 
 export interface PlayerRecord {
   key: string;
@@ -14,6 +15,8 @@ export interface PlayerRecord {
   kinematic: KinematicState;
   lastSeq: number;
   inputQueue: PlayerInput[];
+  /** Se crea una sola vez; attach() (reconnect/takeover) no lo toca: ni cura ni revive. */
+  combat: CombatState;
 }
 
 export type JoinResult =
@@ -28,6 +31,7 @@ export class PlayerRegistry {
   join(
     opts: { name: unknown; token: unknown; sessionId: string },
     spawn: () => KinematicState,
+    makeCombat: () => CombatState = () => newCombatState("warrior", 1),
   ): JoinResult {
     const name = normalizeName(opts.name);
     if (!name) return { ok: false, code: "invalid-name" };
@@ -61,6 +65,7 @@ export class PlayerRegistry {
       kinematic: spawn(),
       lastSeq: 0,
       inputQueue: [],
+      combat: makeCombat(),
     };
     this.records.set(record.key, record);
     this.attach(record, opts.sessionId, spawn);
@@ -81,6 +86,11 @@ export class PlayerRegistry {
 
   connected(): PlayerRecord[] {
     return [...this.records.values()].filter((r) => r.sessionId !== null);
+  }
+
+  /** Todos los registros, incluidos los desconectados. */
+  all(): PlayerRecord[] {
+    return [...this.records.values()];
   }
 
   size(): number {

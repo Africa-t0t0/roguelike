@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KinematicState } from "@roguelike/shared";
 import { normalizeName } from "@roguelike/shared";
 import { PlayerRegistry } from "../src/rooms/PlayerRegistry";
+import { newCombatState } from "../src/sim/CombatSystem";
 
 const spawn = (): KinematicState => ({ x: 1, z: 2, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0, y: 0, vy: 0 });
 
@@ -59,6 +60,38 @@ describe("PlayerRegistry", () => {
     expect(res.record.inputQueue).toEqual([]);
     expect(res.record.lastSeq).toBe(0);
     expect(res.record.kinematic.x).toBe(1);
+  });
+
+  it("un registro nuevo nace con el estado de combate dado; reconnect y takeover no lo tocan", () => {
+    const r = new PlayerRegistry();
+    const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn, () => newCombatState("warrior", 3));
+    if (!first.ok) throw new Error();
+    const combat = first.record.combat;
+    expect(combat.maxHp).toBe(newCombatState("warrior", 3).maxHp);
+    combat.hp = 50;
+    combat.dead = true;
+    combat.respawnIn = 2.5;
+
+    const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn, () => newCombatState("warrior", 1));
+    if (!taken.ok) throw new Error();
+    expect(taken.kind).toBe("takeover");
+    expect(taken.record.combat).toBe(combat);
+
+    r.leave("s2");
+    const back = r.join({ name: "Jorge", token: "otro", sessionId: "s3" }, spawn, () => newCombatState("warrior", 1));
+    if (!back.ok) throw new Error();
+    expect(back.kind).toBe("reconnect");
+    expect(back.record.combat).toBe(combat);
+    expect(back.record.combat).toMatchObject({ hp: 50, dead: true, respawnIn: 2.5 });
+  });
+
+  it("all() incluye a los desconectados", () => {
+    const r = new PlayerRegistry();
+    r.join({ name: "A", token: "a", sessionId: "sA" }, spawn);
+    r.join({ name: "B", token: "b", sessionId: "sB" }, spawn);
+    r.leave("sB");
+    expect(r.all().map((x) => x.key).sort()).toEqual(["a", "b"]);
+    expect(r.connected().map((x) => x.key)).toEqual(["a"]);
   });
 
   it("leave tardío del sessionId viejo tras un takeover no desconecta", () => {

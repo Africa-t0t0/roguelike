@@ -5,6 +5,7 @@ import { ErrorCode, matchMaker } from "colyseus";
 import {
   generateDungeon,
   isWalkableTile,
+  roomSpawnPoints,
   JOIN_ERROR_STATUS,
   MAX_INPUTS_PER_TICK,
   MAX_QUEUED_INPUTS,
@@ -15,6 +16,7 @@ import {
   TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
   tileCenter,
+  type CombatEvent,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
 import type { RunRoom } from "../src/rooms/RunRoom";
@@ -234,6 +236,162 @@ describe("RunRoom", () => {
     await back.client.leave();
     await new Promise((r) => setTimeout(r, 300));
     expect(await matchMaker.query({ roomId: room.roomId })).toHaveLength(0);
+  });
+});
+
+// Acceso de prueba a la sala del servidor (campos privados por índice; producción no cambia).
+const record = (key: string) => {
+  const r = room["registry"].all().find((x) => x.key === key);
+  if (!r) throw new Error(`no hay registro ${key}`);
+  return r;
+};
+const teleport = (key: string, p: { x: number; z: number }) => {
+  const r = record(key);
+  r.kinematic = { ...r.kinematic, x: p.x, z: p.z, y: 0, vy: 0, dodgeTime: 0 };
+};
+const combatRoom = () => {
+  const d = generateDungeon(SEED, 1);
+  const cr = d.rooms.find((r) => r.kind === "combat");
+  if (!cr) throw new Error("sin sala de combate");
+  return { d, cr };
+};
+const collect = (client: ClientRoom) => {
+  const events: CombatEvent[] = [];
+  client.onMessage(MSG.combat, (e: CombatEvent) => events.push(e));
+  return events;
+};
+const attackInput = (seq: number, facing: number, viewTick: number) => ({
+  seq, moveX: 0, moveZ: 0, facing, dodge: false, sprint: false, jump: false, attack: true, viewTick,
+});
+
+describe("RunRoom: combate", () => {
+  it("rechaza una versión de protocolo distinta con 4104", async () => {
+    await expect(colyseus.sdk.joinById(room.roomId, { name: "Ana", token: "t", version: 1 })).rejects.toMatchObject({
+      code: JOIN_ERROR_STATUS["version-mismatch"],
+    });
+    await expect(colyseus.sdk.joinById(room.roomId, { name: "Ana", token: "t" })).rejects.toMatchObject({
+      code: JOIN_ERROR_STATUS["version-mismatch"],
+    });
+    expect(room["registry"].size()).toBe(0);
+  });
+
+  it("un jugador recién entrado tiene 120 de vida y el grupo nivel 1", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const p = player("ana");
+    expect(p.hp).toBe(120);
+    expect(p.maxHp).toBe(120);
+    expect(p.dead).toBe(false);
+    expect(room.state.level).toBe(1);
+    expect(room.state.xp).toBe(0);
+    expect(room.state.xpToNext).toBe(20);
+    await ticksUntil(() => ana.client.state.players.get("ana")?.hp === 120 && ana.client.state.level === 1);
+  });
+
+  it("al entrar a una sala de combate aparecen 4 enemigos", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await room.waitForNextTimestep();
+    await ticksUntil(() => room.state.enemies.size > 0, 3);
+    expect(room.state.enemies.size).toBe(4);
+    for (const e of room.state.enemies.values()) {
+      expect(["minion", "brute", "mage"]).toContain(e.kind);
+      expect(e.hp).toBe(e.maxHp);
+    }
+    await ticksUntil(() => ana.client.state.enemies.size === 4);
+    expect(room.state.tick).toBeGreaterThan(0);
+  });
+
+  it("tres ataques separados por 0,4 s dañan al enemigo de enfrente y emiten swing y damage", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const events = collect(ana.client);
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room.state.enemies.size === 4, 5);
+
+    // Ubica a Ana en una casilla caminable junto a un enemigo.
+    const sys = room["enemySystem"];
+    const target = sys.enemies.find((e) => {
+      const [tx, tz] = [tileOf(e.x), tileOf(e.z)];
+      return [[0, -1], [0, 1], [-1, 0], [1, 0]].some(([dx, dz]) => isWalkableTile(d, tx + dx!, tz + dz!));
+    })!;
+    const [tx, tz] = [tileOf(target.x), tileOf(target.z)];
+    const [dx, dz] = [[0, -1], [0, 1], [-1, 0], [1, 0]].find(([dx, dz]) => isWalkableTile(d, tx + dx!, tz + dz!))!;
+    teleport("ana", tileCenter(tx + dx!, tz + dz!));
+
+    const hpBefore = target.hp;
+    for (let i = 0; i < 3; i++) {
+      const me = record("ana").kinematic;
+      const e = room["enemySystem"].enemies.find((x) => x.id === target.id);
+      const aim = e ?? target;
+      const facing = Math.atan2(aim.x - me.x, aim.z - me.z);
+      ana.client.send(MSG.input, attackInput(i + 1, facing, room.state.tick));
+      await ticksUntil(() => player("ana").lastSeq === i + 1, 5);
+      for (let t = 0; t < 12; t++) await room.waitForNextTimestep();
+    }
+    const after = room["enemySystem"].enemies.find((x) => x.id === target.id);
+    expect(after === undefined || after.hp < hpBefore).toBe(true);
+
+    await ticksUntil(() => events.filter((e) => e.type === "swing").length === 3, 10);
+    // Separados por 0,4 s caen dentro de la ventana del combo: pasos 1, 2 y 3.
+    expect(events.filter((e) => e.type === "swing")).toEqual([1, 2, 3].map((step) => ({ type: "swing", key: "ana", step })));
+    const dmg = events.find((e) => e.type === "damage" && e.targetKind === "enemy");
+    expect(dmg).toMatchObject({ type: "damage", targetKind: "enemy", amount: 12 });
+  });
+
+  it("Foco 2: salir y volver conserva la vida", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    record("ana").combat.hp = 50;
+    await ticksUntil(() => player("ana").hp === 50, 3);
+    await ana.client.leave();
+    await ticksUntil(() => !room.state.players.has("ana"));
+
+    const back = await join("Ana", "t-otro");
+    await back.welcome;
+    expect(player("ana").hp).toBe(50);
+    expect(player("ana").maxHp).toBe(120);
+    await room.waitForNextTimestep();
+    expect(player("ana").hp).toBe(50);
+  });
+
+  it("Foco 2: un takeover conserva la vida y el estado de muerte", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    record("ana").combat.hp = 50;
+    await ticksUntil(() => player("ana").hp === 50, 3);
+
+    const ana2 = await join("Ana", "t-ana");
+    await ana2.welcome;
+    expect(player("ana").hp).toBe(50);
+    await room.waitForNextTimestep();
+    expect(player("ana").hp).toBe(50);
+
+    const c = record("ana").combat;
+    c.hp = 0;
+    c.dead = true;
+    c.respawnIn = 3;
+    await ticksUntil(() => player("ana").dead, 3);
+    const ana3 = await join("Ana", "t-ana");
+    await ana3.welcome;
+    expect(player("ana").dead).toBe(true);
+    expect(player("ana").respawnIn).toBeGreaterThan(2.5);
+  });
+
+  it("un jugador muerto no se mueve, pero su seq se confirma", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const c = record("ana").combat;
+    c.hp = 0;
+    c.dead = true;
+    c.respawnIn = 3;
+    const x0 = player("ana").x;
+    ana.client.send(MSG.input, input(1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    expect(player("ana").x).toBe(x0);
   });
 });
 
