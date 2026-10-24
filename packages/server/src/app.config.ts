@@ -29,7 +29,9 @@ export const appConfig = config({
       res.status(200).send("ok");
     });
 
-    // Cliente compilado (solo si existe: en desarrollo lo sirve Vite).
+    // Cliente compilado: solo en producción. En desarrollo lo sirve Vite (puerto 5173), y un
+    // dist viejo en :2567 mezclaría dos versiones del generador de mazmorras.
+    if (process.env.NODE_ENV !== "production") return;
     if (!existsSync(join(CLIENT_DIST, "index.html"))) return;
     app.use((req: Req, res: Res, next: Next) => {
       // Las rutas de Colyseus (/matchmake, etc.) no se tocan.

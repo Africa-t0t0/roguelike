@@ -241,4 +241,11 @@ describe("HTTP", () => {
     const res = await fetch("http://localhost:2568/health");
     expect(res.status).toBe(200);
   });
+
+  it("fuera de producción no sirve el cliente compilado (aunque exista packages/client/dist)", async () => {
+    // En desarrollo el cliente lo sirve Vite; un dist viejo mezclaría dos versiones del mapa.
+    // Colyseus responde "/" con su saludo; lo que no debe llegar es el index.html del cliente.
+    const body = await (await fetch("http://localhost:2568/")).text();
+    expect(body).not.toMatch(/<script/i);
+  });
 });
