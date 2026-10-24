@@ -1,33 +1,39 @@
 import {
   CLASS_DEFS,
-  DODGE_GRACE_S,
   ENEMY_DEFS,
   REWIND_MAX_TICKS,
   RESPAWN_INVULN_S,
   RESPAWN_S,
+  SIM_DT,
+  advanceCombo,
   inArc,
   isInvulnerable,
   playerStats,
+  tryStartSwing,
   xpToNext,
   type ClassId,
+  type ComboTimers,
   type KinematicState,
   type PlayerInput,
 } from "@roguelike/shared";
 import type { EnemyHit, EnemySystem } from "./EnemySystem";
 import type { PositionHistory } from "./PositionHistory";
 
-export interface CombatState {
+/** Golpe de enemigo a la espera: `resolveTick` es el tick del servidor en que EnemySystem lo resolvió. */
+export interface PendingHit {
+  damage: number;
+  resolveTick: number;
+}
+
+/** El combo (ComboTimers) avanza por input procesado; respawnIn, invulnFor y los plazos, por tick. */
+export interface CombatState extends ComboTimers {
   cls: ClassId;
   hp: number;
   maxHp: number;
   dead: boolean;
   respawnIn: number;
   invulnFor: number;
-  /** paso del último swing aceptado: 0 = ninguno, 1..3 */
-  comboStep: number;
-  swingTimer: number;
-  comboTimer: number;
-  pendingHits: { damage: number; deadline: number }[];
+  pendingHits: PendingHit[];
 }
 
 export function newCombatState(cls: ClassId, level: number): CombatState {
@@ -59,6 +65,21 @@ export class CombatSystem {
   level = 1;
   xp = 0;
 
+  /**
+   * Llamar justo después de simular cada input del jugador (y antes de resolver su ataque).
+   * Avanza el combo un SIM_DT y resuelve sus golpes pendientes: si el input lo deja esquivando (o está
+   * invulnerable) se descartan; si no, se aplican los que ya vio (`viewTick >= resolveTick`).
+   */
+  onInputProcessed(c: CombatState, k: KinematicState, input: PlayerInput): { damage: number; died: boolean } {
+    advanceCombo(c, SIM_DT);
+    if (c.dead || c.pendingHits.length === 0) return { damage: 0, died: false };
+    if (c.invulnFor > 0 || isInvulnerable(k)) {
+      c.pendingHits = [];
+      return { damage: 0, died: false };
+    }
+    return this.applyDue(c, (h) => input.viewTick >= h.resolveTick);
+  }
+
   /** No llama a grantXp: el llamador aplica `xpGained`. */
   attack(
     c: CombatState,
@@ -69,14 +90,10 @@ export class CombatSystem {
     history: PositionHistory,
   ): AttackResult {
     const none: AttackResult = { swung: false, step: 0, hits: [], xpGained: 0 };
-    if (!input.attack || c.dead || isInvulnerable(k) || c.swingTimer > 0) return none;
-
-    const def = CLASS_DEFS[c.cls];
-    const step = c.comboTimer > 0 ? (c.comboStep % def.combo.length) + 1 : 1;
-    const cs = def.combo[step - 1]!;
-    c.comboStep = step;
-    c.swingTimer = cs.duration;
-    c.comboTimer = cs.duration + def.comboResetS;
+    if (!input.attack || c.dead || isInvulnerable(k)) return none;
+    const step = tryStartSwing(c, c.cls);
+    if (step === 0) return none;
+    const cs = CLASS_DEFS[c.cls].combo[step - 1]!;
 
     const t = Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(input.viewTick)));
     const amount = Math.round(playerStats(c.cls, this.level).damage * cs.damageMult);
@@ -95,18 +112,19 @@ export class CombatSystem {
     return result;
   }
 
-  queueEnemyHits(states: Map<string, CombatState>, hits: readonly EnemyHit[], nowS: number): void {
+  queueEnemyHits(states: Map<string, CombatState>, hits: readonly EnemyHit[], nowTick: number): void {
     for (const h of hits) {
       const c = states.get(h.targetKey);
       if (!c || c.dead) continue;
-      c.pendingHits.push({ damage: h.damage, deadline: nowS + DODGE_GRACE_S });
+      c.pendingHits.push({ damage: h.damage, resolveTick: nowTick });
     }
   }
 
+  /** Una vez por tick: reapariciones, invulnerabilidad y el plazo máximo de los golpes pendientes. */
   step(
     states: Map<string, CombatState>,
     kin: Map<string, KinematicState>,
-    nowS: number,
+    nowTick: number,
     dt: number,
   ): { damaged: { key: string; amount: number }[]; died: string[]; respawned: string[] } {
     const damaged: { key: string; amount: number }[] = [];
@@ -114,12 +132,6 @@ export class CombatSystem {
     const respawned: string[] = [];
 
     for (const [key, c] of states) {
-      c.swingTimer = Math.max(0, c.swingTimer - dt);
-      c.comboTimer = Math.max(0, c.comboTimer - dt);
-      if (c.comboTimer <= EPS) {
-        c.comboTimer = 0;
-        c.comboStep = 0;
-      }
       c.invulnFor = Math.max(0, c.invulnFor - dt);
 
       if (c.dead) {
@@ -135,30 +147,34 @@ export class CombatSystem {
       }
 
       const k = kin.get(key);
-      const protectedNow = c.invulnFor > 0 || (k !== undefined && isInvulnerable(k));
-      if (protectedNow) {
+      if (c.invulnFor > 0 || (k !== undefined && isInvulnerable(k))) {
         c.pendingHits = [];
         continue;
       }
-      let total = 0;
-      const keep: CombatState["pendingHits"] = [];
-      for (const h of c.pendingHits) {
-        if (h.deadline <= nowS + EPS) total += h.damage;
-        else keep.push(h);
-      }
-      c.pendingHits = keep;
-      if (total > 0) {
-        c.hp = Math.max(0, c.hp - total);
-        damaged.push({ key, amount: total });
-        if (c.hp <= 0) {
-          c.dead = true;
-          c.respawnIn = RESPAWN_S;
-          c.pendingHits = [];
-          died.push(key);
-        }
-      }
+      // Sin un input que lo resuelva antes (jugador callado o con mucho lag), se aplica al vencer el plazo.
+      const r = this.applyDue(c, (h) => nowTick >= h.resolveTick + REWIND_MAX_TICKS);
+      if (r.damage > 0) damaged.push({ key, amount: r.damage });
+      if (r.died) died.push(key);
     }
     return { damaged, died, respawned };
+  }
+
+  /** Aplica (y quita de la lista) los golpes pendientes que cumplen `due`. */
+  private applyDue(c: CombatState, due: (h: PendingHit) => boolean): { damage: number; died: boolean } {
+    let damage = 0;
+    const keep: PendingHit[] = [];
+    for (const h of c.pendingHits) {
+      if (due(h)) damage += h.damage;
+      else keep.push(h);
+    }
+    c.pendingHits = keep;
+    if (damage === 0) return { damage: 0, died: false };
+    c.hp = Math.max(0, c.hp - damage);
+    if (c.hp > 0) return { damage, died: false };
+    c.dead = true;
+    c.respawnIn = RESPAWN_S;
+    c.pendingHits = [];
+    return { damage, died: true };
   }
 
   grantXp(states: Map<string, CombatState>, xp: number): number[] {

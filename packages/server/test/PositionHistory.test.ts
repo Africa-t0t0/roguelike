@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { HISTORY_TICKS } from "@roguelike/shared";
 import { PositionHistory } from "../src/sim/PositionHistory";
 
 describe("PositionHistory", () => {
-  it("guarda solo los últimos 10 ticks", () => {
+  it("guarda solo los últimos HISTORY_TICKS ticks", () => {
     const h = new PositionHistory();
-    for (let t = 0; t < 15; t++) h.record(t, [{ id: "e1", x: t, z: -t }]);
+    const total = HISTORY_TICKS + 5;
+    for (let t = 0; t < total; t++) h.record(t, [{ id: "e1", x: t, z: -t }]);
     expect(h.at(0, "e1")).toBeUndefined();
     expect(h.at(4, "e1")).toBeUndefined();
-    for (let t = 5; t < 15; t++) expect(h.at(t, "e1")).toEqual({ x: t, z: -t });
+    for (let t = 5; t < total; t++) expect(h.at(t, "e1")).toEqual({ x: t, z: -t });
   });
 
   it("devuelve undefined para un id desconocido y redondea el tick", () => {

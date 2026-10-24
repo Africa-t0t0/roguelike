@@ -67,6 +67,38 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
   },
 };
 
+/** Temporizadores del combo; los usan igual el servidor y el `LocalCombo` del cliente. */
+export interface ComboTimers {
+  /** paso del último golpe aceptado: 0 = ninguno, 1..n */
+  comboStep: number;
+  swingTimer: number;
+  comboTimer: number;
+}
+
+const COMBO_EPS = 1e-9;
+
+/**
+ * Avanza el combo un input (`dt` = SIM_DT). Lo que queda por debajo de COMBO_EPS cuenta como 0, así un
+ * golpe de `duration` s libera el siguiente tras exactamente ceil(duration / dt) avances.
+ */
+export function advanceCombo(c: ComboTimers, dt: number): void {
+  c.swingTimer = c.swingTimer - dt > COMBO_EPS ? c.swingTimer - dt : 0;
+  c.comboTimer = c.comboTimer - dt > COMBO_EPS ? c.comboTimer - dt : 0;
+  if (c.comboTimer === 0) c.comboStep = 0;
+}
+
+/** Arranca el siguiente golpe del combo si no hay uno en curso. Devuelve el paso (1..n) o 0. */
+export function tryStartSwing(c: ComboTimers, cls: ClassId): number {
+  if (c.swingTimer > 0) return 0;
+  const def = CLASS_DEFS[cls];
+  const step = c.comboTimer > 0 ? (c.comboStep % def.combo.length) + 1 : 1;
+  const duration = def.combo[step - 1]!.duration;
+  c.comboStep = step;
+  c.swingTimer = duration;
+  c.comboTimer = duration + def.comboResetS;
+  return step;
+}
+
 export function xpToNext(level: number): number {
   return 10 + 10 * level;
 }

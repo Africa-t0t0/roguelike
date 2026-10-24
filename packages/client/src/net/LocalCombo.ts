@@ -1,6 +1,5 @@
-import { CLASS_DEFS, SIM_DT } from "@roguelike/shared";
+import { advanceCombo, SIM_DT, tryStartSwing, type ComboTimers } from "@roguelike/shared";
 
-const EPS = 1e-9;
 /**
  * Tras terminar el último golpe local, cuánto tiempo el combo que informa el servidor se toma como eco
  * de lo ya dibujado (llega una ida y vuelta tarde, más lo que el servidor tarde en procesar los inputs).
@@ -13,39 +12,26 @@ export interface ComboView {
 }
 
 /**
- * Copia local del combo del guerrero (mismas reglas que el `CombatSystem` del servidor) para que el
- * clip de ataque del propio jugador arranque al hacer clic. Solo es visual: el daño lo decide el servidor.
+ * Copia local del combo del guerrero (las mismas `advanceCombo`/`tryStartSwing`, en el mismo orden, que
+ * el `CombatSystem` del servidor por cada input procesado) para que el clip de ataque del propio jugador
+ * arranque al hacer clic. Solo es visual: el daño lo decide el servidor.
  */
 export class LocalCombo {
-  private comboStep = 0;
-  private swingTimer = 0;
-  private comboTimer = 0;
+  private readonly c: ComboTimers = { comboStep: 0, swingTimer: 0, comboTimer: 0 };
   /** Cuándo termina (o terminó) el último golpe local, en el reloj de `tick`. */
   private lastEndMs: number | undefined;
 
   /** Un paso de simulación con el `attack` enviado. Devuelve el golpe que arrancó (1..3) o 0. */
   tick(attack: boolean, blocked: { dead: boolean; dodging: boolean }, nowMs: number): number {
-    const def = CLASS_DEFS.warrior;
-    let started = 0;
-    if (attack && !blocked.dead && !blocked.dodging && this.swingTimer <= 0) {
-      started = this.comboTimer > 0 ? (this.comboStep % def.combo.length) + 1 : 1;
-      const duration = def.combo[started - 1]!.duration;
-      this.comboStep = started;
-      this.swingTimer = duration;
-      this.comboTimer = duration + def.comboResetS;
-      this.lastEndMs = nowMs + duration * 1000;
-    }
-    this.swingTimer = Math.max(0, this.swingTimer - SIM_DT);
-    this.comboTimer = Math.max(0, this.comboTimer - SIM_DT);
-    if (this.comboTimer <= EPS) {
-      this.comboTimer = 0;
-      this.comboStep = 0;
-    }
+    advanceCombo(this.c, SIM_DT);
+    if (!attack || blocked.dead || blocked.dodging) return 0;
+    const started = tryStartSwing(this.c, "warrior");
+    if (started) this.lastEndMs = nowMs + this.c.swingTimer * 1000;
     return started;
   }
 
   state(): ComboView {
-    return { comboStep: this.comboStep, swingTimer: this.swingTimer };
+    return { comboStep: this.c.comboStep, swingTimer: this.c.swingTimer };
   }
 
   /**
@@ -54,7 +40,7 @@ export class LocalCombo {
    * ignora. Fuera de esa ventana manda el servidor (p. ej. un golpe que el cliente no predijo).
    */
   heroCombat(server: ComboView, nowMs: number): ComboView {
-    if (this.swingTimer > 0) return this.state();
+    if (this.c.swingTimer > 0) return this.state();
     if (this.lastEndMs !== undefined && nowMs < this.lastEndMs + ECHO_WINDOW_MS) return { comboStep: 0, swingTimer: 0 };
     return { comboStep: server.comboStep, swingTimer: server.swingTimer };
   }

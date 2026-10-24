@@ -30,6 +30,17 @@ describe("LocalCombo", () => {
     expect(run(combo, total, true)).toEqual([1, 2, 3, 1]);
   });
 
+  it("acepta cada golpe exactamente ceil(duration / SIM_DT) inputs después del anterior, como el servidor", () => {
+    const combo = new LocalCombo();
+    for (const [k, step] of CLASS_DEFS.warrior.combo.entries()) {
+      expect(combo.tick(true, free, 0)).toBe(k + 1);
+      const n = Math.ceil(step.duration / SIM_DT - 1e-9);
+      for (let i = 0; i < n - 2; i++) combo.tick(false, free, 0);
+      expect(combo.tick(true, free, 0)).toBe(0); // input n − 1
+    }
+    expect(combo.tick(true, free, 0)).toBe(1); // input n tras el golpe 3
+  });
+
   it("tras comboResetS sin atacar, el combo vuelve al golpe 1", () => {
     const combo = new LocalCombo();
     expect(combo.tick(true, free, 0)).toBe(1);

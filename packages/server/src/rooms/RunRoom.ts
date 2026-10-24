@@ -149,6 +149,10 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.broadcast(MSG.combat, event);
   }
 
+  private emitPlayerDamage(key: string, amount: number, k: KinematicState): void {
+    this.emit({ type: "damage", targetKind: "player", targetId: key, amount, x: k.x, z: k.z });
+  }
+
   private tick(): void {
     const connected = this.registry.connected();
     const allStates = new Map(this.registry.all().map((r) => [r.key, r.combat] as const));
@@ -159,13 +163,15 @@ export class RunRoom extends Room<{ state: RunState }> {
         const input = record.combat.dead ? deadInput(raw, record.kinematic) : raw;
         record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT);
         record.lastSeq = input.seq;
+        // Combo y golpes pendientes avanzan por input, antes de resolver el ataque de ese input.
+        const hit = this.combat.onInputProcessed(record.combat, record.kinematic, input);
+        if (hit.damage > 0) this.emitPlayerDamage(record.key, hit.damage, record.kinematic);
         if (input.attack) this.attack(record, input, allStates);
       }
     }
 
     // 2.
     this.state.tick++;
-    const nowS = this.state.tick * SIM_DT;
 
     // 3-4. Enemigos (solo ven a los conectados vivos).
     const alive: SimPlayer[] = connected
@@ -173,15 +179,12 @@ export class RunRoom extends Room<{ state: RunState }> {
       .map((r) => ({ key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true }));
     this.enemySystem.activateRooms(alive, this.registry.size());
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
-    this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), nowS);
+    this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
 
-    // 5. Daño, muertes y reapariciones (los desconectados quedan congelados).
+    // 5. Golpes vencidos, muertes y reapariciones (los desconectados quedan congelados).
     const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
-    const { damaged, respawned } = this.combat.step(states, kin, nowS, SIM_DT);
-    for (const d of damaged) {
-      const k = kin.get(d.key)!;
-      this.emit({ type: "damage", targetKind: "player", targetId: d.key, amount: d.amount, x: k.x, z: k.z });
-    }
+    const { damaged, respawned } = this.combat.step(states, kin, this.state.tick, SIM_DT);
+    for (const d of damaged) this.emitPlayerDamage(d.key, d.amount, kin.get(d.key)!);
     for (const key of respawned) {
       const r = connected.find((x) => x.key === key)!;
       r.kinematic = this.spawnFor(key);

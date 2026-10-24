@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLASS_DEFS,
+  HISTORY_TICKS,
+  REWIND_MAX_TICKS,
+  SIM_DT,
   TILE_SIZE,
+  advanceCombo,
+  tryStartSwing,
   circlesOverlap,
   enemiesForRoom,
   inArc,
@@ -67,5 +73,40 @@ describe("sanitizeInput ataque", () => {
   it("attack y viewTick", () => {
     expect(sanitizeInput({ seq: 1, attack: "y", viewTick: -3 })).toMatchObject({ attack: false, viewTick: 0 });
     expect(sanitizeInput({ seq: 1, attack: true, viewTick: 41.5 })).toMatchObject({ attack: true, viewTick: 41.5 });
+  });
+});
+
+describe("constantes de rebobinado", () => {
+  it("REWIND_MAX_TICKS = 10 y el historial lo cubre con margen", () => {
+    expect(REWIND_MAX_TICKS).toBe(10);
+    expect(HISTORY_TICKS).toBe(14);
+  });
+});
+
+describe("advanceCombo / tryStartSwing", () => {
+  const fresh = () => ({ comboStep: 0, swingTimer: 0, comboTimer: 0 });
+
+  it("cada golpe acepta el siguiente exactamente tras ceil(duration / SIM_DT) avances", () => {
+    const c = fresh();
+    for (const [k, step] of CLASS_DEFS.warrior.combo.entries()) {
+      expect(tryStartSwing(c, "warrior")).toBe(k + 1);
+      const n = Math.ceil(step.duration / SIM_DT - 1e-9);
+      for (let i = 0; i < n - 1; i++) advanceCombo(c, SIM_DT);
+      expect(tryStartSwing(c, "warrior")).toBe(0);
+      advanceCombo(c, SIM_DT);
+      expect(c.swingTimer).toBe(0);
+    }
+    expect(tryStartSwing(c, "warrior")).toBe(1);
+  });
+
+  it("sin atacar durante duration + comboResetS el combo vuelve a 0", () => {
+    const c = fresh();
+    tryStartSwing(c, "warrior");
+    const def = CLASS_DEFS.warrior;
+    const n = Math.ceil((def.combo[0]!.duration + def.comboResetS) / SIM_DT - 1e-9);
+    for (let i = 0; i < n - 1; i++) advanceCombo(c, SIM_DT);
+    expect(c.comboStep).toBe(1);
+    advanceCombo(c, SIM_DT);
+    expect(c).toEqual(fresh());
   });
 });

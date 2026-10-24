@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLASS_DEFS,
   ENEMY_DEFS,
+  REWIND_MAX_TICKS,
+  SIM_DT,
   createRng,
   type Dungeon,
   type KinematicState,
@@ -46,38 +49,89 @@ const input = (over: Partial<PlayerInput> = {}): PlayerInput => ({
   seq: 1, moveX: 0, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false, attack: true, viewTick: 0, ...over,
 });
 
+/** Un input procesado y, si trae `attack`, su ataque (como hace RunRoom). */
+function press(cs: CombatSystem, c: CombatState, sys: EnemySystem, h: PositionHistory, attack: boolean) {
+  const inp = input({ attack });
+  cs.onInputProcessed(c, kin(), inp);
+  return attack ? cs.attack(c, kin(), inp, 100, sys, h) : undefined;
+}
+const inputsFor = (seconds: number) => Math.ceil(seconds / SIM_DT - 1e-9);
+
 describe("combo", () => {
-  it("tres ataques separados por 0.4 s dan pasos 1, 2, 3; tras 2 s vuelve al 1", () => {
+  it("tres ataques separados por 12 inputs dan pasos 1, 2, 3; tras comboResetS de inputs vuelve al 1", () => {
     const { sys } = world(0, 1);
     const cs = new CombatSystem();
     const c = newCombatState("warrior", 1);
     const h = new PositionHistory();
-    const states = new Map([["a", c]]);
-    const kins = new Map([["a", kin()]]);
     const steps: number[] = [];
-    let now = 0;
     for (let i = 0; i < 3; i++) {
-      steps.push(cs.attack(c, kin(), input(), 100, sys, h).step);
-      cs.step(states, kins, now + 0.4, 0.4);
-      now += 0.4;
+      steps.push(press(cs, c, sys, h, true)!.step);
+      for (let j = 0; j < 11; j++) press(cs, c, sys, h, false);
     }
     expect(steps).toEqual([1, 2, 3]);
-    cs.step(states, kins, now + 2, 2);
+    for (let j = 0; j < 60; j++) press(cs, c, sys, h, false);
     expect(c.comboStep).toBe(0);
-    expect(cs.attack(c, kin(), input(), 100, sys, h).step).toBe(1);
+    expect(press(cs, c, sys, h, true)!.step).toBe(1);
   });
 
-  it("un ataque 0.1 s después de otro no hace swing", () => {
+  it("los ticks sin inputs no avanzan el golpe", () => {
     const { sys } = world(0, 1);
     const cs = new CombatSystem();
     const c = newCombatState("warrior", 1);
     const h = new PositionHistory();
-    expect(cs.attack(c, kin(), input(), 100, sys, h).swung).toBe(true);
-    cs.step(new Map([["a", c]]), new Map([["a", kin()]]), 0.1, 0.1);
-    expect(cs.attack(c, kin(), input(), 100, sys, h).swung).toBe(false);
+    expect(press(cs, c, sys, h, true)!.swung).toBe(true);
+    for (let t = 1; t <= 30; t++) cs.step(new Map([["a", c]]), new Map([["a", kin()]]), 100 + t, SIM_DT);
+    expect(c.swingTimer).toBeGreaterThan(0);
+    expect(press(cs, c, sys, h, true)!.swung).toBe(false);
   });
 
-  it("ráfaga de 50 ataques en el mismo tick: un swing y un golpe por enemigo", () => {
+  // patrón de inputs por tick: ráfagas de 3 y ticks sin nada en medio.
+  for (const [name, pattern] of [
+    ["en ráfagas de 3 por tick", [3]],
+    ["con ticks vacíos en medio", [1, 0, 2, 0, 0, 3]],
+  ] as const) {
+    it(`un ataque exactamente duration/SIM_DT inputs después del anterior se acepta ${name}`, () => {
+      for (const [k, step] of CLASS_DEFS.warrior.combo.entries()) {
+        const n = inputsFor(step.duration);
+        for (const gap of [n - 1, n]) {
+          const { sys } = world(0, 1, 9999);
+          const cs = new CombatSystem();
+          const c = newCombatState("warrior", 1);
+          const h = new PositionHistory();
+          // Lleva el combo al golpe k+1.
+          for (let s = 0; s < k; s++) {
+            press(cs, c, sys, h, true);
+            for (let j = 0; j < inputsFor(CLASS_DEFS.warrior.combo[s]!.duration) - 1; j++) press(cs, c, sys, h, false);
+          }
+          expect(press(cs, c, sys, h, true)!.step).toBe(k + 1);
+          let sent = 0;
+          let tick = 100;
+          let result: ReturnType<typeof press> = undefined;
+          for (let p = 0; sent < gap; p = (p + 1) % pattern.length) {
+            for (let i = 0; i < pattern[p]! && sent < gap; i++) {
+              sent++;
+              result = press(cs, c, sys, h, sent === gap);
+            }
+            cs.step(new Map([["a", c]]), new Map([["a", kin()]]), ++tick, SIM_DT);
+          }
+          expect(result!.swung, `golpe ${k + 1}, ${gap} inputs`).toBe(gap === n);
+        }
+      }
+    });
+  }
+
+  it("un ataque 3 inputs después de otro no hace swing", () => {
+    const { sys } = world(0, 1);
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    const h = new PositionHistory();
+    expect(press(cs, c, sys, h, true)!.swung).toBe(true);
+    press(cs, c, sys, h, false);
+    press(cs, c, sys, h, false);
+    expect(press(cs, c, sys, h, true)!.swung).toBe(false);
+  });
+
+  it("50 ataques sin inputs procesados en medio: un swing y un golpe por enemigo", () => {
     const { sys } = world(0, 1, 500);
     const cs = new CombatSystem();
     const c = newCombatState("warrior", 1);
@@ -139,63 +193,99 @@ describe("daño", () => {
 });
 
 describe("rebobinado", () => {
+  const NOW = 104;
+  const CLAMP = NOW - REWIND_MAX_TICKS;
   // currentZ: posición actual (la usada como respaldo cuando el historial no tiene el tick).
-  function setup(currentZ = 8) {
+  // El historial cubre desde antes del límite: solo en `inArcAt` el enemigo estaba en el arco.
+  function setup(currentZ = 8, inArcAt = 100) {
     const { sys, e } = world(0, currentZ, 100);
     const h = new PositionHistory();
-    for (let t = 95; t <= 104; t++) h.record(t, [{ id: e.id, x: 0, z: t === 100 ? 1.5 : 8 }]);
+    for (let t = CLAMP - 2; t <= NOW; t++) h.record(t, [{ id: e.id, x: 0, z: t === inArcAt ? 1.5 : 8 }]);
     return { sys, e, h };
   }
   it("viewTick 100 con nowTick 104 golpea al enemigo que estaba en el arco", () => {
     const { sys, h } = setup();
-    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 100 }), 104, sys, h);
+    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 100 }), NOW, sys, h);
     expect(r.hits).toHaveLength(1);
   });
-  it("viewTick 90 con nowTick 104 se limita a 98 y no golpea (el respaldo actual estaría en el arco)", () => {
+  it("viewTick en el límite (nowTick − REWIND_MAX_TICKS) todavía rebobina", () => {
+    const { sys, h } = setup(8, CLAMP);
+    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: CLAMP }), NOW, sys, h);
+    expect(r.hits).toHaveLength(1);
+  });
+  it("un viewTick más viejo que el límite se lleva al límite y no golpea (el respaldo actual estaría en el arco)", () => {
     const { sys, h } = setup(1.5);
-    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 90 }), 104, sys, h);
+    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: CLAMP - 10 }), NOW, sys, h);
     expect(r.swung).toBe(true);
     expect(r.hits).toHaveLength(0);
   });
   it("un viewTick enorme se limita a nowTick (el respaldo actual estaría en el arco)", () => {
     const { sys, h } = setup(1.5);
-    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 1e9 }), 104, sys, h);
+    const r = new CombatSystem().attack(newCombatState("warrior", 1), kin(), input({ viewTick: 1e9 }), NOW, sys, h);
     expect(r.hits).toHaveLength(0);
   });
 });
 
 describe("golpes de enemigos", () => {
+  const H = 100;
   const hit = (damage: number) => [{ targetKey: "a", damage, sourceId: "e1" }];
   function ctx(c: CombatState) {
-    return { states: new Map([["a", c]]), cs: new CombatSystem() };
+    const states = new Map([["a", c]]);
+    const cs = new CombatSystem();
+    const tick = (t: number, k = kin()) => cs.step(states, new Map([["a", k]]), t, SIM_DT);
+    return { states, cs, tick };
   }
+  const idle = (viewTick: number) => input({ attack: false, viewTick });
 
-  it("se aplica tras la gracia si no esquiva", () => {
+  it("se aplica en cuanto llega un input con viewTick >= H sin esquivar", () => {
     const c = newCombatState("warrior", 1);
-    const { states, cs } = ctx(c);
-    cs.queueEnemyHits(states, hit(6), 1);
-    expect(cs.step(states, new Map([["a", kin()]]), 1.05, 0.05).damaged).toEqual([]);
-    const r = cs.step(states, new Map([["a", kin()]]), 1.15, 0.1);
-    expect(r.damaged).toEqual([{ key: "a", amount: 6 }]);
+    const { states, cs, tick } = ctx(c);
+    cs.queueEnemyHits(states, hit(6), H);
+    expect(tick(H).damaged).toEqual([]);
+    expect(cs.onInputProcessed(c, kin(), idle(H - 1))).toEqual({ damage: 0, died: false });
+    expect(tick(H + 1).damaged).toEqual([]);
+    expect(c.hp).toBe(120);
+    expect(cs.onInputProcessed(c, kin(), idle(H))).toEqual({ damage: 6, died: false });
+    expect(c.hp).toBe(114);
+    expect(c.pendingHits).toHaveLength(0);
+  });
+
+  it("se descarta si un input (aunque con viewTick < H) empieza una esquiva", () => {
+    const c = newCombatState("warrior", 1);
+    const { states, cs, tick } = ctx(c);
+    cs.queueEnemyHits(states, hit(6), H);
+    for (let t = H; t <= H + 2; t++) tick(t);
+    // procesado en el tick 103
+    expect(cs.onInputProcessed(c, kin({ dodgeTime: 0.2 }), idle(H - 1)).damage).toBe(0);
+    expect(c.pendingHits).toHaveLength(0);
+    for (let t = H + 3; t <= H + REWIND_MAX_TICKS + 2; t++) expect(tick(t).damaged).toEqual([]);
+    expect(c.hp).toBe(120);
+  });
+
+  it("sin inputs se aplica en el tick H + REWIND_MAX_TICKS", () => {
+    const c = newCombatState("warrior", 1);
+    const { states, cs, tick } = ctx(c);
+    cs.queueEnemyHits(states, hit(6), H);
+    for (let t = H; t < H + REWIND_MAX_TICKS; t++) expect(tick(t).damaged).toEqual([]);
+    expect(tick(H + REWIND_MAX_TICKS).damaged).toEqual([{ key: "a", amount: 6 }]);
     expect(c.hp).toBe(114);
   });
 
-  it("se descarta si el jugador empieza a esquivar dentro de la gracia", () => {
+  it("un golpe por input que mata deja al jugador muerto", () => {
     const c = newCombatState("warrior", 1);
+    c.hp = 5;
     const { states, cs } = ctx(c);
-    cs.queueEnemyHits(states, hit(6), 1);
-    cs.step(states, new Map([["a", kin({ dodgeTime: 0.2 })]]), 1.05, 0.05);
-    const r = cs.step(states, new Map([["a", kin()]]), 1.2, 0.15);
-    expect(r.damaged).toEqual([]);
-    expect(c.hp).toBe(120);
-    expect(c.pendingHits).toHaveLength(0);
+    cs.queueEnemyHits(states, hit(6), H);
+    expect(cs.onInputProcessed(c, kin(), idle(H))).toEqual({ damage: 6, died: true });
+    expect(c).toMatchObject({ hp: 0, dead: true, pendingHits: [] });
+    expect(c.respawnIn).toBe(5);
   });
 
   it("ignora golpes a jugadores muertos o inexistentes", () => {
     const c = newCombatState("warrior", 1);
     c.dead = true;
     const { states, cs } = ctx(c);
-    cs.queueEnemyHits(states, [...hit(6), { targetKey: "zzz", damage: 5, sourceId: "e1" }], 1);
+    cs.queueEnemyHits(states, [...hit(6), { targetKey: "zzz", damage: 5, sourceId: "e1" }], H);
     expect(c.pendingHits).toHaveLength(0);
   });
 });
@@ -208,7 +298,7 @@ describe("muerte y reaparición", () => {
     const kins = new Map([["a", kin()]]);
     const cs = new CombatSystem();
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 0);
-    const r = cs.step(states, kins, 0.2, 0.2);
+    const r = cs.step(states, kins, REWIND_MAX_TICKS, 0.2);
     expect(r.died).toEqual(["a"]);
     expect(c.dead).toBe(true);
     expect(c.respawnIn).toBe(5);
@@ -216,7 +306,7 @@ describe("muerte y reaparición", () => {
 
     let respawned: string[] = [];
     for (let i = 0; i < 10; i++) {
-      const rr = cs.step(states, kins, 0.7 + i * 0.5, 0.5);
+      const rr = cs.step(states, kins, REWIND_MAX_TICKS + 1 + i, 0.5);
       if (rr.respawned.length) respawned = rr.respawned;
     }
     expect(respawned).toEqual(["a"]);
@@ -224,8 +314,10 @@ describe("muerte y reaparición", () => {
     expect(c.hp).toBe(120);
     expect(c.invulnFor).toBe(1);
 
-    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 6);
-    cs.step(states, kins, 6.2, 0.2);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
+    expect(cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 })).damage).toBe(0);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
+    cs.step(states, kins, 100 + REWIND_MAX_TICKS, 0.2);
     expect(c.hp).toBe(120);
     expect(c.pendingHits).toHaveLength(0);
   });

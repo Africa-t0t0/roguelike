@@ -304,7 +304,7 @@ describe("RunRoom: combate", () => {
     expect(room.state.tick).toBeGreaterThan(0);
   });
 
-  it("tres ataques separados por 0,4 s dañan al enemigo de enfrente y emiten swing y damage", async () => {
+  it("tres ataques separados por 12 inputs (0,4 s) dañan al enemigo de enfrente y emiten swing y damage", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
     const events = collect(ana.client);
@@ -323,14 +323,16 @@ describe("RunRoom: combate", () => {
     teleport("ana", tileCenter(tx + dx!, tz + dz!));
 
     const hpBefore = target.hp;
+    let seq = 0;
     for (let i = 0; i < 3; i++) {
       const me = record("ana").kinematic;
       const e = room["enemySystem"].enemies.find((x) => x.id === target.id);
       const aim = e ?? target;
       const facing = Math.atan2(aim.x - me.x, aim.z - me.z);
-      ana.client.send(MSG.input, attackInput(i + 1, facing, room.state.tick));
-      await ticksUntil(() => player("ana").lastSeq === i + 1, 5);
-      for (let t = 0; t < 12; t++) await room.waitForNextTimestep();
+      ana.client.send(MSG.input, attackInput(++seq, facing, room.state.tick));
+      // El golpe avanza por input: 11 inputs quietos más (12 en total ≈ 0,4 s) antes del siguiente.
+      for (let j = 0; j < 11; j++) ana.client.send(MSG.input, { ...attackInput(++seq, facing, room.state.tick), attack: false });
+      await ticksUntil(() => player("ana").lastSeq === seq, 10);
     }
     const after = room["enemySystem"].enemies.find((x) => x.id === target.id);
     expect(after === undefined || after.hp < hpBefore).toBe(true);
