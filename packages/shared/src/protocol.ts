@@ -13,6 +13,9 @@ export const JOIN_ERROR_STATUS: Record<JoinErrorCode, number> = {
   "room-full": 4003,
 };
 
+/** Código de cierre que recibe la conexión vieja cuando otra pestaña toma el control del jugador. */
+export const TAKEOVER_CLOSE_CODE = 4005;
+
 /** Mensajes cliente/servidor. `welcome` lleva `{ key: string }`. */
 export const MSG = { input: "input", welcome: "welcome" } as const;
 

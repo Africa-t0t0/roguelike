@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@babylonjs/core": "9.30.0",
+    "@colyseus/sdk": "0.18.5",
     "@roguelike/shared": "*"
   },
   "devDependencies": {

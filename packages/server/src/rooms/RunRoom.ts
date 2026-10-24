@@ -17,6 +17,7 @@ import {
   SIM_DT,
   SIM_HZ,
   stepPlayer,
+  TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
   tileCenter,
   type Dungeon,
@@ -30,9 +31,6 @@ export interface RunRoomCreateOptions {
   seed?: number;
   emptyRoomTtlMs?: number;
 }
-
-/** Código de cierre que recibe la conexión vieja cuando otra pestaña toma el control del jugador. */
-export const TAKEOVER_CLOSE_CODE = 4005;
 
 const ROOM_CODE_ATTEMPTS = 5;
 const ALLY_SPAWN_RADIUS = 2;

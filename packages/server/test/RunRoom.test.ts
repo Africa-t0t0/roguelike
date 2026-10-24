@@ -11,11 +11,12 @@ import {
   MSG,
   PLAYER_SPEED,
   SIM_DT,
+  TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
   tileCenter,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
-import { TAKEOVER_CLOSE_CODE, type RunRoom } from "../src/rooms/RunRoom";
+import type { RunRoom } from "../src/rooms/RunRoom";
 
 const SEED = 123;
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}$/;
