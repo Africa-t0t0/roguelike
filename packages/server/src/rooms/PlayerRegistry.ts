@@ -15,7 +15,7 @@ export interface PlayerRecord {
   kinematic: KinematicState;
   lastSeq: number;
   inputQueue: PlayerInput[];
-  /** Se crea una sola vez; attach() (reconnect/takeover) no lo toca: ni cura ni revive. */
+  /** Se crea una sola vez; attach() (reconnect/takeover) ni cura ni revive: solo vacía los golpes pendientes. */
   combat: CombatState;
 }
 
@@ -102,5 +102,7 @@ export class PlayerRegistry {
     record.kinematic = spawn();
     record.lastSeq = 0;
     record.inputQueue = [];
+    // Al volver no caen golpes recibidos antes de irse.
+    record.combat.pendingHits = [];
   }
 }

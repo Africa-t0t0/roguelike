@@ -23,6 +23,7 @@ export function lerpSnapshot(a: PlayerSnapshot, b: PlayerSnapshot, t: number): P
 
 const MIN_CORRECTION = 0.01; // m
 const CORRECTION_TAU_S = 0.035; // ~95 % absorbido en 100 ms
+const SNAP_CORRECTION = 2.5; // m: más que esto (reaparición, teletransporte) se salta sin suavizar
 
 /**
  * Suaviza solo la vista del jugador propio cuando la reconciliación lo mueve.
@@ -36,7 +37,13 @@ export class CorrectionSmoother {
   correct(before: { x: number; z: number }, after: { x: number; z: number }): void {
     const dx = before.x - after.x;
     const dz = before.z - after.z;
-    if (Math.hypot(dx, dz) <= MIN_CORRECTION) return;
+    const dist = Math.hypot(dx, dz);
+    if (dist <= MIN_CORRECTION) return;
+    if (dist > SNAP_CORRECTION) {
+      this.x = 0;
+      this.z = 0;
+      return;
+    }
     this.x += dx;
     this.z += dz;
   }

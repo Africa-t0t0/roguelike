@@ -85,6 +85,24 @@ describe("PlayerRegistry", () => {
     expect(back.record.combat).toMatchObject({ hp: 50, dead: true, respawnIn: 2.5 });
   });
 
+  it("reconnect y takeover vacían los golpes pendientes", () => {
+    const r = new PlayerRegistry();
+    const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
+    if (!first.ok) throw new Error();
+    first.record.combat.pendingHits.push({ damage: 6, resolveTick: 100 });
+    const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn);
+    if (!taken.ok) throw new Error();
+    expect(taken.kind).toBe("takeover");
+    expect(taken.record.combat.pendingHits).toEqual([]);
+
+    taken.record.combat.pendingHits.push({ damage: 6, resolveTick: 200 });
+    r.leave("s2");
+    const back = r.join({ name: "Jorge", token: "otro", sessionId: "s3" }, spawn);
+    if (!back.ok) throw new Error();
+    expect(back.kind).toBe("reconnect");
+    expect(back.record.combat.pendingHits).toEqual([]);
+  });
+
   it("all() incluye a los desconectados", () => {
     const r = new PlayerRegistry();
     r.join({ name: "A", token: "a", sessionId: "sA" }, spawn);

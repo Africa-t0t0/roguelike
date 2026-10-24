@@ -28,4 +28,18 @@ describe("CorrectionSmoother", () => {
     expect(s.x).toBeLessThan(0.06);
     expect(s.x).toBeGreaterThan(0);
   });
+
+  it("una corrección de más de 2,5 m salta sin suavizar (y descarta el desfase previo)", () => {
+    const s = new CorrectionSmoother();
+    s.correct({ x: 1, z: 0 }, { x: 0, z: 0 });
+    s.correct({ x: 0, z: 0 }, { x: 0, z: 2.6 });
+    expect(s.x).toBe(0);
+    expect(s.z).toBe(0);
+  });
+
+  it("2,5 m justos todavía se suavizan", () => {
+    const s = new CorrectionSmoother();
+    s.correct({ x: 2.5, z: 0 }, { x: 0, z: 0 });
+    expect(s.x).toBe(2.5);
+  });
 });
