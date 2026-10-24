@@ -1,0 +1,58 @@
+{
+  "characters": {
+    "kingslayer": "characters/kingslayer.glb",
+    "brute": "characters/brute.glb",
+    "minion": "characters/minion.glb",
+    "mage": "characters/mage.glb"
+  },
+  "anims": {
+    "ss_idle": "anims/ss_idle.glb",
+    "ss_run": "anims/ss_run.glb",
+    "ss_run_2": "anims/ss_run_2.glb",
+    "ss_jump": "anims/ss_jump.glb",
+    "ss_impact": "anims/ss_impact.glb",
+    "ss_death": "anims/ss_death.glb",
+    "ss_slash": "anims/ss_slash.glb",
+    "ss_slash_3": "anims/ss_slash_3.glb",
+    "ss_attack_4": "anims/ss_attack_4.glb",
+    "gs_idle": "anims/gs_idle.glb",
+    "gs_run": "anims/gs_run.glb",
+    "gs_run_2": "anims/gs_run_2.glb",
+    "gs_jump": "anims/gs_jump.glb",
+    "gs_impact": "anims/gs_impact.glb",
+    "gs_impact_2": "anims/gs_impact_2.glb",
+    "gs_impact_4": "anims/gs_impact_4.glb",
+    "gs_slash": "anims/gs_slash.glb",
+    "gs_high_spin_attack": "anims/gs_high_spin_attack.glb",
+    "gs_death": "anims/gs_death.glb",
+    "cr_idle": "anims/cr_idle.glb",
+    "cr_idle_2": "anims/cr_idle_2.glb",
+    "cr_run": "anims/cr_run.glb",
+    "cr_walking": "anims/cr_walking.glb",
+    "cr_swiping": "anims/cr_swiping.glb",
+    "cr_punch": "anims/cr_punch.glb",
+    "cr_dying": "anims/cr_dying.glb",
+    "mg_idle": "anims/mg_idle.glb",
+    "mg_attack": "anims/mg_attack.glb"
+  },
+  "weapons": {
+    "kingslayer-sword": {
+      "file": "weapons/kingslayer-sword.glb",
+      "bladeLength": 0.2886,
+      "handleLength": 0.1302,
+      "guardWidth": 0.1027
+    },
+    "guard-sword": {
+      "file": "weapons/guard-sword.glb",
+      "bladeLength": 3.7457,
+      "handleLength": 1.707,
+      "guardWidth": 1.1424
+    },
+    "great-sword": {
+      "file": "weapons/great-sword.glb",
+      "bladeLength": 4.6394,
+      "handleLength": 1.9552,
+      "guardWidth": 0.978
+    }
+  }
+}
