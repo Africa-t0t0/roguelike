@@ -205,7 +205,15 @@ export class RunRoom extends Room<{ state: RunState }> {
     const res = this.combat.attack(record.combat, record.kinematic, input, this.state.tick, this.enemySystem, this.history);
     if (res.swung) this.emit({ type: "swing", key: record.key, step: res.step });
     for (const h of res.hits) {
-      this.emit({ type: "damage", targetKind: "enemy", targetId: h.enemyId, amount: h.amount, x: h.x, z: h.z });
+      this.emit({
+        type: "damage",
+        targetKind: "enemy",
+        targetId: h.enemyId,
+        amount: h.amount,
+        x: h.x,
+        z: h.z,
+        sourceKey: record.key,
+      });
     }
     // Todos los registros (también los desconectados) suben su vida máxima con el nivel del grupo.
     for (const level of this.combat.grantXp(allStates, res.xpGained)) this.emit({ type: "levelUp", level });

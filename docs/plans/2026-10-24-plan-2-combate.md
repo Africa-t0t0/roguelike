@@ -26,7 +26,7 @@
     - `brute`: cuerpo a cuerpo. Hp 45, velocidad 3.5, radio 0.5, daño 12, alcance 1.6, telegrafía 0.6, enfriamiento 1.6, xp 8.
     - `mage`: a distancia. Hp 30, velocidad 3, radio 0.45, daño 10, telegrafía 0.7, enfriamiento 2.2, xp 8. Además `ranged: {projectileSpeed 9, projectileRadius 0.3, lifetimeS 3, preferredMin 6, preferredMax 10}`.
   - `xpToNext(level) = 10 + 10 * level`. `enemiesForRoom(floor, players) = 3 + floor + (players - 1)`. Mezcla por sala: la mitad `brute` (redondeando hacia arriba), luego `minion` y luego `mage`, alternando con el `Rng` de la sala.
-- **Constantes de red y combate** (en `constants.ts`): `REWIND_MAX_TICKS = 10` (~333 ms a 30 Hz), `HISTORY_TICKS = 14`, `RESPAWN_S = 5`, `RESPAWN_INVULN_S = 1`, `ENEMY_SPAWN_MIN_PLAYER_DIST_TILES = 3`. En `protocol.ts` (no en `constants.ts`, para no exportarla dos veces desde `index.ts`): `PROTOCOL_VERSION = 2`.
+- **Constantes de red y combate** (en `constants.ts`): `REWIND_MAX_TICKS = 10` (~333 ms a 30 Hz), `HISTORY_TICKS = 14`, `RESPAWN_S = 5`, `RESPAWN_INVULN_S = 1`, `ENEMY_SPAWN_MIN_PLAYER_DIST_TILES = 3`. En `protocol.ts` (no en `constants.ts`, para no exportarla dos veces desde `index.ts`): `PROTOCOL_VERSION = 3`.
 - Toda la lógica de combate y de IA en `shared`/`server` es determinista dado su `Rng`: **sin `Math.random`**.
 - Textos visibles en español. Commits con `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Decisiones de este plan** (son de Claude, no del usuario; ver el final):

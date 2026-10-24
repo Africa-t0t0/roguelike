@@ -267,7 +267,8 @@ const attackInput = (seq: number, facing: number, viewTick: number) => ({
 
 describe("RunRoom: combate", () => {
   it("rechaza una versión de protocolo distinta con 4104", async () => {
-    await expect(colyseus.sdk.joinById(room.roomId, { name: "Ana", token: "t", version: 1 })).rejects.toMatchObject({
+    expect(PROTOCOL_VERSION).toBe(3); // 3: los daños a enemigos llevan sourceKey
+    await expect(colyseus.sdk.joinById(room.roomId, { name: "Ana", token: "t", version: PROTOCOL_VERSION - 1 })).rejects.toMatchObject({
       code: JOIN_ERROR_STATUS["version-mismatch"],
     });
     await expect(colyseus.sdk.joinById(room.roomId, { name: "Ana", token: "t" })).rejects.toMatchObject({
@@ -342,7 +343,7 @@ describe("RunRoom: combate", () => {
     // Separados por 0,4 s caen dentro de la ventana del combo: pasos 1, 2 y 3.
     expect(events.filter((e) => e.type === "swing")).toEqual([1, 2, 3].map((step) => ({ type: "swing", key: "ana", step })));
     const dmg = events.find((e) => e.type === "damage" && e.targetKind === "enemy");
-    expect(dmg).toMatchObject({ type: "damage", targetKind: "enemy", amount: 12 });
+    expect(dmg).toMatchObject({ type: "damage", targetKind: "enemy", amount: 12, sourceKey: "ana" });
   });
 
   it("Foco 2: salir y volver conserva la vida", async () => {

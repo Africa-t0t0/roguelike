@@ -20,6 +20,7 @@ import { createTickClock } from "./net/tickClock";
 import { RecentHits } from "./render/animState";
 import { loadAssets, type Assets } from "./render/assets";
 import { createScene } from "./render/createScene";
+import { damageTiming } from "./render/damageTiming";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
 import { EnemyViews } from "./render/enemyViews";
 import { DamageNumbers, HurtFlash } from "./render/fx";
@@ -167,17 +168,16 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
   });
 
   // Los eventos se marcan en el reloj de recepción; lo remoto se dibuja INTERP_DELAY_MS después.
-  // El propio jugador se dibuja en el presente: sus eventos se ven sin ese retardo.
+  // Lo propio (daño recibido, golpes dados) se ve sin ese retardo.
   conn.onCombat((event) => {
     const now = performance.now();
     if (event.type === "swing") {
       if (event.key !== conn.myKey) views.swing(event.key, event.step, now);
     } else if (event.type === "damage") {
-      hits.hit(`${event.targetKind}:${event.targetId}`, now);
-      const own = event.targetKind === "player" && event.targetId === conn.myKey;
-      const shownAt = own ? now : now + INTERP_DELAY_MS;
-      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, shownAt);
-      if (own) hurtFlash.flash();
+      const t = damageTiming(event, conn.myKey, now);
+      hits.hit(`${event.targetKind}:${event.targetId}`, t.hitAt);
+      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt);
+      if (t.hurtMe) hurtFlash.flash();
     } else if (event.type === "levelUp") {
       hud.levelUp(event.level);
     }

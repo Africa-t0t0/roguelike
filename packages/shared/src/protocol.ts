@@ -1,7 +1,7 @@
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export interface JoinOptions {
   name: string;
@@ -36,6 +36,15 @@ export function normalizeName(raw: unknown): { display: string; key: string } | 
 }
 
 export type CombatEvent =
-  | { type: "damage"; targetKind: "enemy" | "player"; targetId: string; amount: number; x: number; z: number }
+  | {
+      type: "damage";
+      targetKind: "enemy" | "player";
+      targetId: string;
+      amount: number;
+      x: number;
+      z: number;
+      /** Solo en daño a enemigos: clave del jugador que golpeó. */
+      sourceKey?: string;
+    }
   | { type: "swing"; key: string; step: number }
   | { type: "levelUp"; level: number };
