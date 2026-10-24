@@ -1,7 +1,4 @@
-export interface TokenCrypto {
-  randomUUID?: () => string;
-  getRandomValues<T extends ArrayBufferView>(array: T): T;
-}
+export type TokenCrypto = Pick<Crypto, "getRandomValues"> & { randomUUID?: () => string };
 
 /** `crypto.randomUUID` solo existe en contextos seguros (https/localhost); por http en la LAN hay que caer a getRandomValues. */
 export function generateToken(c: TokenCrypto = crypto): string {
