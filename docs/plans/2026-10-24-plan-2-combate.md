@@ -59,7 +59,7 @@ packages/shared/src/
 packages/server/src/sim/
   EnemySystem.ts       aparición por sala, IA, movimiento, proyectiles
   PositionHistory.ts   historial de posiciones de enemigos por tick
-  CombatSystem.ts      combo, golpes con rebobinado, daño, XP/nivel, golpes pendientes con gracia de esquive, muerte/reaparición
+  CombatSystem.ts      combo, golpes con rebobinado, daño, XP/nivel, golpes pendientes con gracia de esquive por tick visto, muerte/reaparición
 packages/server/src/rooms/
   RunState.ts          + EnemyState, ProjectileState, campos de combate
   RunRoom.ts           conecta los sistemas; chequeo de versión
@@ -240,8 +240,8 @@ Reglas:
   - Golpea si `inArc({x: k.x, z: k.z, facing: input.facing}, {pos, radius}, range, arcDeg)`.
   - Daño = `round(playerStats(cls, level).damage * damageMult)`, aplicado con `enemies.damage`. Las muertes suman su xp con `grantXp`.
 - **Golpes de enemigos con gracia de esquive:**
-  - `queueEnemyHits` agrega `{damage, deadline: nowS + DODGE_GRACE_S}` al jugador objetivo, si está vivo.
-  - En cada `step`, un golpe pendiente se **descarta** si el jugador está esquivando (`isInvulnerable(kin)`) o tiene `invulnFor > 0`, y se **aplica** si pasó su `deadline`.
+  - *(Actualizado tras la revisión final: reemplaza la gracia fija de 150 ms.)* `queueEnemyHits` agrega `{damage, resolveTick: H}` al jugador objetivo, si está vivo.
+  - Un golpe pendiente se **descarta** si el jugador esquiva o tiene `invulnFor > 0` mientras está pendiente. Se **aplica** con el primer input procesado del jugador cuyo `viewTick >= H` (ya vio el momento del golpe y no esquivó), o a más tardar en el tick `H + REWIND_MAX_TICKS`.
 - **Muerte y reaparición:**
   - Al llegar a hp ≤ 0: `dead = true`, `respawnIn = RESPAWN_S`, y se vacían los golpes pendientes.
   - Al cumplirse: `dead = false`, `hp = maxHp`, `invulnFor = RESPAWN_INVULN_S`, y aparece en `respawned` para que `RunRoom` lo reubique.
@@ -470,4 +470,4 @@ Comportamiento:
 - **Atacar no frena el movimiento**, y el golpe sale hacia donde mira la cámara.
 - **Stats por nivel en este plan: solo vida y daño.** Velocidad de movimiento y de ataque quedan para el Plan 3, junto con las curvas por clase.
 - **Los élites (spec §4.8) quedan para el Plan 4**, junto con los cofres.
-- **La gracia de esquive es de 150 ms:** un golpe se descarta si el jugador empieza a esquivar hasta 150 ms después de que el servidor lo resolvió. Es la forma simple de que el esquive "cuente desde que se presionó" (spec §5.1).
+- **La gracia de esquive se resuelve por el tick que el jugador ve** (cambio de la revisión final; antes eran 150 ms fijos, demasiado poco con 50–150 ms de latencia): el golpe espera hasta que el jugador "lo vio" sin esquivar, con un tope de `REWIND_MAX_TICKS`. Así el esquive cuenta desde que se presionó (spec §5.1). Los timers del combo también avanzan por input procesado, igual que el cliente.
