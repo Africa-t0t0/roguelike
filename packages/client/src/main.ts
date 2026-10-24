@@ -1,4 +1,5 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
+import type { Scene } from "@babylonjs/core/scene";
 import {
   generateDungeon,
   INTERP_DELAY_MS,
@@ -14,6 +15,7 @@ import { connect, type GameConnection, type PlayerSnapshot } from "./net/connect
 import { parseLagParams } from "./net/LagSimulator";
 import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
+import { loadAssets, type Assets } from "./render/assets";
 import { createScene } from "./render/createScene";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
@@ -36,6 +38,14 @@ const lobby = new Lobby(
 );
 lobby.showLobby();
 
+/** Aviso mientras se cargan los modelos; solo DOM, encima del canvas. */
+const loading = document.createElement("div");
+loading.className = "panel";
+loading.textContent = "Cargando…";
+loading.style.textAlign = "center";
+loading.hidden = true;
+document.body.append(loading);
+
 async function join(opts: { name: string; code?: string }): Promise<void> {
   // Mismo criterio que el servidor, sin tocarlo: así no queda viva una sala vacía por un nombre inválido.
   if (!normalizeName(opts.name)) {
@@ -52,19 +62,48 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
   // Reconectar es volver a entrar con el mismo código, nombre y token.
   lastJoin = { code: conn.roomCode, name: opts.name };
   lobby.showGame(conn.roomCode);
-  const stop = startSession(conn);
+  // Se escucha el corte antes de cargar: si llega durante la carga, la sesión no arranca.
+  let stop: (() => void) | undefined;
+  let gone = false;
   conn.onDisconnect((reason) => {
-    stop();
+    gone = true;
+    loading.hidden = true;
+    stop?.();
     if (reason === "takeover") lobby.showLobby("Abriste el juego en otra pestaña");
     else lobby.showConnectionLost();
   });
+
+  const scene = createScene(engine);
+  let assets: Assets;
+  loading.hidden = false;
+  try {
+    assets = await loadAssets(scene);
+  } catch (err) {
+    console.error(err);
+    scene.dispose();
+    if (!gone) {
+      gone = true;
+      conn.leave();
+      loading.hidden = true;
+      lobby.showLobby("No se pudieron cargar los modelos. Recarga la página.");
+    }
+    return;
+  }
+  if (gone) {
+    scene.dispose();
+    return;
+  }
+  loading.hidden = true;
+  stop = startSession(conn, scene, assets);
 }
 
-/** Escena + bucle de tiempo fijo para una conexión. Devuelve la función que lo desarma todo. */
-function startSession(conn: GameConnection): () => void {
+/**
+ * Mazmorra, vistas y bucle de tiempo fijo para una conexión, sobre una escena con los modelos ya
+ * cargados. Devuelve la función que lo desarma todo.
+ */
+function startSession(conn: GameConnection, scene: Scene, assets: Assets): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
-  const scene = createScene(engine);
-  buildDungeonMeshes(scene, dungeon);
+  const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
   const views = new PlayerViews(scene, conn.myKey);
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
@@ -141,6 +180,7 @@ function startSession(conn: GameConnection): () => void {
     detachInput();
     camera.dispose();
     views.dispose();
+    dungeonMeshes.dispose();
     scene.dispose();
   };
 }
