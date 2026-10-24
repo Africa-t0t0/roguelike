@@ -6,6 +6,7 @@ export const MAX_INPUTS_PER_TICK = 3;
 export const MAX_QUEUED_INPUTS = 30;
 export const MAX_PENDING_INPUTS = 90;
 export const TILE_SIZE = 2; // metros
+export const CORRIDOR_WIDTH = 3; // casillas; impar para quedar centrado en la línea entre salas
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_SPEED = 5; // m/s
 export const DODGE_SPEED = 12; // m/s

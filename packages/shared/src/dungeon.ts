@@ -1,4 +1,4 @@
-import { TILE_SIZE } from "./constants";
+import { CORRIDOR_WIDTH, TILE_SIZE } from "./constants";
 import { createRng, type Rng } from "./rng";
 
 export type RoomKind = "start" | "combat" | "boss";
@@ -99,15 +99,28 @@ function carveRoom(tiles: Uint8Array, width: number, r: Rect): void {
   }
 }
 
-/** Pasillo en L de 1 casilla: horizontal en z de `a`, luego vertical en x de `b`. */
+/** Rellena el rectángulo [x0..x1]×[z0..z1] sin tocar el borde exterior. */
+function carveBox(tiles: Uint8Array, width: number, x0: number, x1: number, z0: number, z1: number): void {
+  for (let z = Math.max(1, z0); z <= Math.min(width - 2, z1); z++) {
+    for (let x = Math.max(1, x0); x <= Math.min(width - 2, x1); x++) tiles[z * width + x] = 1;
+  }
+}
+
+/**
+ * Pasillo en L de CORRIDOR_WIDTH casillas, centrado en la línea entre centros:
+ * horizontal en z de `a`, luego vertical en x de `b`. Cada tramo se alarga media
+ * anchura en sus extremos para que la esquina quede completa.
+ */
 function carveCorridor(tiles: Uint8Array, width: number, a: Rect, b: Rect): void {
   const ca = center(a);
   const cb = center(b);
-  const dx = Math.sign(cb.x - ca.x);
-  for (let x = ca.x; x !== cb.x; x += dx) tiles[ca.z * width + x] = 1;
-  const dz = Math.sign(cb.z - ca.z);
-  for (let z = ca.z; z !== cb.z; z += dz) tiles[z * width + cb.x] = 1;
-  tiles[cb.z * width + cb.x] = 1;
+  const half = Math.floor(CORRIDOR_WIDTH / 2);
+  const minX = Math.min(ca.x, cb.x);
+  const maxX = Math.max(ca.x, cb.x);
+  const minZ = Math.min(ca.z, cb.z);
+  const maxZ = Math.max(ca.z, cb.z);
+  carveBox(tiles, width, minX - half, maxX + half, ca.z - half, ca.z + half);
+  carveBox(tiles, width, cb.x - half, cb.x + half, minZ - half, maxZ + half);
 }
 
 export function generateDungeon(seed: number, floor: number): Dungeon {

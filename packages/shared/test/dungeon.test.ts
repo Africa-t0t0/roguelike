@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CORRIDOR_WIDTH } from "../src/constants";
 import { generateDungeon, isWalkableTile, roomSpawnPoints, type Dungeon } from "../src/dungeon";
 
 function roomCenter(d: Dungeon, id: number) {
@@ -29,6 +30,32 @@ describe("generateDungeon", () => {
 
   it("semillas distintas generan tiles distintos", () => {
     expect(generateDungeon(7, 1).tiles).not.toEqual(generateDungeon(8, 1).tiles);
+  });
+
+  it(`no hay pasos más angostos que CORRIDOR_WIDTH (${CORRIDOR_WIDTH} casillas)`, () => {
+    // toda casilla de suelo pertenece a algún cuadrado de CORRIDOR_WIDTH×CORRIDOR_WIDTH todo suelo
+    const n = CORRIDOR_WIDTH;
+    for (const floor of [1, 2, 3]) {
+      for (let seed = 1; seed <= 50; seed++) {
+        const d = generateDungeon(seed, floor);
+        const allFloor = (x0: number, z0: number) => {
+          for (let z = z0; z < z0 + n; z++) {
+            for (let x = x0; x < x0 + n; x++) if (!isWalkableTile(d, x, z)) return false;
+          }
+          return true;
+        };
+        for (let z = 0; z < d.height; z++) {
+          for (let x = 0; x < d.width; x++) {
+            if (!isWalkableTile(d, x, z)) continue;
+            let ok = false;
+            for (let z0 = z - n + 1; z0 <= z && !ok; z0++) {
+              for (let x0 = x - n + 1; x0 <= x && !ok; x0++) ok = allFloor(x0, z0);
+            }
+            expect(ok, `seed ${seed} piso ${floor} casilla (${x},${z})`).toBe(true);
+          }
+        }
+      }
+    }
   });
 
   for (const floor of [1, 2, 3]) {
