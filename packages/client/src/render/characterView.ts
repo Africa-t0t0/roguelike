@@ -5,11 +5,12 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Observer } from "@babylonjs/core/Misc/observable";
 import type { Node } from "@babylonjs/core/node";
 import type { Scene } from "@babylonjs/core/scene";
-import type { WeaponId } from "@roguelike/shared";
+import type { WeaponId, WeaponTier } from "@roguelike/shared";
 import { boneKey, type AnimLibrary } from "./animLibrary";
 import type { AnimChoice } from "./animState";
 import type { AssetId, Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
+import { applyTierGlow } from "./tierGlow";
 
 /**
  * Giro constante del modelo respecto de `facing` (0 = +Z, π/2 = +X). Los personajes de Mixamo, tras
@@ -51,7 +52,7 @@ export class CharacterView {
   private readonly groups = new Map<string, AnimationGroup | null>();
   private readonly fadingOut = new Set<AnimationGroup>();
   private current: { clip: string; group: AnimationGroup } | undefined;
-  private weapon: { id: WeaponId; grip: TransformNode } | undefined;
+  private weapon: { id: WeaponId; tier: WeaponTier; grip: TransformNode } | undefined;
   private readonly observer: Observer<Scene>;
   private readonly skeletons: Skeleton[];
   private readonly body: TransformNode;
@@ -115,10 +116,22 @@ export class CharacterView {
     this.bodyYawTarget = yaw;
   }
 
-  /** Cuelga el arma de la mano derecha con su agarre de `WEAPON_LOOKS`; con `null` la quita. */
-  setWeapon(weaponId: WeaponId | null): void {
-    if (this.weapon?.id === weaponId) return;
-    this.weapon?.grip.dispose(); // sin materiales: son del contenedor, compartidos
+  /**
+   * Cuelga el arma de la mano derecha con su agarre de `WEAPON_LOOKS` (posición y escala por
+   * `opts.gripScale`, por defecto 1) y el brillo de `opts.tier` (por defecto 1); con `null` la quita.
+   * Con la misma arma solo vuelve a teñir si cambió el tier (`gripScale` se fija al colgarla).
+   */
+  setWeapon(weaponId: WeaponId | null, opts: { tier?: WeaponTier; gripScale?: number } = {}): void {
+    const tier = opts.tier ?? 1;
+    if (this.weapon && this.weapon.id === weaponId) {
+      if (this.weapon.tier !== tier) {
+        applyTierGlow(this.weapon.grip, tier);
+        this.weapon.tier = tier;
+      }
+      return;
+    }
+    if (!this.weapon && weaponId === null) return;
+    this.weapon?.grip.dispose(); // sin materiales: son del contenedor o clones por tier, compartidos
     this.weapon = undefined;
     if (weaponId === null) return;
     const hand = this.nodes.get("righthand");
@@ -129,7 +142,7 @@ export class CharacterView {
     // El agarre está en metros: se compensa la escala de mundo del esqueleto (constante; los huesos
     // de Mixamo no se escalan al animar).
     const s = worldScale(hand);
-    const k = s > 1e-9 ? 1 / s : 1;
+    const k = (s > 1e-9 ? 1 / s : 1) * (opts.gripScale ?? 1);
     node.position.set(grip.position[0] * k, grip.position[1] * k, grip.position[2] * k);
     node.rotation.set(grip.rotation[0], grip.rotation[1], grip.rotation[2]);
     node.scaling.setAll(grip.scale * k);
@@ -142,7 +155,8 @@ export class CharacterView {
       for (const child of wroot.getChildren()) child.parent = node;
       wroot.dispose();
     }
-    this.weapon = { id: weaponId, grip: node };
+    if (tier !== 1) applyTierGlow(node, tier);
+    this.weapon = { id: weaponId, tier, grip: node };
   }
 
   /** Cambia de clip con un cruce; si `choice.clip` ya suena solo ajusta la velocidad (salvo `restart`). */

@@ -33,6 +33,8 @@ export interface EnemyAnimInput {
   ai: string;
   speed: number;
   hurtRecently: boolean;
+  /** arma en la mano (`null` si va desarmado): armado, ataca con el primer golpe de su arma */
+  weaponId: WeaponId | null;
 }
 
 const MOVING_SPEED = 0.2; // m/s
@@ -100,12 +102,18 @@ export function heroBodyYaw(a: HeroAnimInput): number {
   return running && a.speed > MOVING_SPEED ? moveSector(a.moveAngle).yaw : 0;
 }
 
-/** Clips de `ENEMY_LOOKS`. Reglas por prioridad: muerte, telegrafía, golpe recibido, correr, quieto. */
+/**
+ * Clips de `ENEMY_LOOKS`. Reglas por prioridad: muerte, telegrafía, golpe recibido, correr, quieto. Si va
+ * armado, la telegrafía usa el primer golpe de su arma; el resto de los clips no cambia.
+ */
 export function chooseEnemyAnim(e: EnemyAnimInput, clipLengths?: ClipLengths): AnimChoice {
   const look = ENEMY_LOOKS[e.kind];
   const { clips } = look;
   if (e.ai === "dead") return once(clips.death);
-  if (e.ai === "telegraph") return once(clips.attack, fitTo(clips.attack, ENEMY_DEFS[e.kind].telegraphS, clipLengths));
+  if (e.ai === "telegraph") {
+    const attack = e.weaponId ? strikeOf(e.weaponId, 1).clip : clips.attack;
+    return once(attack, fitTo(attack, ENEMY_DEFS[e.kind].telegraphS, clipLengths));
+  }
   if (e.hurtRecently) return once(clips.hit);
   if (e.speed > MOVING_SPEED) return looped(clips.run, look.runSpeed ?? 1);
   return looped(clips.idle);

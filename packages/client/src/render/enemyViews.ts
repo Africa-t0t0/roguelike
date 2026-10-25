@@ -6,7 +6,7 @@ import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ENEMY_DEFS, type EnemyKind } from "@roguelike/shared";
+import { ENEMY_DEFS, enemyAttack, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import type { EnemySnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import type { AnimLibrary } from "./animLibrary";
@@ -48,6 +48,8 @@ function flatMaterial(scene: Scene, name: string, color: Color3, alpha = 1): Sta
 
 interface EnemyView {
   kind: EnemyKind;
+  /** el arma no cambia en la vida del enemigo; si cambiara, la vista se rehace */
+  weaponId: WeaponId | null;
   buffer: SnapshotBuffer<EnemySnapshot>;
   character: CharacterView;
   speed: SpeedMeter;
@@ -59,7 +61,7 @@ interface EnemyView {
   goneAtMs?: number;
 }
 
-/** Enemigos de Mixamo interpolados, con barra de vida y aro de telegrafía. */
+/** Enemigos de Mixamo interpolados, con su arma (si la llevan), barra de vida y aro de telegrafía. */
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
   private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill", StandardMaterial>;
@@ -82,9 +84,9 @@ export class EnemyViews {
   push(world: WorldSnapshot, receivedAtMs: number): void {
     for (const [id, e] of world.enemies) {
       let view = this.views.get(id);
-      if (!view || view.kind !== e.kind) {
+      if (!view || view.kind !== e.kind || view.weaponId !== e.weaponId) {
         view?.character.dispose();
-        view = this.create(id, e.kind);
+        view = this.create(id, e);
         this.views.set(id, view);
       }
       view.goneAtMs = undefined;
@@ -112,9 +114,10 @@ export class EnemyViews {
       const e = view.buffer.sample(renderAtMs);
       if (!e) continue;
       view.character.setPose(e.x, 0, e.z, e.facing);
+      view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, gripScale: ENEMY_LOOKS[e.kind].gripScale });
       view.character.play(
         chooseEnemyAnim(
-          { kind: e.kind, ai: e.ai, speed: view.speed.sample(e.x, e.z, dtS), hurtRecently: hurt(id) },
+          { kind: e.kind, ai: e.ai, speed: view.speed.sample(e.x, e.z, dtS), hurtRecently: hurt(id), weaponId: e.weaponId },
           this.clipLengths,
         ),
       );
@@ -137,7 +140,8 @@ export class EnemyViews {
     for (const m of Object.values(this.mats)) m.dispose();
   }
 
-  private create(id: string, kind: EnemyKind): EnemyView {
+  private create(id: string, e: EnemySnapshot): EnemyView {
+    const { kind, weaponId } = e;
     const scene = this.scene;
     const look = ENEMY_LOOKS[kind];
     const character = new CharacterView(scene, this.assets, this.anims, look);
@@ -156,9 +160,11 @@ export class EnemyViews {
     barFill.position.z = -0.01; // delante del fondo
     bar.setEnabled(false);
 
-    // Aro de telegrafía en el suelo: borde fijo y disco que crece hasta llenarlo.
+    // Aro de telegrafía en el suelo: borde fijo y disco que crece hasta llenarlo. Armado, el alcance
+    // es el de su arma.
     const def = ENEMY_DEFS[kind];
-    const radius = Math.max(RING_MIN_RADIUS, def.radius + def.attackRange);
+    const { attackRange } = enemyAttack(kind, weaponId ? { weaponId, tier: e.weaponTier ?? 1 } : null);
+    const radius = Math.max(RING_MIN_RADIUS, def.radius + attackRange);
     const ring = new TransformNode(`telegraph-${id}`, scene);
     ring.parent = character.root;
     ring.position.y = RING_Y;
@@ -174,6 +180,7 @@ export class EnemyViews {
 
     return {
       kind,
+      weaponId,
       buffer: new SnapshotBuffer(lerpEnemy),
       character,
       speed: new SpeedMeter(),

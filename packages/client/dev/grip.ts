@@ -1,5 +1,6 @@
 // Página de desarrollo (no entra al build): ajustar a ojo el agarre de cada arma en la mano del
-// Kingslayer y revisar los clips. `npm run dev` → http://localhost:5173/dev/grip.html
+// Kingslayer (y su `gripScale` en brute y minion) y revisar los clips y el brillo por tier.
+// `npm run dev` → http://localhost:5173/dev/grip.html
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
@@ -7,7 +8,7 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
-import { MOVESETS, WEAPONS, type WeaponId } from "@roguelike/shared";
+import { MOVESETS, WEAPONS, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import { AnimLibrary } from "../src/render/animLibrary";
 import { loadAssets, type AssetId } from "../src/render/assets";
 import { CharacterView } from "../src/render/characterView";
@@ -36,7 +37,7 @@ camera.attachControl(canvas, true);
 camera.wheelPrecision = 60;
 camera.minZ = 0.01;
 
-const characters: Record<string, { asset: AssetId; height: number }> = {
+const characters: Record<string, { asset: AssetId; height: number; gripScale?: number }> = {
   kingslayer: PLAYER_LOOK,
   brute: ENEMY_LOOKS.brute,
   minion: ENEMY_LOOKS.minion,
@@ -56,6 +57,8 @@ await anims.load(allClipIds());
 
 const characterSel = $<HTMLSelectElement>("character");
 const weaponSel = $<HTMLSelectElement>("weapon");
+const tierSel = $<HTMLSelectElement>("tier");
+const gripScaleField = $<HTMLInputElement>("gs");
 const clipSel = $<HTMLSelectElement>("clip");
 const frac = $<HTMLInputElement>("frac");
 const playing = $<HTMLInputElement>("playing");
@@ -87,6 +90,7 @@ function fillClips(): void {
 }
 
 function fillFields(): void {
+  gripScaleField.value = String(characters[characterSel.value]!.gripScale ?? 1);
   const w = weaponSel.value as WeaponId | "";
   const disabled = !w;
   for (const f of fields) f.disabled = disabled;
@@ -122,6 +126,7 @@ function writeOut(): void {
   out.value =
     `"${w}": { asset: "${WEAPON_LOOKS[w].asset}", grip: { position: [${g.position.map((v) => round(v, 3)).join(", ")}], ` +
     `rotation: [${r.join(", ")}], scale: ${round(g.scale, 4)} } },` +
+    `\n// ${characterSel.value}: gripScale: ${round(characters[characterSel.value]!.gripScale ?? 1, 3)}` +
     (Number.isFinite(lo) ? `\n// alto vertical del arma en el mundo: ${round(hi - lo, 3)} m` : "");
 }
 
@@ -142,7 +147,8 @@ function applyWeapon(): void {
   if (!view) return;
   view.setWeapon(null);
   const w = weaponSel.value as WeaponId | "";
-  if (w) view.setWeapon(w);
+  const gripScale = characters[characterSel.value]!.gripScale;
+  if (w) view.setWeapon(w, { tier: Number(tierSel.value) as WeaponTier, gripScale });
   writeOut();
 }
 
@@ -197,6 +203,7 @@ function applyCamera(): void {
 
 characterSel.onchange = () => {
   fillClips();
+  fillFields();
   buildView();
   applyCamera();
 };
@@ -205,6 +212,12 @@ weaponSel.onchange = () => {
   fillFields();
   applyWeapon();
   applyClip();
+};
+tierSel.onchange = applyWeapon;
+// Toca el look del personaje solo en esta página: el valor a copiar sale en el cuadro de abajo.
+gripScaleField.oninput = () => {
+  characters[characterSel.value]!.gripScale = Number(gripScaleField.value) || 1;
+  applyWeapon();
 };
 clipSel.onchange = applyClip;
 frac.oninput = () => {
@@ -237,11 +250,21 @@ window.addEventListener("resize", () => engine.resize());
 (window as unknown as { grip: unknown }).grip = {
   scene,
   ready: true,
-  set(opts: { character?: string; weapon?: string; clip?: string; frac?: number; cam?: string; grip?: unknown; alpha?: number; beta?: number; radius?: number }) {
+  set(opts: { character?: string; weapon?: string; tier?: number; gripScale?: number; clip?: string; frac?: number; cam?: string; grip?: unknown; alpha?: number; beta?: number; radius?: number }) {
     if (opts.character && opts.character !== characterSel.value) {
       characterSel.value = opts.character;
       fillClips();
+      fillFields();
       buildView();
+    }
+    if (opts.gripScale !== undefined) {
+      gripScaleField.value = String(opts.gripScale);
+      characters[characterSel.value]!.gripScale = opts.gripScale;
+      applyWeapon();
+    }
+    if (opts.tier !== undefined) {
+      tierSel.value = String(opts.tier);
+      applyWeapon();
     }
     if (opts.weapon !== undefined && opts.weapon !== weaponSel.value) {
       weaponSel.value = opts.weapon;

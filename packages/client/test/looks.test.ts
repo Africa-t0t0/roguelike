@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MOVESETS, WEAPONS, type EnemyKind } from "@roguelike/shared";
+import { ARMED_CHANCE, MOVESETS, WEAPONS, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { chooseEnemyAnim } from "../src/render/animState";
 import { allClipIds, ENEMY_LOOKS, PLAYER_LOOK, WEAPON_LOOKS } from "../src/render/looks";
+
+/** Nombres de los clips en `public/assets/mixamo/anims/` (solo las rutas: nada se carga). */
+const ANIM_FILES = Object.keys(import.meta.glob("../public/assets/mixamo/anims/*.glb")).map((f) =>
+  f.slice(f.lastIndexOf("/") + 1, -".glb".length),
+);
 
 describe("looks", () => {
   it("allClipIds trae cada clip de MOVESETS y ENEMY_LOOKS, sin repetidos", () => {
@@ -34,5 +40,30 @@ describe("looks", () => {
       const c = look.clips;
       expect([c.idle, c.run, c.attack, c.hit, c.death]).toEqual(clips);
     }
+  });
+
+  it("todo clip que puede elegir chooseEnemyAnim, armado o no, está en allClipIds y en public/", () => {
+    const ids = allClipIds();
+    const ais = ["idle", "chase", "telegraph", "recover", "dead"];
+    for (const kind of Object.keys(ENEMY_LOOKS) as EnemyKind[]) {
+      const weapons: (WeaponId | null)[] = [null];
+      const armed = ARMED_CHANCE[kind];
+      if (armed) weapons.push(armed.weaponId);
+      for (const weaponId of weapons) {
+        for (const ai of ais) {
+          for (const speed of [0, 3]) {
+            for (const hurtRecently of [false, true]) {
+              const { clip } = chooseEnemyAnim({ kind, ai, speed, hurtRecently, weaponId });
+              expect(ids).toContain(clip);
+              expect(ANIM_FILES).toContain(clip);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it("brute y minion tienen gripScale (> 0) para su arma; el mago no la necesita", () => {
+    for (const kind of ["brute", "minion"] as const) expect(ENEMY_LOOKS[kind].gripScale).toBeGreaterThan(0);
   });
 });

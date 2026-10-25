@@ -38,18 +38,23 @@ describe("brillo por tier", () => {
     const w2 = weapon(scene, blade, hilt);
     applyTierGlow(w1.root, 2);
     applyTierGlow(w2.root, 2);
-    const [r, g, b] = TIERS[2].glow!;
+    // El brillo es el color del tier a media intensidad: la hoja conserva su sombreado.
+    const [r, g, b] = TIERS[2].glow!.map((c) => c * 0.5);
     const tinted = w1.a.material as PBRMaterial;
     expect(tinted).not.toBe(blade);
-    expect(tinted.emissiveColor.asArray()).toEqual([r, g, b]);
-    expect((w1.b.material as StandardMaterial).emissiveColor.asArray()).toEqual([r, g, b]);
+    expect(tinted.emissiveColor.r).toBeCloseTo(r!);
+    expect(tinted.emissiveColor.g).toBeCloseTo(g!);
+    expect(tinted.emissiveColor.b).toBeCloseTo(b!);
+    expect((w1.b.material as StandardMaterial).emissiveColor.equalsWithEpsilon(tinted.emissiveColor)).toBe(true);
     expect(blade.emissiveColor.asArray()).toEqual([0, 0, 0]);
     expect(w2.a.material).toBe(tinted);
     expect(w2.b.material).toBe(w1.b.material);
 
     // Volver a teñir parte del original: tier 3 y de vuelta a 1.
     applyTierGlow(w1.root, 3);
-    expect((w1.a.material as PBRMaterial).emissiveColor.asArray()).toEqual([...TIERS[3].glow!]);
+    expect((w1.a.material as PBRMaterial).emissiveColor.asArray().map((c) => Math.round(c * 1000) / 1000)).toEqual(
+      TIERS[3].glow!.map((c) => Math.round(c * 500) / 1000),
+    );
     applyTierGlow(w1.root, 2);
     expect(w1.a.material).toBe(tinted);
     applyTierGlow(w1.root, 1);

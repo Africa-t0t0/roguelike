@@ -30,6 +30,7 @@ const enemy = (over: Partial<EnemyAnimInput> = {}): EnemyAnimInput => ({
   ai: "chase",
   speed: 0,
   hurtRecently: false,
+  weaponId: null,
   ...over,
 });
 
@@ -225,6 +226,36 @@ describe("chooseEnemyAnim", () => {
 
   it("recover sin moverse → idle", () => {
     expect(chooseEnemyAnim(enemy({ ai: "recover", speed: 0 })).clip).toBe(ENEMY_LOOKS.brute.clips.idle);
+  });
+
+  it("bruto armado con mandoble: la telegrafía usa gs_slash ajustado a 0,6 s; desarmado, cr_swiping", () => {
+    const lengths = new Map([
+      ["gs_slash", 1.5],
+      ["cr_swiping", 1.2],
+    ]);
+    const armed = chooseEnemyAnim(enemy({ kind: "brute", ai: "telegraph", weaponId: "great-sword" }), lengths);
+    expect(armed.clip).toBe("gs_slash");
+    expect(armed.loop).toBe(false);
+    expect(armed.speed).toBeCloseTo(1.5 / 0.6);
+    // sin el largo del clip, velocidad 1
+    expect(chooseEnemyAnim(enemy({ kind: "brute", ai: "telegraph", weaponId: "great-sword" })).speed).toBe(1);
+    const bare = chooseEnemyAnim(enemy({ kind: "brute", ai: "telegraph", weaponId: null }), lengths);
+    expect(bare.clip).toBe("cr_swiping");
+    expect(bare.speed).toBeCloseTo(1.2 / 0.6);
+  });
+
+  it("esbirro armado con espada de guardia: la telegrafía usa ss_slash", () => {
+    const c = chooseEnemyAnim(enemy({ kind: "minion", ai: "telegraph", weaponId: "guard-sword" }), new Map([["ss_slash", 0.8]]));
+    expect(c.clip).toBe("ss_slash");
+    expect(c.speed).toBeCloseTo(0.8 / ENEMY_DEFS.minion.telegraphS);
+  });
+
+  it("armado, el resto de los clips no cambia", () => {
+    const w = { weaponId: "great-sword" as const };
+    expect(chooseEnemyAnim(enemy({ ...w, ai: "idle" })).clip).toBe(ENEMY_LOOKS.brute.clips.idle);
+    expect(chooseEnemyAnim(enemy({ ...w, speed: 3 })).clip).toBe(ENEMY_LOOKS.brute.clips.run);
+    expect(chooseEnemyAnim(enemy({ ...w, hurtRecently: true })).clip).toBe(ENEMY_LOOKS.brute.clips.hit);
+    expect(chooseEnemyAnim(enemy({ ...w, ai: "dead" })).clip).toBe(ENEMY_LOOKS.brute.clips.death);
   });
 });
 

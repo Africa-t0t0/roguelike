@@ -9,6 +9,9 @@ type Emissive = Material & { emissiveColor: Color3 };
 
 const hasEmissive = (m: Material): m is Emissive => (m as { emissiveColor?: unknown }).emissiveColor instanceof Color3;
 
+/** El color del tier se aplica a media intensidad: la hoja brilla sin perder su sombreado. */
+const GLOW_STRENGTH = 0.5;
+
 /** Original → clones teñidos por tier; y de cada clon, su original (para volver a teñir o quitar el tinte). */
 const clones = new WeakMap<Material, Map<WeaponTier, Material>>();
 const sourceOf = new WeakMap<Material, Material>();
@@ -26,7 +29,7 @@ function tinted(source: Material, tier: WeaponTier): Material {
       clone = multi;
     } else {
       clone = source.clone(`${source.name}-tier${tier}`) ?? source;
-      if (clone !== source && hasEmissive(clone)) clone.emissiveColor = new Color3(glow[0], glow[1], glow[2]);
+      if (clone !== source && hasEmissive(clone)) clone.emissiveColor = new Color3(glow[0], glow[1], glow[2]).scale(GLOW_STRENGTH);
     }
     byTier.set(tier, clone);
     if (clone !== source) sourceOf.set(clone, source);
@@ -35,7 +38,8 @@ function tinted(source: Material, tier: WeaponTier): Material {
 }
 
 /**
- * Tiñe el color emisivo de las mallas bajo `root` con `TIERS[tier].glow` (sin luces: solo material). Cada
+ * Tiñe el color emisivo de las mallas bajo `root` con `TIERS[tier].glow` a media intensidad (sin luces:
+ * solo material). Cada
  * material se clona como mucho una vez por (material, tier) y se reutiliza; tier 1 deja el material original.
  * Se puede volver a llamar sobre el mismo nodo con otro tier. Los clones viven lo que la escena.
  */

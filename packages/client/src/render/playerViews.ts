@@ -5,7 +5,7 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { MOVESETS, WEAPONS, strikeOf, type WeaponId } from "@roguelike/shared";
+import { MOVESETS, WEAPONS, strikeOf, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
@@ -24,6 +24,7 @@ export interface HeroState {
   swingTimer: number;
   dead: boolean;
   weaponId: WeaponId;
+  weaponTier: WeaponTier;
 }
 
 interface PlayerView {
@@ -101,7 +102,7 @@ export class PlayerViews {
     const view = this.views.get(key);
     if (!view) return;
     view.character.setPose(pose.x, pose.y, pose.z, pose.facing);
-    view.character.setWeapon(state.weaponId);
+    view.character.setWeapon(state.weaponId, { tier: state.weaponTier });
     let { comboStep, swingTimer } = state;
     let attackClip: string | undefined;
     const s = view.swing;

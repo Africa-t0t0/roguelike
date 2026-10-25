@@ -236,6 +236,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         ...swing,
         dead: mine?.dead ?? false,
         weaponId: mine?.weaponId ?? STARTING_WEAPON,
+        weaponTier: mine?.weaponTier ?? 1,
       };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.

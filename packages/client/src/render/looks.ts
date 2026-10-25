@@ -35,6 +35,12 @@ export interface EnemyLook {
   clips: { idle: string; run: string; attack: string; hit: string; death: string };
   /** velocidad de reproducción del clip de correr */
   runSpeed?: number;
+  /**
+   * Multiplica `grip.scale` y `grip.position` de `WEAPON_LOOKS` cuando lleva arma (por defecto 1): el
+   * agarre está ajustado a la mano del Kingslayer de 1,8 m. Ajustado a ojo con `dev/grip.html`: el
+   * mandoble del bruto queda de ~1,8 m de hoja y la espada del esbirro, de ~0,85 m.
+   */
+  gripScale?: number;
 }
 
 export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
@@ -42,12 +48,14 @@ export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
     asset: "brute",
     height: 2.4,
     clips: { idle: "cr_idle", run: "cr_run", attack: "cr_swiping", hit: "gs_impact", death: "cr_dying" },
+    gripScale: 1.2,
   },
   minion: {
     asset: "minion",
     height: 1.7,
     clips: { idle: "cr_idle_2", run: "cr_run", attack: "cr_punch", hit: "gs_impact_4", death: "cr_dying" },
     runSpeed: 1.3,
+    gripScale: 0.94,
   },
   mage: {
     asset: "mage",
