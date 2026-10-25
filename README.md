@@ -103,7 +103,7 @@ fly scale count 1
 
 ## Assets
 
-Los modelos KayKit (CC0) viven en `packages/client/public/assets/kaykit/`; `node scripts/fetch-kaykit.mjs` los vuelve a descargar desde commits fijos. Ver `CREDITS.md`.
+Las piezas de mazmorra KayKit (CC0) viven en `packages/client/public/assets/kaykit/dungeon/`; `node scripts/fetch-kaykit.mjs` las vuelve a descargar desde commits fijos. Ver `CREDITS.md`.
 
 Los personajes de Mixamo, sus animaciones y las armas viven en `packages/client/public/assets/mixamo/`
 (`characters/`, `anims/<clipId>.glb`, `weapons/` y un `manifest.json` con ids → archivos). Para regenerarlos:

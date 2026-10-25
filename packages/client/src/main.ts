@@ -184,7 +184,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     } else if (event.type === "damage") {
       const t = damageTiming(event, conn.myKey, now);
       hits.hit(`${event.targetKind}:${event.targetId}`, t.hitAt);
-      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt);
+      const height = event.targetKind === "enemy" ? enemies.heightOf(event.targetId) : undefined;
+      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt, height);
       if (t.hurtMe) hurtFlash.flash();
     } else if (event.type === "levelUp") {
       hud.levelUp(event.level);

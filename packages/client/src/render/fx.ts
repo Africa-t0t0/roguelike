@@ -1,11 +1,11 @@
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { CHARACTER_HEIGHT } from "./legacyCharacterView";
+import { PLAYER_LOOK } from "./looks";
 
 const NUMBER_LIFE_MS = 800;
 const NUMBER_RISE_M = 0.8;
-/** m: sobre la barra de vida del enemigo, o sobre el nombre del jugador. */
-const NUMBER_START_Y = { enemy: CHARACTER_HEIGHT + 0.4, player: CHARACTER_HEIGHT + 0.75 } as const;
+/** m sobre la cabeza: encima de la barra de vida del enemigo, o del nombre del jugador. */
+const NUMBER_ABOVE_HEAD = { enemy: 0.4, player: 0.75 } as const;
 
 interface FloatingNumber {
   el: HTMLDivElement;
@@ -33,14 +33,24 @@ export class DamageNumbers {
     parent.append(this.layer);
   }
 
-  /** `startMs`: desde cuándo se ve (mismo reloj que `render`), para que coincida con lo que se dibuja. */
-  spawn(amount: number, x: number, z: number, target: "enemy" | "player", startMs: number): void {
+  /**
+   * `startMs`: desde cuándo se ve (mismo reloj que `render`), para que coincida con lo que se dibuja.
+   * `headHeight`: alto del blanco en m (por defecto, el del jugador).
+   */
+  spawn(
+    amount: number,
+    x: number,
+    z: number,
+    target: "enemy" | "player",
+    startMs: number,
+    headHeight = PLAYER_LOOK.height,
+  ): void {
     const el = document.createElement("div");
     el.className = `fx-number fx-${target}`;
     el.textContent = String(Math.round(amount));
     el.hidden = true;
     this.layer.append(el);
-    this.items.push({ el, x, z, y: NUMBER_START_Y[target], startMs });
+    this.items.push({ el, x, z, y: headHeight + NUMBER_ABOVE_HEAD[target], startMs });
   }
 
   render(nowMs: number): void {

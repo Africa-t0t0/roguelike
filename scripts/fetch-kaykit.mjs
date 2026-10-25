@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Descarga los assets KayKit (CC0) desde commits fijos a packages/client/public/assets/kaykit/.
+// Descarga las piezas de mazmorra KayKit (CC0) desde un commit fijo a packages/client/public/assets/kaykit/.
 // Uso: node scripts/fetch-kaykit.mjs   (Node >= 24, sin dependencias)
 // Los archivos descargados son solo datos: se escriben a disco y se parsea su JSON, nada se ejecuta.
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -7,23 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ORG = 'KayKit-Game-Assets';
-const ADV = { repo: 'KayKit-Character-Pack-Adventures-1.0', sha: '672074b73ba276876a19e8816ecdc5241817ab47', base: 'addons/kaykit_character_pack_adventures' };
-const SKE = { repo: 'KayKit-Character-Pack-Skeletons-1.0', sha: '15b62b9bad122f72926c10fb14d622c73819fa54', base: 'addons/kaykit_character_pack_skeletons' };
 const DUN = { repo: 'KayKit-Dungeon-Remastered-1.0', sha: 'b0ca9bd96a8072ab36a3a5464f00ed1e06a16d07', base: 'addons/kaykit_dungeon_remastered' };
 
 const OUT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../packages/client/public/assets/kaykit');
 
-/** @type {{src: typeof ADV, from: string, to: string}[]} */
+/** @type {{src: typeof DUN, from: string, to: string}[]} */
 const files = [];
 const add = (src, from, to) => files.push({ src, from: `${src.base}/${from}`, to });
 
-add(ADV, 'Characters/gltf/Knight.glb', 'characters/Knight.glb');
-for (const n of ['Warrior', 'Minion', 'Mage']) add(SKE, `Characters/gltf/Skeleton_${n}.glb`, `skeletons/Skeleton_${n}.glb`);
-for (const n of ['Axe', 'Blade', 'Staff']) {
-  add(SKE, `Assets/gltf/Skeleton_${n}.gltf`, `skeletons/weapons/Skeleton_${n}.gltf`);
-  add(SKE, `Assets/gltf/Skeleton_${n}.bin`, `skeletons/weapons/Skeleton_${n}.bin`);
-}
-add(SKE, 'Assets/gltf/skeleton_texture.png', 'skeletons/weapons/skeleton_texture.png');
 for (const n of ['wall', 'floor_tile_large', 'pillar']) add(DUN, `Assets/gltf/${n}.gltf.glb`, `dungeon/${n}.glb`);
 
 const rawUrl = (f) => `https://raw.githubusercontent.com/${ORG}/${f.src.repo}/${f.src.sha}/${f.from}`;

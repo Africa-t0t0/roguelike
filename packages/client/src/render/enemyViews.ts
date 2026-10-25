@@ -94,6 +94,12 @@ export class EnemyViews {
     }
   }
 
+  /** Alto (m) del enemigo `id`, si existe su vista. */
+  heightOf(id: string): number | undefined {
+    const view = this.views.get(id);
+    return view ? ENEMY_LOOKS[view.kind].height : undefined;
+  }
+
   /** `renderAtMs`: instante interpolado (ahora − INTERP_DELAY_MS). */
   render(renderAtMs: number, dtS: number, hurt: (id: string) => boolean): void {
     for (const [id, view] of this.views) {
