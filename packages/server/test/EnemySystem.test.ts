@@ -9,6 +9,7 @@ import {
   circlesOverlap,
   createRng,
   generateDungeon,
+  hasLineOfSight,
   isWalkableTile,
   type Dungeon,
   type EnemyKind,
@@ -161,16 +162,25 @@ describe("mago", () => {
     expect(sys.projectiles).toHaveLength(0);
   });
 
+  it("arrinconado contra un muro con el jugador encima, no puede retroceder y dispara", () => {
+    const { sys, e } = setup("mage", 16.6, 30);
+    const pl = [P("a", 19.6, 30)];
+    const hits = run(sys, pl, 60);
+    expect(hits).toEqual([{ targetKey: "a", damage: 10, sourceId: e.id }]);
+  });
+
   it("un proyectil contra un muro desaparece sin golpear", () => {
     const d = arena();
     d.tiles[15 * d.width + 11] = 0; // pilar en x 22..24, z 30..32
     const { sys, e } = setup("mage", 28, 31, d);
-    const pl = [P("a", 18.5, 31)];
+    // Empieza a telegrafiar viendo al jugador; durante la telegrafía este se esconde tras el pilar.
+    const pl = [P("a", 20, 26)];
     let sawProjectile = false;
     const hits: EnemyHit[] = [];
     for (let i = 0; i < 60; i++) {
       hits.push(...sys.step(pl, SIM_DT));
       if (sys.projectiles.length > 0) sawProjectile = true;
+      if (e.ai === "telegraph") Object.assign(pl[0]!, { x: 18.5, z: 31 });
       if (i === 0) e.cooldown = 99; // un solo disparo
     }
     expect(sawProjectile).toBe(true);
@@ -381,6 +391,26 @@ describe("navegación", () => {
       expect(reached).toBe(true);
     });
   }
+
+  it("un mago de oleada rodea la L y solo telegrafía con línea de vista, hasta acertar al jugador", () => {
+    const d = lDungeon();
+    const sys = new EnemySystem(d, createRng(1));
+    // Bajando por el pasillo vertical entra en su banda de 6-10 m con el muro de por medio.
+    const [e] = sys.spawnWave([center(2, 3)], ["mage"]);
+    const pl = [P("a", center(12, 13).x, center(12, 13).z)];
+    const shotR = ENEMY_DEFS.mage.ranged!.projectileRadius;
+    let hit = false;
+    for (let i = 0; i < 30 / SIM_DT && !hit; i++) {
+      const before = e!.ai;
+      hit = sys.step(pl, SIM_DT).some((h) => h.targetKey === "a" && h.sourceId === e!.id);
+      expect(isWalkableTile(d, Math.floor(e!.x / TILE_SIZE), Math.floor(e!.z / TILE_SIZE))).toBe(true);
+      // Al entrar en telegrafía debe ver al jugador (con el radio del proyectil).
+      if (before !== "telegraph" && e!.ai === "telegraph") {
+        expect(hasLineOfSight(d, e!.x, e!.z, pl[0]!.x, pl[0]!.z, shotR)).toBe(true);
+      }
+    }
+    expect(hit).toBe(true);
+  });
 
   it("con dos jugadores ataca al más cercano por recorrido aunque el otro esté más cerca en línea recta", () => {
     const d = lDungeon();

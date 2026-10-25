@@ -285,16 +285,31 @@ export class EnemySystem {
 
     // chase
     if (def.ranged) {
-      if (d >= def.ranged.preferredMin && d <= def.ranged.preferredMax) {
+      // Solo se planta o retrocede si el proyectil pasaría; tras un muro sigue acercándose con la navegación.
+      const r = def.ranged.projectileRadius;
+      const los = hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r);
+      if (los && d >= def.ranged.preferredMin && d <= def.ranged.preferredMax) {
         if (e.cooldown <= 0) this.setAi(e, "telegraph");
         return;
       }
-      // retrocede en línea recta, como siempre; para acercarse usa la navegación
-      if (d < def.ranged.preferredMin) {
-        if (d > 0) this.moveEnemy(e, -dx / d, -dz / d, def.speed * dt, def.radius);
-      } else {
+      if (!los) {
         this.chaseMove(e, target, d, def.speed * dt, def.radius);
+        return;
       }
+      if (d < def.ranged.preferredMin) {
+        // Retrocede en línea recta; si un muro no lo deja o al retroceder perdería la vista, dispara desde ahí
+        // (si no, quedaba yendo y viniendo contra la esquina o arrinconado sin disparar nunca).
+        const [px, pz] = [e.x, e.z];
+        if (d > 0) this.moveEnemy(e, -dx / d, -dz / d, def.speed * dt, def.radius);
+        const moved = Math.hypot(e.x - px, e.z - pz) > 1e-3;
+        if (!moved || !hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r)) {
+          e.x = px;
+          e.z = pz;
+          if (e.cooldown <= 0) this.setAi(e, "telegraph");
+        }
+        return;
+      }
+      this.chaseMove(e, target, d, def.speed * dt, def.radius);
       return;
     }
     if (d - PLAYER_RADIUS <= atk.attackRange && e.cooldown <= 0) {
