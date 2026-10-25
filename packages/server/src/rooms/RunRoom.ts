@@ -31,7 +31,8 @@ import {
   type PlayerInput,
   type WeaponId,
 } from "@roguelike/shared";
-import { CombatSystem, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
+import { AbilitySystem } from "../sim/AbilitySystem";
+import { CombatSystem, moveSpeedMult, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
 import { LevelUpSystem, type ChoiceEvent } from "../sim/LevelUpSystem";
 import { OrbSystem } from "../sim/OrbSystem";
@@ -80,6 +81,7 @@ export class RunRoom extends Room<{ state: RunState }> {
   private floorTime = 0;
   private readonly history = new PositionHistory();
   private readonly combat = new CombatSystem();
+  private abilities!: AbilitySystem;
 
   async onCreate(options: RunRoomCreateOptions = {}): Promise<void> {
     const rng = createRng(randomInt(2 ** 32));
@@ -95,6 +97,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
     this.orbs = new OrbSystem(createRng(seed ^ ORB_RNG_SALT));
     this.levelUp = new LevelUpSystem(createRng(seed ^ CARD_RNG_SALT));
+    this.abilities = new AbilitySystem(this.dungeon, this.combat);
     this.floorTime = floorTimeStart;
     this.state = new RunState({
       seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart, paused: false, pauseLeft: 0,
@@ -130,6 +133,9 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
 
     const { record } = result;
+    // El combate lee las habilidades (y sus rangos) del mismo arreglo que `progress`: applyCard lo cambia en
+    // su sitio, así que nunca se desincronizan.
+    record.combat.abilities = record.progress.abilities;
     // Quien entra a mitad de run elige las cartas de los niveles que ya subió el grupo.
     if (result.kind === "new") record.pendingChoices = this.combat.level - 1;
     let ps = this.state.players.get(record.key);
@@ -228,22 +234,30 @@ export class RunRoom extends Room<{ state: RunState }> {
       return;
     }
 
-    // 1. Inputs (y ataques) de cada jugador conectado.
+    // 1. Inputs (habilidades y ataques) de cada jugador conectado.
+    const party = connected.map((r) => r.combat);
     for (const record of connected) {
       for (const raw of record.inputQueue.splice(0, MAX_INPUTS_PER_TICK)) {
-        const input = record.combat.dead ? deadInput(raw, record.kinematic) : raw;
-        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT, {
-          speedMult: record.combat.mods.moveSpeedMult,
-        });
+        const c = record.combat;
+        const input = c.dead ? deadInput(raw, record.kinematic) : raw;
+        // Bloqueando (según el input anterior) se mueve a la mitad.
+        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT, { speedMult: moveSpeedMult(c) });
         record.lastSeq = input.seq;
         // Combo, impacto y golpes pendientes avanzan por input, antes de empezar el swing de ese input.
-        const res = this.combat.onInputProcessed(
-          record.combat, record.kinematic, input, this.state.tick, this.enemySystem, this.history,
-        );
-        if (res.impact) this.impact(record, res.impact);
+        const res = this.combat.onInputProcessed(c, record.kinematic, input, this.state.tick, this.enemySystem, this.history);
+        if (res.impact) {
+          this.impact(record.key, res.impact);
+          this.abilities.onComboImpact(c, record.kinematic, res.impact.step, record.key);
+        }
         if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
-        // Antes del ataque de este input: con un swing en curso no se cambia de arma.
-        if (input.interact && !record.combat.dead && record.combat.swingTimer === 0) this.tryPickup(record);
+        // Habilidades después del combo y antes del ataque (que no se puede durante su animación).
+        const ab = this.abilities.onInput(
+          c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party,
+        );
+        if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started });
+        this.impact(record.key, ab);
+        // Antes del ataque de este input: con un swing o una habilidad en curso no se cambia de arma.
+        if (input.interact && !c.dead && c.swingTimer === 0 && !c.abilityAnim) this.tryPickup(record);
         if (input.attack) {
           const swing = this.combat.attack(record.combat, input);
           if (swing.swung) this.emit({ type: "swing", key: record.key, step: swing.step });
@@ -265,6 +279,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (connected.length > 0) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
+    // Enfriamientos, Grito y ondas (por tick: se congelan en la pausa).
+    for (const r of this.abilities.step(states, this.enemySystem, SIM_DT)) this.impact(r.key, r);
     // Orbes: los atraen y recogen los vivos; la xp es del grupo y sube la vida máxima de todos los registros.
     // Si se sube de nivel, la pausa empieza al final de este tick.
     const levels = this.combat.grantXp(allStates, this.orbs.step(alive, SIM_DT));
@@ -273,7 +289,7 @@ export class RunRoom extends Room<{ state: RunState }> {
 
     // 5. Golpes vencidos, muertes y reapariciones (los desconectados quedan congelados).
     const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
-    const { damaged, respawned } = this.combat.step(states, this.state.tick, SIM_DT);
+    const { damaged, respawned } = this.combat.step(states, this.state.tick, SIM_DT, kin);
     for (const d of damaged) this.emitPlayerDamage(d.key, d.amount, kin.get(d.key)!);
     for (const key of respawned) {
       const r = connected.find((x) => x.key === key)!;
@@ -286,7 +302,10 @@ export class RunRoom extends Room<{ state: RunState }> {
     // 7. Schema.
     this.syncPlayers(connected);
     this.state.floorTime = this.floorTime;
-    syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat, this.orbs.orbs);
+    syncWorld(
+      this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat, this.orbs.orbs,
+      this.abilities.playerShots,
+    );
   }
 
   /**
@@ -312,10 +331,11 @@ export class RunRoom extends Room<{ state: RunState }> {
   }
 
   /**
-   * Daño contra enemigos, orbes y armas soltadas: llegan en el impacto del swing, no en el clic.
+   * Daño contra enemigos, orbes y armas soltadas: llegan en el impacto del swing o de una habilidad (no en el
+   * clic) o cuando una onda toca a un enemigo.
    * Matar no da xp: deja orbes que hay que recoger.
    */
-  private impact(record: PlayerRecord, res: ImpactResult): void {
+  private impact(key: string, res: Pick<ImpactResult, "hits" | "kills">): void {
     for (const h of res.hits) {
       this.emit({
         type: "damage",
@@ -324,7 +344,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         amount: h.amount,
         x: h.x,
         z: h.z,
-        sourceKey: record.key,
+        sourceKey: key,
       });
     }
     for (const k of res.kills) {

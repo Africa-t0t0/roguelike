@@ -339,7 +339,7 @@ describe("Foco 1: golpe cancelado", () => {
     const h = new PositionHistory();
     const states = new Map([["a", c]]);
     press(cs, c, sys, h, true);
-    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 0);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e", sourceX: 0, sourceZ: 0 }], 0);
     expect(cs.step(states, REWIND_MAX_TICKS, SIM_DT).died).toEqual(["a"]);
     expect(c.impactPending).toBe(false);
     for (let i = 0; i < 10; i++) expect(press(cs, c, sys, h, false).impact).toBeNull();
@@ -357,7 +357,7 @@ describe("Foco 1: golpe cancelado", () => {
     c.hp = 5;
     const h = new PositionHistory();
     press(cs, c, sys, h, true);
-    cs.queueEnemyHits(new Map([["a", c]]), [{ targetKey: "a", damage: 12, sourceId: "e" }], 50);
+    cs.queueEnemyHits(new Map([["a", c]]), [{ targetKey: "a", damage: 12, sourceId: "e", sourceX: 0, sourceZ: 0 }], 50);
     expect(press(cs, c, sys, h, false, { inp: { viewTick: 50 } }).r).toEqual({ damage: 12, died: true, impact: null });
     for (let i = 0; i < 10; i++) expect(press(cs, c, sys, h, false).impact).toBeNull();
     expect(e.hp).toBe(100);
@@ -448,7 +448,7 @@ describe("rebobinado al impacto", () => {
 
 describe("golpes de enemigos", () => {
   const H = 100;
-  const hit = (damage: number) => [{ targetKey: "a", damage, sourceId: "e1" }];
+  const hit = (damage: number) => [{ targetKey: "a", damage, sourceId: "e1", sourceX: 0, sourceZ: 0 }];
   function ctx(c: CombatState) {
     const states = new Map([["a", c]]);
     const cs = new CombatSystem();
@@ -493,7 +493,7 @@ describe("golpes de enemigos", () => {
     const c = newCombatState("warrior", 1);
     c.dead = true;
     const { states, cs } = ctx(c);
-    cs.queueEnemyHits(states, [...hit(6), { targetKey: "zzz", damage: 5, sourceId: "e1" }], H);
+    cs.queueEnemyHits(states, [...hit(6), { targetKey: "zzz", damage: 5, sourceId: "e1", sourceX: 0, sourceZ: 0 }], H);
     expect(c.pendingHits).toHaveLength(0);
   });
 });
@@ -504,7 +504,7 @@ describe("muerte y reaparición", () => {
     c.hp = 10;
     const states = new Map([["a", c]]);
     const cs = new CombatSystem();
-    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 0);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e", sourceX: 0, sourceZ: 0 }], 0);
     const r = cs.step(states, REWIND_MAX_TICKS, 0.2);
     expect(r.died).toEqual(["a"]);
     expect(c.dead).toBe(true);
@@ -521,9 +521,9 @@ describe("muerte y reaparición", () => {
     expect(c.hp).toBe(120);
     expect(c.invulnFor).toBe(1);
 
-    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e", sourceX: 0, sourceZ: 0 }], 100);
     expect(cs.onInputProcessed(c, kin(), input({ attack: false, interact: false, viewTick: 100 }), 100, noEnemies(), new PositionHistory()).damage).toBe(0);
-    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e", sourceX: 0, sourceZ: 0 }], 100);
     cs.step(states, 100 + REWIND_MAX_TICKS, 0.2);
     expect(c.hp).toBe(120);
     expect(c.pendingHits).toHaveLength(0);
@@ -608,7 +608,7 @@ describe("mejoras de stat", () => {
     c.mods = mods({ ironskin: 1 });
     const states = new Map([["a", c]]);
     const cs = new CombatSystem();
-    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 10, sourceId: "e" }], 100);
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 10, sourceId: "e", sourceX: 0, sourceZ: 0 }], 100);
     const r = cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 }), 101, noEnemies(), new PositionHistory());
     expect(r.damage).toBeCloseTo(9.2, 9);
     expect(c.hp).toBeCloseTo(120 - 9.2, 9);

@@ -444,7 +444,7 @@ describe("RunRoom: combate", () => {
   /** Mata a `key` con un golpe pendiente ya vencido; devuelve los eventos vistos por `client`. */
   async function killByHit(key: string, client: ClientRoom): Promise<CombatEvent[]> {
     const events = collect(client);
-    record(key).combat.pendingHits.push({ damage: 999, resolveTick: -REWIND_MAX_TICKS });
+    record(key).combat.pendingHits.push({ damage: 999, resolveTick: -REWIND_MAX_TICKS, sourceX: 0, sourceZ: 0 });
     await ticksUntil(() => player(key).dead, 5);
     return events;
   }
@@ -1088,6 +1088,54 @@ describe("RunRoom: efectos de las mejoras de stat", () => {
     await room.waitForNextTimestep();
     await room.waitForNextTimestep();
     expect(Math.hypot(orb.x - me.x, orb.z - me.z)).toBeLessThan(5);
+  });
+});
+
+describe("RunRoom: habilidades", () => {
+  const grant = (key: string, card: CardOffer) => {
+    applyCard(record(key).progress, card);
+    room["handleChoices"]([{ type: "applied", key, card }]);
+  };
+  const keyInput = (seq: number, abilities: number) => ({ ...attackInput(seq, 0, room.state.tick), attack: false, abilities });
+
+  it("la tecla 1 lanza la primera activa (la pasiva no ocupa casilla), avisa a todos y sincroniza las casillas", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const beto = await join("Beto", "t-beto");
+    await beto.welcome;
+    const seen = collect(beto.client);
+    grant("ana", { kind: "ability", id: "cleave", rank: 1 });
+    grant("ana", { kind: "ability", id: "whirlwind", rank: 1 });
+    grant("ana", { kind: "ability", id: "block", rank: 2 });
+
+    ana.client.send(MSG.input, keyInput(1, 1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 10);
+    expect(record("ana").combat.abilityCd.whirlwind).toBeGreaterThan(7.9);
+    await ticksUntil(() => seen.some((e) => e.type === "ability"), 10);
+    expect(seen.find((e) => e.type === "ability")).toEqual({ type: "ability", key: "ana", id: "whirlwind" });
+
+    await ticksUntil(() => beto.client.state.players.get("ana")?.abilities?.length === 2, 10);
+    const synced = beto.client.state.players.get("ana");
+    expect(synced.passiveRank).toBe(1);
+    expect(synced.abilities[0].id).toBe("whirlwind");
+    expect(synced.abilities[0].cooldown).toBeGreaterThan(7);
+    expect(synced.abilities[1]).toMatchObject({ id: "block", rank: 2, cooldown: 0 });
+  });
+
+  it("los enfriamientos y el Grito no avanzan en la pausa", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    grant("ana", { kind: "ability", id: "warcry", rank: 1 });
+    ana.client.send(MSG.input, keyInput(1, 1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 10);
+    const c = record("ana").combat;
+    expect(c.buffDamage).toBe(0.25);
+    room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => room.state.paused, 5);
+    const [cd, buff] = [c.abilityCd.warcry, c.buffLeft];
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect(c.abilityCd.warcry).toBe(cd);
+    expect(c.buffLeft).toBe(buff);
   });
 });
 

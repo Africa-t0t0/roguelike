@@ -89,13 +89,13 @@ describe("PlayerRegistry", () => {
     const r = new PlayerRegistry();
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
     if (!first.ok) throw new Error();
-    first.record.combat.pendingHits.push({ damage: 6, resolveTick: 100 });
+    first.record.combat.pendingHits.push({ damage: 6, resolveTick: 100, sourceX: 0, sourceZ: 0 });
     const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn);
     if (!taken.ok) throw new Error();
     expect(taken.kind).toBe("takeover");
     expect(taken.record.combat.pendingHits).toEqual([]);
 
-    taken.record.combat.pendingHits.push({ damage: 6, resolveTick: 200 });
+    taken.record.combat.pendingHits.push({ damage: 6, resolveTick: 200, sourceX: 0, sourceZ: 0 });
     r.leave("s2");
     const back = r.join({ name: "Jorge", token: "otro", sessionId: "s3" }, spawn);
     if (!back.ok) throw new Error();

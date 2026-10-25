@@ -39,6 +39,8 @@ export interface Enemy {
   cooldown: number;
   /** arma que lleva; null si va desarmado */
   loadout: EnemyLoadout | null;
+  /** segundos que le quedan aturdido (Patada): ni se mueve ni ataca */
+  stunned: number;
 }
 
 export interface Projectile {
@@ -78,11 +80,15 @@ export interface EnemyHit {
   targetKey: string;
   damage: number;
   sourceId: string;
+  /** posición de la fuente al golpear (el enemigo o su proyectil); el Bloqueo mira desde dónde llega */
+  sourceX: number;
+  sourceZ: number;
 }
 
 const MELEE_TOLERANCE = 0.3;
 const DEAD_LINGER_S = 2;
 const SEPARATION_EPS = 1e-4;
+const STUN_EPS = 1e-9;
 
 function tileOf(v: number): number {
   return Math.floor(v / TILE_SIZE);
@@ -140,7 +146,7 @@ export class EnemySystem {
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp: def.hp, maxHp: def.hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout: this.rollLoadout(kind),
+      loadout: this.rollLoadout(kind), stunned: 0,
     };
     this.list.push(e);
     return e;
@@ -225,6 +231,11 @@ export class EnemySystem {
       e.aiTime += dt;
       if (e.ai === "dead") continue;
       e.cooldown = Math.max(0, e.cooldown - dt);
+      if (e.stunned > 0) {
+        // Aturdido: el tiempo corre, pero ni se mueve ni ataca.
+        e.stunned = e.stunned - dt > STUN_EPS ? e.stunned - dt : 0;
+        continue;
+      }
       this.stepEnemy(e, alive, dt, hits);
     }
     this.list = this.list.filter((e) => !(e.ai === "dead" && e.aiTime >= DEAD_LINGER_S));
@@ -278,7 +289,7 @@ export class EnemySystem {
           radius: def.ranged.projectileRadius, damage: def.damage, life: def.ranged.lifetimeS, sourceId: e.id,
         });
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
-        hits.push({ targetKey: target.key, damage: atk.damage, sourceId: e.id });
+        hits.push({ targetKey: target.key, damage: atk.damage, sourceId: e.id, sourceX: e.x, sourceZ: e.z });
       }
       e.cooldown = def.cooldownS;
       this.setAi(e, "recover");
@@ -395,12 +406,31 @@ export class EnemySystem {
       if (!isWalkableTile(this.dungeon, tileOf(p.x), tileOf(p.z))) continue;
       const victim = alive.find((pl) => circlesOverlap(p, { x: pl.x, z: pl.z, radius: PLAYER_RADIUS }));
       if (victim) {
-        hits.push({ targetKey: victim.key, damage: p.damage, sourceId: p.sourceId });
+        hits.push({ targetKey: victim.key, damage: p.damage, sourceId: p.sourceId, sourceX: p.x, sourceZ: p.z });
         continue;
       }
       if (p.life > 0) keep.push(p);
     }
     this.shots = keep;
+  }
+
+  /**
+   * Aturde `s` segundos (se queda el mayor si ya lo estaba) y cancela su telegrafía. Los muertos y los
+   * `stunImmune` no se aturden.
+   */
+  stun(enemyId: string, s: number): void {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (!e || e.ai === "dead" || ENEMY_DEFS[e.kind].stunImmune) return;
+    e.stunned = Math.max(e.stunned, s);
+    if (e.ai === "telegraph") this.setAi(e, "chase");
+  }
+
+  /** Empuja `m` metros en la dirección (dirX, dirZ) contra los muros. */
+  knockback(enemyId: string, dirX: number, dirZ: number, m: number): void {
+    const e = this.list.find((x) => x.id === enemyId);
+    const len = Math.hypot(dirX, dirZ);
+    if (!e || e.ai === "dead" || len === 0) return;
+    this.moveEnemy(e, dirX / len, dirZ / len, m, ENEMY_DEFS[e.kind].radius);
   }
 
   /** Si el id no existe devuelve x: 0, z: 0: el llamador solo debe usar la posición cuando `killed`. */

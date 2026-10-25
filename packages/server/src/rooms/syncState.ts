@@ -1,9 +1,18 @@
 import { xpToNext } from "@roguelike/shared";
-import type { CombatSystem } from "../sim/CombatSystem";
+import { abilitySlots, type PlayerShot } from "../sim/AbilitySystem";
+import { abilityRank, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
 import type { Orb } from "../sim/OrbSystem";
 import type { PlayerRecord } from "./PlayerRegistry";
-import { EnemyState, OrbState, ProjectileState, type PlayerState, type RunState } from "./RunState";
+import {
+  AbilitySlotState,
+  EnemyState,
+  OrbState,
+  PlayerShotState,
+  ProjectileState,
+  type PlayerState,
+  type RunState,
+} from "./RunState";
 
 export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: boolean): void {
   const k = record.kinematic;
@@ -25,15 +34,30 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.choosing = choosing;
   ps.moveSpeedMult = c.mods.moveSpeedMult;
   ps.attackSpeedMult = c.mods.attackSpeedMult;
+  ps.passiveRank = abilityRank(c, "cleave");
+  ps.blocking = c.blocking;
+  ps.buffDamage = c.buffDamage;
+
+  // Casillas en su sitio: solo se agregan o quitan entradas si cambia la cantidad.
+  const slots = abilitySlots(c);
+  while (ps.abilities.length > slots.length) ps.abilities.pop();
+  while (ps.abilities.length < slots.length) ps.abilities.push(new AbilitySlotState());
+  slots.forEach((slot, i) => {
+    const s = ps.abilities[i]!;
+    s.id = slot.id;
+    s.rank = slot.rank;
+    s.cooldown = c.abilityCd[slot.id] ?? 0;
+  });
 }
 
-/** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles` y `orbs`. */
+/** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles`, `orbs` y `playerShots`. */
 export function syncWorld(
   state: RunState,
   enemies: readonly Enemy[],
   projectiles: readonly Projectile[],
   combat: CombatSystem,
   orbs: readonly Orb[],
+  playerShots: readonly PlayerShot[] = [],
 ): void {
   const liveEnemies = new Set<string>();
   for (const e of enemies) {
@@ -54,6 +78,7 @@ export function syncWorld(
     es.maxHp = e.maxHp;
     es.ai = e.ai;
     es.aiTime = e.aiTime;
+    es.stunned = e.stunned;
   }
   for (const id of [...state.enemies.keys()]) if (!liveEnemies.has(id)) state.enemies.delete(id);
 
@@ -83,6 +108,22 @@ export function syncWorld(
     os.value = o.value;
   }
   for (const id of [...state.orbs.keys()]) if (!liveOrbs.has(id)) state.orbs.delete(id);
+
+  const liveWaves = new Set<string>();
+  for (const w of playerShots) {
+    liveWaves.add(w.id);
+    let ws = state.playerShots.get(w.id);
+    if (!ws) {
+      ws = new PlayerShotState();
+      ws.dirX = w.dirX;
+      ws.dirZ = w.dirZ;
+      ws.radius = w.radius;
+      state.playerShots.set(w.id, ws);
+    }
+    ws.x = w.x;
+    ws.z = w.z;
+  }
+  for (const id of [...state.playerShots.keys()]) if (!liveWaves.has(id)) state.playerShots.delete(id);
 
   state.level = combat.level;
   state.xp = combat.xp;

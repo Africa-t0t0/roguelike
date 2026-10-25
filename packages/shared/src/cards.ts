@@ -9,6 +9,25 @@ export const MAX_ACTIVE_ABILITIES = 4;
 /** El factor de daño recibido nunca baja de aquí. */
 export const MIN_DAMAGE_TAKEN_MULT = 0.4;
 
+// Constantes de las habilidades que no dependen del rango.
+/** impacto del Torbellino, como fracción de su animación */
+export const WHIRLWIND_IMPACT_AT = 0.5;
+/** impacto de la Patada, como fracción de su animación */
+export const KICK_IMPACT_AT = 0.4;
+/** segundos desde el inicio del Azote hasta su impacto */
+export const SLAM_IMPACT_S = 0.5;
+/** apertura total del cono de la Patada, en grados */
+export const KICK_ARC_DEG = 90;
+/** segundos que dura el Grito de guerra */
+export const WARCRY_DURATION_S = 8;
+/** el Bloqueo cubre ± estos grados alrededor de hacia dónde mira el jugador */
+export const BLOCK_HALF_ARC_DEG = 60;
+/** multiplicador de la velocidad de movimiento mientras bloquea */
+export const BLOCK_MOVE_MULT = 0.5;
+/** velocidad (m/s) y vida (s) de la onda de Tajo ondulante */
+export const CLEAVE_SPEED = 14;
+export const CLEAVE_LIFE_S = 0.5;
+
 export const STAT_CARDS: Record<StatCardId, { name: string; text: string }> = {
   vitality: { name: "Vitalidad", text: "+20 de vida máxima y te cura 20" },
   regen: { name: "Regeneración", text: "+1 de vida por segundo" },
@@ -84,7 +103,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     animS: 0.8,
     clip: "ss_power_up",
     ranks: [{ buff: 0.25 }, { buff: 0.35 }, { buff: 0.45 }],
-    text: (r) => `Todo el grupo hace +${pct(ABILITIES.warcry.ranks[r - 1]!.buff!)} de daño durante 8 s`,
+    text: (r) => `Todo el grupo hace +${pct(ABILITIES.warcry.ranks[r - 1]!.buff!)} de daño durante ${WARCRY_DURATION_S} s`,
   },
   slam: {
     name: "Azote",
@@ -109,7 +128,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     animS: 0,
     clip: "ss_block_idle",
     ranks: [{ reduction: 0.7 }, { reduction: 0.8 }, { reduction: 0.9 }],
-    text: (r) => `Mantén la tecla: -${pct(ABILITIES.block.ranks[r - 1]!.reduction!)} de daño de frente; te mueves a la mitad y no atacas`,
+    text: (r) => `Mantén la tecla: -${pct(ABILITIES.block.ranks[r - 1]!.reduction!)} de daño de frente (±${BLOCK_HALF_ARC_DEG}°); te mueves a la mitad y no atacas`,
   },
   cleave: {
     name: "Tajo ondulante",

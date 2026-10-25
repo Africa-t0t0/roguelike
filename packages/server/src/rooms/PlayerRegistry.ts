@@ -132,5 +132,9 @@ export class PlayerRegistry {
     // Al volver no caen golpes recibidos antes de irse.
     record.combat.pendingHits = [];
     Object.assign(record.combat, newComboTimers());
+    // Tampoco sobreviven la animación de una habilidad ni el Bloqueo; los enfriamientos y el Grito sí.
+    record.combat.abilityAnim = null;
+    record.combat.heldMask = 0;
+    record.combat.blocking = false;
   }
 }

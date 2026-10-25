@@ -1,5 +1,8 @@
 import {
+  ABILITIES,
   BASE_REGEN,
+  BLOCK_HALF_ARC_DEG,
+  BLOCK_MOVE_MULT,
   STARTING_WEAPON,
   newComboTimers,
   strikeOf,
@@ -17,6 +20,7 @@ import {
   playerStats,
   tryStartSwing,
   xpToNext,
+  type AbilityId,
   type ClassId,
   type ComboTimers,
   type EnemyLoadout,
@@ -33,6 +37,20 @@ import type { PositionHistory } from "./PositionHistory";
 export interface PendingHit {
   damage: number;
   resolveTick: number;
+  /** posición de la fuente al golpear, para el Bloqueo */
+  sourceX: number;
+  sourceZ: number;
+}
+
+/** Animación de una habilidad activa en curso; avanza por input procesado, como el combo. */
+export interface AbilityAnim {
+  id: AbilityId;
+  /** segundos que le quedan */
+  left: number;
+  /** segundos que faltan para cada impacto pendiente */
+  impacts: number[];
+  /** dirección del input que la empezó; los impactos la usan aunque el jugador gire */
+  facing: number;
 }
 
 /** El combo (ComboTimers) avanza por input procesado; respawnIn, invulnFor y los plazos, por tick. */
@@ -50,6 +68,33 @@ export interface CombatState extends ComboTimers {
   pendingHits: PendingHit[];
   /** multiplicadores de sus cartas de stat; se recalculan con setMods al aplicar una carta */
   mods: PlayerMods;
+  /** habilidades aprendidas con su rango, en orden de aprendizaje (copia de `progress.abilities`) */
+  abilities: { id: AbilityId; rank: number }[];
+  /** enfriamiento restante (s) de cada habilidad; cuenta por tick simulado */
+  abilityCd: Partial<Record<AbilityId, number>>;
+  abilityAnim: AbilityAnim | null;
+  /** máscara de teclas de habilidad del último input procesado (para detectar flancos) */
+  heldMask: number;
+  /** mantiene el Bloqueo en este momento */
+  blocking: boolean;
+  /** el mayor Grito activo sobre este jugador (0 si ninguno) y los segundos que le quedan */
+  buffDamage: number;
+  buffLeft: number;
+}
+
+/** Rango (1..3) de esa habilidad, o 0 si no la tiene. */
+export function abilityRank(c: CombatState, id: AbilityId): number {
+  return c.abilities.find((a) => a.id === id)?.rank ?? 0;
+}
+
+/** Velocidad de movimiento efectiva: la de sus cartas, a la mitad mientras bloquea. */
+export function moveSpeedMult(c: CombatState): number {
+  return c.mods.moveSpeedMult * (c.blocking ? BLOCK_MOVE_MULT : 1);
+}
+
+/** Tick al que se rebobina un impacto: el que veía el cliente, acotado a REWIND_MAX_TICKS. */
+export function rewindTick(nowTick: number, viewTick: number): number {
+  return Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(viewTick)));
 }
 
 export function newCombatState(
@@ -72,6 +117,13 @@ export function newCombatState(
     ...newComboTimers(),
     pendingHits: [],
     mods: playerMods(newProgress()),
+    abilities: [],
+    abilityCd: {},
+    abilityAnim: null,
+    heldMask: 0,
+    blocking: false,
+    buffDamage: 0,
+    buffLeft: 0,
   };
 }
 
@@ -125,13 +177,16 @@ export class CombatSystem {
       c.pendingHits = [];
       return { damage: 0, died: false, impact };
     }
-    return { ...this.applyDue(c, (h) => input.viewTick >= h.resolveTick), impact };
+    return { ...this.applyDue(c, k, (h) => input.viewTick >= h.resolveTick), impact };
   }
 
-  /** Solo empieza el swing (el daño llega en el impacto, en onInputProcessed) y fija su dirección. */
+  /**
+   * Solo empieza el swing (el daño llega en el impacto, en onInputProcessed) y fija su dirección.
+   * Bloqueando o con la animación de una habilidad en curso no se ataca.
+   */
   attack(c: CombatState, input: PlayerInput): AttackResult {
     const none: AttackResult = { swung: false, step: 0 };
-    if (!input.attack || c.dead) return none;
+    if (!input.attack || c.dead || c.blocking || c.abilityAnim) return none;
     const step = tryStartSwing(c, c.weaponId, c.mods.attackSpeedMult);
     if (step === 0) return none;
     c.swingFacing = input.facing;
@@ -150,8 +205,10 @@ export class CombatSystem {
     const strike = strikeOf(c.weaponId, step, c.mods.attackSpeedMult);
     const range = strike.range * c.mods.reachMult;
     const arcDeg = Math.min(360, strike.arcDeg * c.mods.reachMult);
-    const t = Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(input.viewTick)));
-    const amount = Math.round(strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier) * c.mods.damageMult);
+    const t = rewindTick(nowTick, input.viewTick);
+    const amount = Math.round(
+      strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier) * c.mods.damageMult * (1 + c.buffDamage),
+    );
     const origin = { x: k.x, z: k.z, facing: c.swingFacing };
     const result: ImpactResult = { step, hits: [], kills: [] };
 
@@ -174,18 +231,22 @@ export class CombatSystem {
       const c = states.get(h.targetKey);
       if (!c || c.dead) continue;
       // Piel de hierro: se aplica al encolar, sin redondear (la vida es decimal).
-      c.pendingHits.push({ damage: h.damage * c.mods.damageTakenMult, resolveTick: nowTick });
+      c.pendingHits.push({
+        damage: h.damage * c.mods.damageTakenMult, resolveTick: nowTick, sourceX: h.sourceX, sourceZ: h.sourceZ,
+      });
     }
   }
 
   /**
    * Una vez por tick (solo fuera de la pausa): reapariciones, invulnerabilidad, regeneración de los vivos
-   * (antes de los golpes del tick) y el plazo máximo de los golpes pendientes.
+   * (antes de los golpes del tick) y el plazo máximo de los golpes pendientes. `kin` da la posición y
+   * orientación de cada jugador para el Bloqueo; sin su entrada, el golpe no se bloquea.
    */
   step(
     states: Map<string, CombatState>,
     nowTick: number,
     dt: number,
+    kin: ReadonlyMap<string, KinematicState> = new Map(),
   ): { damaged: { key: string; amount: number }[]; died: string[]; respawned: string[] } {
     const damaged: { key: string; amount: number }[] = [];
     const died: string[] = [];
@@ -213,7 +274,7 @@ export class CombatSystem {
         continue;
       }
       // Sin un input que lo resuelva antes (jugador callado o con mucho lag), se aplica al vencer el plazo.
-      const r = this.applyDue(c, (h) => nowTick >= h.resolveTick + REWIND_MAX_TICKS);
+      const r = this.applyDue(c, kin.get(key), (h) => nowTick >= h.resolveTick + REWIND_MAX_TICKS);
       if (r.damage > 0) damaged.push({ key, amount: r.damage });
       if (r.died) died.push(key);
     }
@@ -236,13 +297,27 @@ export class CombatSystem {
     c.hp = Math.min(c.maxHp, c.hp + amount);
   }
 
-  /** Aplica (y quita de la lista) los golpes pendientes que cumplen `due`. */
-  private applyDue(c: CombatState, due: (h: PendingHit) => boolean): { damage: number; died: boolean } {
+  /**
+   * Aplica (y quita de la lista) los golpes pendientes que cumplen `due`. Si bloquea, los que llegan
+   * desde ±BLOCK_HALF_ARC_DEG de hacia dónde mira (`k`) se reducen según el rango del Bloqueo.
+   */
+  private applyDue(
+    c: CombatState,
+    k: KinematicState | undefined,
+    due: (h: PendingHit) => boolean,
+  ): { damage: number; died: boolean } {
+    const reduction = c.blocking && k ? (ABILITIES.block.ranks[abilityRank(c, "block") - 1]?.reduction ?? 0) : 0;
     let damage = 0;
     const keep: PendingHit[] = [];
     for (const h of c.pendingHits) {
-      if (due(h)) damage += h.damage;
-      else keep.push(h);
+      if (!due(h)) {
+        keep.push(h);
+        continue;
+      }
+      const front =
+        reduction > 0 &&
+        inArc({ x: k!.x, z: k!.z, facing: k!.facing }, { x: h.sourceX, z: h.sourceZ, radius: 0 }, Infinity, 2 * BLOCK_HALF_ARC_DEG);
+      damage += front ? h.damage * (1 - reduction) : h.damage;
     }
     c.pendingHits = keep;
     if (damage === 0) return { damage: 0, died: false };
@@ -252,6 +327,8 @@ export class CombatSystem {
     c.respawnIn = RESPAWN_S;
     c.pendingHits = [];
     cancelImpact(c);
+    c.abilityAnim = null;
+    c.blocking = false;
     return { damage, died: true };
   }
 

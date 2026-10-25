@@ -1,5 +1,18 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
 
+/** Una casilla de habilidad del jugador (activa o mantenida; la pasiva va en `passiveRank`). */
+export const AbilitySlotState = schema(
+  {
+    /** AbilityId */
+    id: t.string(),
+    rank: t.number(),
+    /** segundos de enfriamiento que le quedan */
+    cooldown: t.number(),
+  },
+  "AbilitySlotState",
+);
+export type AbilitySlotState = SchemaType<typeof AbilitySlotState>;
+
 export const PlayerState = schema(
   {
     name: t.string(),
@@ -25,6 +38,14 @@ export const PlayerState = schema(
     moveSpeedMult: t.number(),
     /** multiplicador de velocidad de ataque de sus cartas (la predicción del combo lo usa) */
     attackSpeedMult: t.number(),
+    /** habilidades en orden de casilla (la tecla i+1 usa la i-ésima), sin la pasiva */
+    abilities: t.array(AbilitySlotState),
+    /** rango de Tajo ondulante; 0 si no la tiene */
+    passiveRank: t.number(),
+    /** mantiene el Bloqueo */
+    blocking: t.boolean(),
+    /** el mayor Grito activo sobre él (0 si ninguno) */
+    buffDamage: t.number(),
   },
   "PlayerState",
 );
@@ -44,6 +65,8 @@ export const EnemyState = schema(
     weaponId: t.string(),
     /** WeaponTier de esa arma; 0 si va desarmado */
     weaponTier: t.number(),
+    /** segundos que le quedan aturdido */
+    stunned: t.number(),
   },
   "EnemyState",
 );
@@ -51,6 +74,13 @@ export type EnemyState = SchemaType<typeof EnemyState>;
 
 export const ProjectileState = schema({ x: t.number(), z: t.number() }, "ProjectileState");
 export type ProjectileState = SchemaType<typeof ProjectileState>;
+
+/** Onda de Tajo ondulante de un jugador. */
+export const PlayerShotState = schema(
+  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number() },
+  "PlayerShotState",
+);
+export type PlayerShotState = SchemaType<typeof PlayerShotState>;
 
 export const OrbState = schema({ x: t.number(), z: t.number(), value: t.number() }, "OrbState");
 export type OrbState = SchemaType<typeof OrbState>;
@@ -73,6 +103,8 @@ export const RunState = schema(
     projectiles: t.map(ProjectileState),
     /** orbes de XP compartidos, indexados por id ("o1", …) */
     orbs: t.map(OrbState),
+    /** ondas de los jugadores, indexadas por id ("w1", …) */
+    playerShots: t.map(PlayerShotState),
     /** el grupo está eligiendo cartas: la simulación no avanza */
     paused: t.boolean(),
     /** segundos que quedan de la elección en curso de la pausa */

@@ -1,3 +1,4 @@
+import type { AbilityId } from "./cards";
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
@@ -54,4 +55,6 @@ export type CombatEvent =
       sourceKey?: string;
     }
   | { type: "swing"; key: string; step: number }
-  | { type: "levelUp"; level: number };
+  | { type: "levelUp"; level: number }
+  /** un jugador empezó una habilidad activa; los demás clientes reproducen su animación */
+  | { type: "ability"; key: string; id: AbilityId };

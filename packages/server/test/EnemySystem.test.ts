@@ -124,7 +124,8 @@ describe("cuerpo a cuerpo", () => {
     const def = ENEMY_DEFS.brute;
     const tele = Math.ceil(def.telegraphS / SIM_DT) + 1;
     const hits = run(s2.sys, p2, tele);
-    expect(hits).toEqual([{ targetKey: "a", damage: 12, sourceId: s2.e.id }]);
+    // la fuente del golpe es la posición del enemigo
+    expect(hits).toEqual([{ targetKey: "a", damage: 12, sourceId: s2.e.id, sourceX: s2.e.x, sourceZ: s2.e.z }]);
     expect(s2.e.ai).toBe("recover");
     // nada más antes de que acabe el enfriamiento
     expect(run(s2.sys, p2, Math.floor(def.cooldownS / SIM_DT) - 2)).toEqual([]);
@@ -158,7 +159,11 @@ describe("mago", () => {
     const { sys, e } = setup("mage", 28, 31);
     const pl = [P("a", 20, 31)];
     const hits = run(sys, pl, 90);
-    expect(hits).toEqual([{ targetKey: "a", damage: 10, sourceId: e.id }]);
+    expect(hits).toMatchObject([{ targetKey: "a", damage: 10, sourceId: e.id }]);
+    // la fuente es el proyectil, que llega desde +X hasta tocar al jugador (no el mago, que quedó atrás)
+    expect(hits[0]!.sourceZ).toBeCloseTo(31, 5);
+    expect(hits[0]!.sourceX).toBeGreaterThan(20);
+    expect(hits[0]!.sourceX).toBeLessThan(20 + 0.4 + 0.3 + 0.5);
     expect(sys.projectiles).toHaveLength(0);
   });
 
@@ -166,7 +171,7 @@ describe("mago", () => {
     const { sys, e } = setup("mage", 16.6, 30);
     const pl = [P("a", 19.6, 30)];
     const hits = run(sys, pl, 60);
-    expect(hits).toEqual([{ targetKey: "a", damage: 10, sourceId: e.id }]);
+    expect(hits).toMatchObject([{ targetKey: "a", damage: 10, sourceId: e.id }]);
   });
 
   it("un proyectil contra un muro desaparece sin golpear", () => {
@@ -296,7 +301,7 @@ describe("armas de los enemigos", () => {
     sys.step(pl, SIM_DT);
     expect(e.ai).toBe("telegraph");
     const hits = run(sys, pl, Math.ceil(ENEMY_DEFS.brute.telegraphS / SIM_DT) + 1);
-    expect(hits).toEqual([{ targetKey: "a", damage: 23, sourceId: e.id }]);
+    expect(hits).toEqual([{ targetKey: "a", damage: 23, sourceId: e.id, sourceX: 30, sourceZ: 30 }]);
     expect(e.x).toBe(30);
   });
 
