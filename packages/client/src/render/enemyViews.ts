@@ -9,16 +9,15 @@ import type { Scene } from "@babylonjs/core/scene";
 import { ENEMY_DEFS, type EnemyKind } from "@roguelike/shared";
 import type { EnemySnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
-import { chooseEnemyAnim, SpeedMeter } from "./animState";
-import type { AssetId, Assets } from "./assets";
-import { CHARACTER_HEIGHT, LegacyCharacterView as CharacterView } from "./legacyCharacterView";
+import type { AnimLibrary } from "./animLibrary";
+import { chooseEnemyAnim, SpeedMeter, type ClipLengths } from "./animState";
+import type { Assets } from "./assets";
+import { CharacterView } from "./characterView";
 import { lerpAngle } from "./interpolation";
+import { ENEMY_LOOKS } from "./looks";
 
-const MODELS: Record<EnemyKind, { model: AssetId; weapon: AssetId }> = {
-  brute: { model: "skeletonWarrior", weapon: "axe" },
-  minion: { model: "skeletonMinion", weapon: "blade" },
-  mage: { model: "skeletonMage", weapon: "staff" },
-};
+/** La barra de vida flota a esta altura sobre la cabeza de cada modelo. */
+const BAR_ABOVE_HEAD = 0.25; // m
 const BAR_W = 1;
 const BAR_H = 0.12;
 /** El aro marca el alcance del golpe (o un mínimo, para el mago): así se ve fuera de la cabeza. */
@@ -59,15 +58,18 @@ interface EnemyView {
   goneAtMs?: number;
 }
 
-/** Esqueletos interpolados, con barra de vida y aro de telegrafía. */
+/** Enemigos de Mixamo interpolados, con barra de vida y aro de telegrafía. */
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
   private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill", StandardMaterial>;
+  private readonly clipLengths: ClipLengths;
 
   constructor(
     private readonly scene: Scene,
     private readonly assets: Assets,
+    private readonly anims: AnimLibrary,
   ) {
+    this.clipLengths = { get: (clip) => anims.length(clip) };
     this.mats = {
       barBack: flatMaterial(scene, "enemyBarBack", new Color3(0.1, 0.05, 0.05), 0.8),
       barFill: flatMaterial(scene, "enemyBarFill", new Color3(0.85, 0.12, 0.1)),
@@ -106,7 +108,7 @@ export class EnemyViews {
       view.character.play(
         chooseEnemyAnim(
           { kind: e.kind, ai: e.ai, speed: view.speed.sample(e.x, e.z, dtS), hurtRecently: hurt(id) },
-          view.character.clipLengths,
+          this.clipLengths,
         ),
       );
 
@@ -130,13 +132,13 @@ export class EnemyViews {
 
   private create(id: string, kind: EnemyKind): EnemyView {
     const scene = this.scene;
-    const { model, weapon } = MODELS[kind];
-    const character = new CharacterView(scene, this.assets, model, { weapon });
+    const look = ENEMY_LOOKS[kind];
+    const character = new CharacterView(scene, this.assets, this.anims, look);
 
     // Barra de vida: fondo + relleno, siempre de cara a la cámara.
     const bar = new TransformNode(`enemyBar-${id}`, scene);
     bar.parent = character.root;
-    bar.position.y = CHARACTER_HEIGHT + 0.25;
+    bar.position.y = look.height + BAR_ABOVE_HEAD;
     bar.billboardMode = TransformNode.BILLBOARDMODE_ALL;
     const back = CreatePlane(`enemyBarBack-${id}`, { width: BAR_W + 0.06, height: BAR_H + 0.06 }, scene);
     back.material = this.mats.barBack;

@@ -1,4 +1,5 @@
-import { ENEMY_DEFS, MOVESETS, STARTING_WEAPON, WEAPONS, strikeOf, type EnemyKind } from "@roguelike/shared";
+import { ENEMY_DEFS, MOVESETS, WEAPONS, strikeOf, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ENEMY_LOOKS } from "./looks";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
 export interface AnimChoice {
@@ -7,7 +8,14 @@ export interface AnimChoice {
   speed: number;
 }
 
+/** Duración en segundos de cada clip (sin el clip, `undefined` o 0). Un `Map` sirve. */
+export interface ClipLengths {
+  get(clip: string): number | undefined;
+}
+
 export interface HeroAnimInput {
+  /** arma equipada: de su estilo salen la locomoción y el combo */
+  weaponId: WeaponId;
   /** m/s en el plano */
   speed: number;
   airborne: boolean;
@@ -27,15 +35,11 @@ export interface EnemyAnimInput {
 
 const MOVING_SPEED = 0.2; // m/s
 const SPRINT_SPEED = 6; // m/s
-
-export const HERO_ATTACK_CLIPS = [
-  "1H_Melee_Attack_Chop",
-  "1H_Melee_Attack_Slice_Diagonal",
-  "1H_Melee_Attack_Stab",
-] as const;
+/** La esquiva no tiene clip propio: corre con el clip del estilo a esta velocidad. */
+const DODGE_RUN_SPEED = 2;
 
 /** Velocidad para que `clip` dure `durationS`; sin la duración del clip, 1. */
-function fitTo(clip: string, durationS: number, clipLengths?: ReadonlyMap<string, number>): number {
+function fitTo(clip: string, durationS: number, clipLengths?: ClipLengths): number {
   const len = clipLengths?.get(clip);
   return len && len > 0 && durationS > 0 ? len / durationS : 1;
 }
@@ -43,32 +47,34 @@ function fitTo(clip: string, durationS: number, clipLengths?: ReadonlyMap<string
 const once = (clip: string, speed = 1): AnimChoice => ({ clip, loop: false, speed });
 const looped = (clip: string, speed = 1): AnimChoice => ({ clip, loop: true, speed });
 
-/** Reglas por prioridad: muerte, esquiva, ataque, aire, golpe recibido, correr, quieto. */
-export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ReadonlyMap<string, number>): AnimChoice {
-  if (a.dead) return once("Death_A");
-  if (a.dodging) return once("Dodge_Forward");
-  const combo = MOVESETS[WEAPONS[STARTING_WEAPON].movesetId].combo;
+/**
+ * Clips del estilo del arma. Reglas por prioridad: muerte, esquiva, ataque, aire, golpe recibido,
+ * correr, quieto.
+ */
+export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): AnimChoice {
+  const { locomotion, combo } = MOVESETS[WEAPONS[a.weaponId].movesetId];
+  if (a.dead) return once(locomotion.death);
+  if (a.dodging) return looped(locomotion.run, DODGE_RUN_SPEED);
   if (a.swingTimer > 0 && a.comboStep >= 1 && a.comboStep <= combo.length) {
-    const clip = HERO_ATTACK_CLIPS[a.comboStep - 1]!;
-    return once(clip, fitTo(clip, strikeOf(STARTING_WEAPON, a.comboStep).duration, clipLengths));
+    const strike = strikeOf(a.weaponId, a.comboStep);
+    return once(strike.clip, fitTo(strike.clip, strike.duration, clipLengths));
   }
-  if (a.airborne) return looped("Jump_Idle");
-  if (a.hurtRecently) return once("Hit_A");
-  if (a.speed > SPRINT_SPEED) return looped("Running_A", 1.4);
-  if (a.speed > MOVING_SPEED) return looped("Running_A");
-  return looped("Idle");
+  if (a.airborne) return once(locomotion.jump);
+  if (a.hurtRecently) return once(locomotion.hit);
+  if (a.speed > SPRINT_SPEED) return looped(locomotion.sprint);
+  if (a.speed > MOVING_SPEED) return looped(locomotion.run);
+  return looped(locomotion.idle);
 }
 
-/** Reglas por prioridad: muerte, telegrafía, golpe recibido, correr, quieto. */
-export function chooseEnemyAnim(e: EnemyAnimInput, clipLengths?: ReadonlyMap<string, number>): AnimChoice {
-  if (e.ai === "dead") return once("Death_A");
-  if (e.ai === "telegraph") {
-    const clip = e.kind === "mage" ? "Spellcast_Shoot" : "1H_Melee_Attack_Chop";
-    return once(clip, fitTo(clip, ENEMY_DEFS[e.kind].telegraphS, clipLengths));
-  }
-  if (e.hurtRecently) return once("Hit_A");
-  if (e.speed > MOVING_SPEED) return looped("Running_A", e.kind === "minion" ? 1.3 : 1);
-  return looped("Idle");
+/** Clips de `ENEMY_LOOKS`. Reglas por prioridad: muerte, telegrafía, golpe recibido, correr, quieto. */
+export function chooseEnemyAnim(e: EnemyAnimInput, clipLengths?: ClipLengths): AnimChoice {
+  const look = ENEMY_LOOKS[e.kind];
+  const { clips } = look;
+  if (e.ai === "dead") return once(clips.death);
+  if (e.ai === "telegraph") return once(clips.attack, fitTo(clips.attack, ENEMY_DEFS[e.kind].telegraphS, clipLengths));
+  if (e.hurtRecently) return once(clips.hit);
+  if (e.speed > MOVING_SPEED) return looped(clips.run, look.runSpeed ?? 1);
+  return looped(clips.idle);
 }
 
 const HURT_WINDOW_MS = 300;

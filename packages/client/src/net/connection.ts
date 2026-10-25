@@ -2,12 +2,15 @@ import { Client, type Room } from "@colyseus/sdk";
 import {
   MSG,
   PROTOCOL_VERSION,
+  STARTING_WEAPON,
   TAKEOVER_CLOSE_CODE,
+  isWeaponId,
   type CombatEvent,
   type EnemyKind,
   type JoinOptions,
   type KinematicState,
   type PlayerInput,
+  type WeaponId,
 } from "@roguelike/shared";
 import { generateToken } from "./token";
 import { LagSimulator, type LagConfig } from "./LagSimulator";
@@ -21,6 +24,7 @@ export type PlayerSnapshot = KinematicState & {
   respawnIn: number;
   comboStep: number;
   swingTimer: number;
+  weaponId: WeaponId;
 };
 export type PlayerSnapshots = Map<string, PlayerSnapshot>;
 
@@ -98,7 +102,7 @@ function browserToken(): string {
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
-  room.state.players.forEach((p: PlayerSnapshot, key: string) => {
+  room.state.players.forEach((p: Omit<PlayerSnapshot, "weaponId"> & { weaponId: string }, key: string) => {
     out.set(key, {
       name: p.name,
       x: p.x,
@@ -117,6 +121,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       respawnIn: p.respawnIn,
       comboStep: p.comboStep,
       swingTimer: p.swingTimer,
+      weaponId: isWeaponId(p.weaponId) ? p.weaponId : STARTING_WEAPON,
     });
   });
   return out;

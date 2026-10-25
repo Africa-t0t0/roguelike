@@ -7,6 +7,7 @@ import {
   normalizeName,
   sanitizeInput,
   SIM_DT,
+  STARTING_WEAPON,
   type KinematicState,
 } from "@roguelike/shared";
 import { InputState, withoutActions } from "./input/InputState";
@@ -18,6 +19,7 @@ import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
 import { createTickClock } from "./net/tickClock";
 import { RecentHits } from "./render/animState";
+import { AnimLibrary } from "./render/animLibrary";
 import { loadAssets, type Assets } from "./render/assets";
 import { createScene } from "./render/createScene";
 import { damageTiming } from "./render/damageTiming";
@@ -25,6 +27,7 @@ import { buildDungeonMeshes } from "./render/dungeonMeshes";
 import { EnemyViews } from "./render/enemyViews";
 import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
+import { allClipIds } from "./render/looks";
 import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
@@ -83,9 +86,10 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
 
   const scene = createScene(engine);
   let assets: Assets;
+  const anims = new AnimLibrary(scene);
   loading.hidden = false;
   try {
-    assets = await loadAssets(scene);
+    [assets] = await Promise.all([loadAssets(scene), anims.load(allClipIds())]);
   } catch (err) {
     console.error(err);
     scene.dispose();
@@ -102,18 +106,18 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
     return;
   }
   loading.hidden = true;
-  stop = startSession(conn, scene, assets);
+  stop = startSession(conn, scene, assets, anims);
 }
 
 /**
- * Mazmorra, vistas y bucle de tiempo fijo para una conexión, sobre una escena con los modelos ya
- * cargados. Devuelve la función que lo desarma todo.
+ * Mazmorra, vistas y bucle de tiempo fijo para una conexión, sobre una escena con los modelos y
+ * las animaciones ya cargados. Devuelve la función que lo desarma todo.
  */
-function startSession(conn: GameConnection, scene: Scene, assets: Assets): () => void {
+function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims: AnimLibrary): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
   const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
-  const views = new PlayerViews(scene, assets);
-  const enemies = new EnemyViews(scene, assets);
+  const views = new PlayerViews(scene, assets, anims);
+  const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
   const hits = new RecentHits();
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
@@ -213,7 +217,12 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets): () =>
       const pose = { x, y, z, facing: lerpAngle(prev.facing, cur.facing, a) };
       // La esquiva y el arranque del golpe son predichos; la muerte viene del servidor.
       const swing = combo.heroCombat({ comboStep: mine?.comboStep ?? 0, swingTimer: mine?.swingTimer ?? 0 }, now);
-      const state = { dodgeTime: cur.dodgeTime, ...swing, dead: mine?.dead ?? false };
+      const state = {
+        dodgeTime: cur.dodgeTime,
+        ...swing,
+        dead: mine?.dead ?? false,
+        weaponId: mine?.weaponId ?? STARTING_WEAPON,
+      };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
       camera.follow(x, z);

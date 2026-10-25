@@ -8,8 +8,10 @@ import {
   type EnemyAnimInput,
   type HeroAnimInput,
 } from "../src/render/animState";
+import { ENEMY_LOOKS } from "../src/render/looks";
 
 const hero = (over: Partial<HeroAnimInput> = {}): HeroAnimInput => ({
+  weaponId: "kingslayer-sword",
   speed: 0,
   airborne: false,
   dodging: false,
@@ -29,42 +31,63 @@ const enemy = (over: Partial<EnemyAnimInput> = {}): EnemyAnimInput => ({
 });
 
 describe("chooseHeroAnim", () => {
-  it("quieto → Idle en bucle", () => {
-    expect(chooseHeroAnim(hero())).toEqual({ clip: "Idle", loop: true, speed: 1 });
+  it("quieto → idle del estilo en bucle", () => {
+    expect(chooseHeroAnim(hero())).toEqual({ clip: "ss_idle", loop: true, speed: 1 });
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword" })).clip).toBe("gs_idle");
   });
 
-  it("muerto → Death_A sin bucle, y gana a todo", () => {
+  it("muerto → death del estilo sin bucle, y gana a todo", () => {
     const all = hero({ dead: true, dodging: true, comboStep: 1, swingTimer: 0.2, airborne: true, hurtRecently: true, speed: 8 });
-    expect(chooseHeroAnim(all)).toEqual({ clip: "Death_A", loop: false, speed: 1 });
+    expect(chooseHeroAnim(all)).toEqual({ clip: "ss_death", loop: false, speed: 1 });
+    expect(chooseHeroAnim({ ...all, weaponId: "great-sword" }).clip).toBe("gs_death");
   });
 
-  it("esquivando → Dodge_Forward, y gana al ataque", () => {
-    const c = chooseHeroAnim(hero({ dodging: true, comboStep: 2, swingTimer: 0.2, speed: 8 }));
-    expect(c.clip).toBe("Dodge_Forward");
+  it("esquivando → run del estilo a ×2, y gana al ataque", () => {
+    expect(chooseHeroAnim(hero({ dodging: true, comboStep: 2, swingTimer: 0.2, speed: 8 }))).toEqual({
+      clip: "ss_run",
+      loop: true,
+      speed: 2,
+    });
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", dodging: true })).clip).toBe("gs_run");
   });
 
-  it("cada paso del combo tiene su clip, sin bucle", () => {
+  it("cada paso del combo de la espada tiene su clip, sin bucle", () => {
     const clips = [1, 2, 3].map((step) => chooseHeroAnim(hero({ comboStep: step, swingTimer: 0.1 })));
-    expect(clips.map((c) => c.clip)).toEqual([
-      "1H_Melee_Attack_Chop",
-      "1H_Melee_Attack_Slice_Diagonal",
-      "1H_Melee_Attack_Stab",
-    ]);
+    expect(clips.map((c) => c.clip)).toEqual(["ss_slash", "ss_slash_3", "ss_attack_4"]);
     for (const c of clips) {
       expect(c.loop).toBe(false);
       expect(c.speed).toBe(1); // sin clipLengths
     }
   });
 
+  it("mandoble, paso 2 con swing → gs_high_spin_attack ajustado a 0,9 s", () => {
+    const lengths = new Map([["gs_high_spin_attack", 2.4]]);
+    const c = chooseHeroAnim(hero({ weaponId: "great-sword", comboStep: 2, swingTimer: 0.3 }), lengths);
+    expect(c.clip).toBe("gs_high_spin_attack");
+    expect(c.loop).toBe(false);
+    expect(c.speed).toBeCloseTo(2.4 / 0.9);
+  });
+
+  it("espada de guardia, paso 1 → duración 0,35 / 1,15", () => {
+    const lengths = new Map([["ss_slash", 1.1]]);
+    const c = chooseHeroAnim(hero({ weaponId: "guard-sword", comboStep: 1, swingTimer: 0.1 }), lengths);
+    expect(c.clip).toBe("ss_slash");
+    expect(1.1 / c.speed).toBeCloseTo(0.35 / 1.15);
+  });
+
   it("sin swing activo el comboStep no muestra ataque", () => {
-    expect(chooseHeroAnim(hero({ comboStep: 2, swingTimer: 0 })).clip).toBe("Idle");
+    expect(chooseHeroAnim(hero({ comboStep: 2, swingTimer: 0 })).clip).toBe("ss_idle");
+  });
+
+  it("un paso fuera del combo del arma no muestra ataque", () => {
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", comboStep: 3, swingTimer: 0.2 })).clip).toBe("gs_idle");
   });
 
   it("el speed del ataque hace que el clip dure lo mismo que el swing", () => {
     const lengths = new Map([
-      ["1H_Melee_Attack_Chop", 1.0],
-      ["1H_Melee_Attack_Slice_Diagonal", 0.7],
-      ["1H_Melee_Attack_Stab", 1.25],
+      ["ss_slash", 1.0],
+      ["ss_slash_3", 0.7],
+      ["ss_attack_4", 1.25],
     ]);
     const combo = MOVESETS["one-hand-sword"].combo;
     for (const step of [1, 2, 3]) {
@@ -74,61 +97,69 @@ describe("chooseHeroAnim", () => {
   });
 
   it("un swing en el aire muestra el ataque", () => {
-    expect(chooseHeroAnim(hero({ airborne: true, comboStep: 1, swingTimer: 0.2 })).clip).toBe("1H_Melee_Attack_Chop");
+    expect(chooseHeroAnim(hero({ airborne: true, comboStep: 1, swingTimer: 0.2 })).clip).toBe("ss_slash");
   });
 
-  it("en el aire → Jump_Idle (gana a herido y a correr)", () => {
-    expect(chooseHeroAnim(hero({ airborne: true, hurtRecently: true, speed: 8 })).clip).toBe("Jump_Idle");
+  it("en el aire → jump del estilo (gana a herido y a correr)", () => {
+    expect(chooseHeroAnim(hero({ airborne: true, hurtRecently: true, speed: 8 })).clip).toBe("ss_jump");
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", airborne: true })).clip).toBe("gs_jump");
   });
 
-  it("herido → Hit_A sin bucle (gana a correr)", () => {
+  it("herido → hit del estilo sin bucle (gana a correr)", () => {
     const c = chooseHeroAnim(hero({ hurtRecently: true, speed: 8 }));
-    expect(c.clip).toBe("Hit_A");
+    expect(c.clip).toBe("ss_impact");
     expect(c.loop).toBe(false);
   });
 
-  it("speed > 6 → Running_A a ×1,4", () => {
-    expect(chooseHeroAnim(hero({ speed: 6.5 }))).toEqual({ clip: "Running_A", loop: true, speed: 1.4 });
+  it("speed > 6 → sprint del estilo", () => {
+    expect(chooseHeroAnim(hero({ speed: 6.5 }))).toEqual({ clip: "ss_run_2", loop: true, speed: 1 });
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", speed: 6.5 })).clip).toBe("gs_run_2");
   });
 
-  it("speed > 0,2 → Running_A a ×1", () => {
-    expect(chooseHeroAnim(hero({ speed: 3 }))).toEqual({ clip: "Running_A", loop: true, speed: 1 });
-    expect(chooseHeroAnim(hero({ speed: 6 })).speed).toBe(1);
+  it("speed > 0,2 → run del estilo", () => {
+    expect(chooseHeroAnim(hero({ speed: 3 }))).toEqual({ clip: "ss_run", loop: true, speed: 1 });
+    expect(chooseHeroAnim(hero({ speed: 6 })).clip).toBe("ss_run");
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", speed: 3 })).clip).toBe("gs_run");
   });
 
-  it("speed ≤ 0,2 → Idle", () => {
-    expect(chooseHeroAnim(hero({ speed: 0.2 })).clip).toBe("Idle");
+  it("speed ≤ 0,2 → idle", () => {
+    expect(chooseHeroAnim(hero({ speed: 0.2 })).clip).toBe("ss_idle");
   });
 });
 
 describe("chooseEnemyAnim", () => {
-  it("quieto → Idle en bucle", () => {
-    expect(chooseEnemyAnim(enemy({ ai: "idle" }))).toEqual({ clip: "Idle", loop: true, speed: 1 });
+  it("quieto → idle del enemigo en bucle", () => {
+    expect(chooseEnemyAnim(enemy({ ai: "idle" }))).toEqual({ clip: ENEMY_LOOKS.brute.clips.idle, loop: true, speed: 1 });
+    expect(chooseEnemyAnim(enemy({ kind: "mage", ai: "idle" })).clip).toBe("mg_idle");
   });
 
-  it("muerto → Death_A sin bucle, y gana a todo", () => {
-    expect(chooseEnemyAnim(enemy({ ai: "dead", hurtRecently: true, speed: 5 }))).toEqual({
-      clip: "Death_A",
+  it("muerto → death sin bucle, y gana a todo (mago: gs_death)", () => {
+    expect(chooseEnemyAnim(enemy({ kind: "mage", ai: "dead", hurtRecently: true, speed: 5 }))).toEqual({
+      clip: "gs_death",
       loop: false,
       speed: 1,
     });
+    expect(chooseEnemyAnim(enemy({ ai: "dead" })).clip).toBe(ENEMY_LOOKS.brute.clips.death);
   });
 
-  it("telegrafía cuerpo a cuerpo → 1H_Melee_Attack_Chop sin bucle (brute y minion)", () => {
-    for (const kind of ["brute", "minion"] as const) {
+  it("telegrafía → attack del enemigo sin bucle (gana a herido y a correr)", () => {
+    for (const kind of ["brute", "minion", "mage"] as const) {
       const c = chooseEnemyAnim(enemy({ kind, ai: "telegraph", hurtRecently: true, speed: 3 }));
-      expect(c).toEqual({ clip: "1H_Melee_Attack_Chop", loop: false, speed: 1 });
+      expect(c).toEqual({ clip: ENEMY_LOOKS[kind].clips.attack, loop: false, speed: 1 });
     }
   });
 
-  it("telegrafía del mago → Spellcast_Shoot", () => {
-    expect(chooseEnemyAnim(enemy({ kind: "mage", ai: "telegraph" })).clip).toBe("Spellcast_Shoot");
+  it("telegrafía del mago → mg_attack con speed = largo / 0,7", () => {
+    const c = chooseEnemyAnim(enemy({ kind: "mage", ai: "telegraph" }), new Map([["mg_attack", 2.1]]));
+    expect(c.clip).toBe("mg_attack");
+    expect(c.speed).toBeCloseTo(2.1 / 0.7);
   });
 
   it("el speed de la telegrafía hace que el clip termine con ella", () => {
     const lengths = new Map([
-      ["1H_Melee_Attack_Chop", 1.2],
-      ["Spellcast_Shoot", 1.4],
+      [ENEMY_LOOKS.brute.clips.attack, 1.2],
+      [ENEMY_LOOKS.minion.clips.attack, 0.9],
+      [ENEMY_LOOKS.mage.clips.attack, 1.4],
     ]);
     for (const kind of ["brute", "minion", "mage"] as const) {
       const c = chooseEnemyAnim(enemy({ kind, ai: "telegraph" }), lengths);
@@ -136,24 +167,24 @@ describe("chooseEnemyAnim", () => {
     }
   });
 
-  it("herido → Hit_A sin bucle (gana a correr)", () => {
+  it("herido → hit del enemigo sin bucle (gana a correr)", () => {
     const c = chooseEnemyAnim(enemy({ hurtRecently: true, speed: 3 }));
-    expect(c.clip).toBe("Hit_A");
+    expect(c.clip).toBe(ENEMY_LOOKS.brute.clips.hit);
     expect(c.loop).toBe(false);
   });
 
-  it("speed > 0,2 → Running_A; ×1,3 si es minion", () => {
-    expect(chooseEnemyAnim(enemy({ kind: "brute", speed: 3 }))).toEqual({ clip: "Running_A", loop: true, speed: 1 });
-    expect(chooseEnemyAnim(enemy({ kind: "mage", speed: 3 })).speed).toBe(1);
+  it("speed > 0,2 → run del enemigo, a runSpeed (por defecto 1)", () => {
+    expect(chooseEnemyAnim(enemy({ kind: "brute", speed: 3 }))).toEqual({ clip: "cr_run", loop: true, speed: 1 });
+    expect(chooseEnemyAnim(enemy({ kind: "mage", speed: 3 }))).toEqual({ clip: "cr_walking", loop: true, speed: 1 });
     expect(chooseEnemyAnim(enemy({ kind: "minion", speed: 5 }))).toEqual({
-      clip: "Running_A",
+      clip: "cr_run",
       loop: true,
-      speed: 1.3,
+      speed: ENEMY_LOOKS.minion.runSpeed,
     });
   });
 
-  it("recover sin moverse → Idle", () => {
-    expect(chooseEnemyAnim(enemy({ ai: "recover", speed: 0 })).clip).toBe("Idle");
+  it("recover sin moverse → idle", () => {
+    expect(chooseEnemyAnim(enemy({ ai: "recover", speed: 0 })).clip).toBe(ENEMY_LOOKS.brute.clips.idle);
   });
 });
 
