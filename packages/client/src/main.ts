@@ -28,6 +28,7 @@ import { EnemyViews } from "./render/enemyViews";
 import { FloorWeaponViews } from "./render/floorWeaponViews";
 import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
+import { createTorches } from "./render/lighting";
 import { allClipIds } from "./render/looks";
 import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
@@ -117,6 +118,7 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
 function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims: AnimLibrary): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
   const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
+  const torches = createTorches(scene, dungeon);
   const views = new PlayerViews(scene, assets, anims);
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
@@ -233,6 +235,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
       camera.follow(x, z);
+      torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
       floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp: !(mine?.dead ?? true) && swing.swingTimer <= 0 });
     }
@@ -260,6 +263,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.dispose();
     projectiles.dispose();
     floorWeapons.dispose();
+    torches.dispose();
     dungeonMeshes.dispose();
     scene.dispose();
   };

@@ -40,6 +40,7 @@ function flatMaterial(scene: Scene, name: string, color: Color3, alpha = 1): Sta
   m.specularColor = Color3.Black();
   m.emissiveColor = color;
   m.disableLighting = true;
+  m.fogEnabled = false; // la UI se lee aunque esté lejos
   m.backFaceCulling = false;
   m.alpha = alpha;
   return m;

@@ -49,6 +49,7 @@ export class FloorWeaponViews {
     m.specularColor = Color3.Black();
     m.emissiveColor = new Color3(1, 0.8, 0.35);
     m.disableLighting = true;
+    m.fogEnabled = false;
     m.alpha = 0.3;
     this.glow = m;
     this.hint.className = "pickup-hint";

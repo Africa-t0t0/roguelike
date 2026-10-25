@@ -32,6 +32,7 @@ export class ProjectileViews {
     m.specularColor = Color3.Black();
     m.emissiveColor = new Color3(0.55, 1, 0.45);
     m.disableLighting = true;
+    m.fogEnabled = false;
     this.material = m;
   }
 

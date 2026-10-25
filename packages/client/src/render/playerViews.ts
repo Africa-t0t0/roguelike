@@ -42,6 +42,7 @@ function createLabel(scene: Scene, key: string, text: string, parent: TransformN
   mat.diffuseTexture = tex;
   mat.emissiveColor = Color3.White();
   mat.disableLighting = true;
+  mat.fogEnabled = false;
   mat.backFaceCulling = false;
   mat.useAlphaFromDiffuseTexture = true;
 
