@@ -50,17 +50,17 @@ const ORB_RNG_SALT = 0x0b5e;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
-/** Un muerto no se mueve, no salta, no esquiva ni ataca; se conserva su orientación. */
+/** Un muerto no se mueve, no salta, no ataca ni usa habilidades; se conserva su orientación. */
 const deadInput = (input: PlayerInput, k: KinematicState): PlayerInput => ({
   ...input,
   moveX: 0,
   moveZ: 0,
   facing: k.facing,
-  dodge: false,
   sprint: false,
   jump: false,
   attack: false,
   interact: false,
+  abilities: 0,
 });
 
 export class RunRoom extends Room<{ state: RunState }> {
@@ -190,7 +190,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         // Antes del ataque de este input: con un swing en curso no se cambia de arma.
         if (input.interact && !record.combat.dead && record.combat.swingTimer === 0) this.tryPickup(record);
         if (input.attack) {
-          const swing = this.combat.attack(record.combat, record.kinematic, input);
+          const swing = this.combat.attack(record.combat, input);
           if (swing.swung) this.emit({ type: "swing", key: record.key, step: swing.step });
         }
       }
@@ -215,7 +215,7 @@ export class RunRoom extends Room<{ state: RunState }> {
 
     // 5. Golpes vencidos, muertes y reapariciones (los desconectados quedan congelados).
     const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
-    const { damaged, respawned } = this.combat.step(states, kin, this.state.tick, SIM_DT);
+    const { damaged, respawned } = this.combat.step(states, this.state.tick, SIM_DT);
     for (const d of damaged) this.emitPlayerDamage(d.key, d.amount, kin.get(d.key)!);
     for (const key of respawned) {
       const r = connected.find((x) => x.key === key)!;
@@ -330,5 +330,5 @@ export class RunRoom extends Room<{ state: RunState }> {
 }
 
 function still(p: { x: number; z: number }): KinematicState {
-  return { x: p.x, z: p.z, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0, y: 0, vy: 0 };
+  return { x: p.x, z: p.z, facing: 0, y: 0, vy: 0 };
 }

@@ -49,23 +49,11 @@ describe("InputState", () => {
     expect(s.moveZ).toBe(0);
   });
 
-  it("C da dodge=true una sola vez por pulsación, aunque la tecla se repita", () => {
-    const input = new InputState();
-    input.keyDown("KeyC");
-    expect(input.sample(1, 0).dodge).toBe(true);
-    input.keyDown("KeyC"); // autorepetición del teclado
-    expect(input.sample(2, 0).dodge).toBe(false);
-    input.keyUp("KeyC");
-    input.keyDown("KeyC");
-    expect(input.sample(3, 0).dodge).toBe(true);
-  });
-
-  it("Space da jump=true una sola vez por pulsación y no esquiva", () => {
+  it("Space da jump=true una sola vez por pulsación", () => {
     const input = new InputState();
     input.keyDown("Space");
     const s = input.sample(1, 0);
     expect(s.jump).toBe(true);
-    expect(s.dodge).toBe(false);
     input.keyDown("Space"); // autorepetición
     expect(input.sample(2, 0).jump).toBe(false);
   });
@@ -149,12 +137,12 @@ describe("InputState", () => {
 });
 
 describe("withoutActions", () => {
-  it("anula movimiento, salto, esquiva, sprint y ataque; conserva seq, facing y viewTick", () => {
+  it("anula movimiento, salto, sprint, ataque y habilidades; conserva seq, facing y viewTick", () => {
     const input = new InputState();
-    for (const k of ["KeyW", "Space", "KeyC", "ShiftLeft", "Mouse0", "KeyE"]) input.keyDown(k);
-    const s = withoutActions(input.sample(7, 0.5, 12));
+    for (const k of ["KeyW", "Space", "ShiftLeft", "Mouse0", "KeyE"]) input.keyDown(k);
+    const s = withoutActions({ ...input.sample(7, 0.5, 12), abilities: 0b0101 });
     expect(s).toEqual({
-      seq: 7, moveX: 0, moveZ: 0, facing: 0.5, dodge: false, sprint: false, jump: false, attack: false, interact: false, viewTick: 12,
+      seq: 7, moveX: 0, moveZ: 0, facing: 0.5, sprint: false, jump: false, attack: false, interact: false, abilities: 0, viewTick: 12,
     });
   });
 });

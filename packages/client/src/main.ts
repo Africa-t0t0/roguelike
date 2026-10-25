@@ -225,7 +225,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         // El golpe propio arranca su clip ya (como el servidor: tras moverse); el daño lo decide él.
         // Con el arma que dice el servidor: al tomar otra, el combo local vuelve a empezar.
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
-        combo.tick(sampled.attack, { dead, dodging: predictor.current.dodgeTime > 0 }, now, weaponId);
+        combo.tick(sampled.attack, { dead, locked: false }, now, weaponId);
         conn.sendInput(sampled);
       }
       smoother.decay(dt);
@@ -235,10 +235,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       const z = prev.z + (cur.z - prev.z) * a + smoother.z;
       const y = prev.y + (cur.y - prev.y) * a;
       const pose = { x, y, z, facing: lerpAngle(prev.facing, cur.facing, a) };
-      // La esquiva y el arranque del golpe son predichos; la muerte viene del servidor.
+      // El arranque del golpe es predicho; la muerte viene del servidor.
       const swing = combo.heroCombat({ comboStep: mine?.comboStep ?? 0, swingTimer: mine?.swingTimer ?? 0 }, now);
       const state = {
-        dodgeTime: cur.dodgeTime,
         ...swing,
         dead: mine?.dead ?? false,
         weaponId: mine?.weaponId ?? STARTING_WEAPON,

@@ -83,7 +83,7 @@ const player = (key: string) => {
   if (!p) throw new Error(`no hay jugador ${key}`);
   return p;
 };
-const input = (seq: number) => ({ seq, moveX: 1, moveZ: 0, facing: Math.PI / 2, dodge: false });
+const input = (seq: number) => ({ seq, moveX: 1, moveZ: 0, facing: Math.PI / 2 });
 const tileOf = (v: number) => Math.floor(v / TILE_SIZE);
 
 describe("RunRoom: reloj del piso y oleadas", () => {
@@ -295,7 +295,7 @@ const record = (key: string) => {
 };
 const teleport = (key: string, p: { x: number; z: number }) => {
   const r = record(key);
-  r.kinematic = { ...r.kinematic, x: p.x, z: p.z, y: 0, vy: 0, dodgeTime: 0 };
+  r.kinematic = { ...r.kinematic, x: p.x, z: p.z, y: 0, vy: 0 };
 };
 const combatRoom = () => {
   const d = generateDungeon(SEED, 1);
@@ -309,7 +309,7 @@ const collect = (client: ClientRoom) => {
   return events;
 };
 const attackInput = (seq: number, facing: number, viewTick: number) => ({
-  seq, moveX: 0, moveZ: 0, facing, dodge: false, sprint: false, jump: false, attack: true, interact: false, viewTick,
+  seq, moveX: 0, moveZ: 0, facing, sprint: false, jump: false, attack: true, interact: false, abilities: 0, viewTick,
 });
 
 describe("RunRoom: combate", () => {

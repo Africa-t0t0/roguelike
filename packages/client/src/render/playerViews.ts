@@ -19,7 +19,6 @@ const LABEL_ABOVE_HEAD = 0.4; // m sobre PLAYER_LOOK.height
 
 /** Lo que el servidor dice del jugador y que decide su animación (además de la pose dibujada). */
 export interface HeroState {
-  dodgeTime: number;
   comboStep: number;
   swingTimer: number;
   dead: boolean;
@@ -124,7 +123,6 @@ export class PlayerViews {
       speed: view.speed.sample(pose.x, pose.z, dtS),
       moveAngle: view.speed.angleFrom(pose.facing),
       airborne: pose.y > AIRBORNE_Y,
-      dodging: state.dodgeTime > 0,
       comboStep,
       swingTimer,
       dead: state.dead,

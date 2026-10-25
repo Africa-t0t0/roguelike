@@ -11,7 +11,6 @@ import {
   advanceCombo,
   cancelImpact,
   inArc,
-  isInvulnerable,
   playerStats,
   tryStartSwing,
   xpToNext,
@@ -97,11 +96,10 @@ export class CombatSystem {
 
   /**
    * Llamar justo después de simular cada input del jugador (`k` ya refleja ese input) y antes de su ataque.
-   * 1. Si el input lo deja esquivando con un impacto pendiente, el impacto se anula.
-   * 2. Avanza el combo un SIM_DT; si vence el impacto (y no está muerto), lo resuelve rebobinando al
+   * 1. Avanza el combo un SIM_DT; si vence el impacto (y no está muerto), lo resuelve rebobinando al
    *    `viewTick` de este input con la dirección guardada del clic.
-   * 3. Resuelve los golpes enemigos pendientes: si el input lo deja esquivando (o está invulnerable) se
-   *    descartan; si no, se aplican los que ya vio (`viewTick >= resolveTick`).
+   * 2. Resuelve los golpes enemigos pendientes: si está invulnerable se descartan; si no, se aplican
+   *    los que ya vio (`viewTick >= resolveTick`).
    */
   onInputProcessed(
     c: CombatState,
@@ -111,13 +109,12 @@ export class CombatSystem {
     enemies: EnemySystem,
     history: PositionHistory,
   ): InputResult {
-    if (c.impactPending && isInvulnerable(k)) cancelImpact(c);
     const step = c.comboStep;
     const due = advanceCombo(c, SIM_DT);
     const impact = due && !c.dead ? this.resolveImpact(c, k, step, input, nowTick, enemies, history) : null;
 
     if (c.dead || c.pendingHits.length === 0) return { damage: 0, died: false, impact };
-    if (c.invulnFor > 0 || isInvulnerable(k)) {
+    if (c.invulnFor > 0) {
       c.pendingHits = [];
       return { damage: 0, died: false, impact };
     }
@@ -125,9 +122,9 @@ export class CombatSystem {
   }
 
   /** Solo empieza el swing (el daño llega en el impacto, en onInputProcessed) y fija su dirección. */
-  attack(c: CombatState, k: KinematicState, input: PlayerInput): AttackResult {
+  attack(c: CombatState, input: PlayerInput): AttackResult {
     const none: AttackResult = { swung: false, step: 0 };
-    if (!input.attack || c.dead || isInvulnerable(k)) return none;
+    if (!input.attack || c.dead) return none;
     const step = tryStartSwing(c, c.weaponId);
     if (step === 0) return none;
     c.swingFacing = input.facing;
@@ -172,7 +169,6 @@ export class CombatSystem {
   /** Una vez por tick: reapariciones, invulnerabilidad y el plazo máximo de los golpes pendientes. */
   step(
     states: Map<string, CombatState>,
-    kin: Map<string, KinematicState>,
     nowTick: number,
     dt: number,
   ): { damaged: { key: string; amount: number }[]; died: string[]; respawned: string[] } {
@@ -195,8 +191,7 @@ export class CombatSystem {
         continue;
       }
 
-      const k = kin.get(key);
-      if (c.invulnFor > 0 || (k !== undefined && isInvulnerable(k))) {
+      if (c.invulnFor > 0) {
         c.pendingHits = [];
         continue;
       }

@@ -17,7 +17,6 @@ const hero = (over: Partial<HeroAnimInput> = {}): HeroAnimInput => ({
   speed: 0,
   moveAngle: 0,
   airborne: false,
-  dodging: false,
   comboStep: 0,
   swingTimer: 0,
   dead: false,
@@ -41,18 +40,9 @@ describe("chooseHeroAnim", () => {
   });
 
   it("muerto → death del estilo sin bucle, y gana a todo", () => {
-    const all = hero({ dead: true, dodging: true, comboStep: 1, swingTimer: 0.2, airborne: true, hurtRecently: true, speed: 8 });
+    const all = hero({ dead: true, comboStep: 1, swingTimer: 0.2, airborne: true, hurtRecently: true, speed: 8 });
     expect(chooseHeroAnim(all)).toEqual({ clip: "ss_death", loop: false, speed: 1 });
     expect(chooseHeroAnim({ ...all, weaponId: "great-sword" }).clip).toBe("gs_death");
-  });
-
-  it("esquivando → run del estilo a ×2, y gana al ataque", () => {
-    expect(chooseHeroAnim(hero({ dodging: true, comboStep: 2, swingTimer: 0.2, speed: 8 }))).toEqual({
-      clip: "ss_run",
-      loop: true,
-      speed: 2,
-    });
-    expect(chooseHeroAnim(hero({ weaponId: "great-sword", dodging: true })).clip).toBe("gs_run_2");
   });
 
   it("cada paso del combo de la espada tiene su clip, sin bucle", () => {
@@ -157,13 +147,12 @@ describe("moveSector / heroBodyYaw", () => {
     expect(moveSector(3 * Math.PI).dir).toBe("runBack"); // se normaliza
   });
 
-  it("sin giro quieto, atacando, en el aire, esquivando o muerto", () => {
+  it("sin giro quieto, atacando, en el aire o muerto", () => {
     const diag = { speed: 5, moveAngle: Math.PI / 4 };
     expect(heroBodyYaw(hero(diag))).toBeCloseTo(Math.PI / 4);
     expect(heroBodyYaw(hero({ moveAngle: Math.PI / 4 }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, comboStep: 1, swingTimer: 0.1 }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, airborne: true }))).toBe(0);
-    expect(heroBodyYaw(hero({ ...diag, dodging: true }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, dead: true }))).toBe(0);
   });
 });

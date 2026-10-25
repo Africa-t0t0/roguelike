@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  DODGE_COOLDOWN,
-  DODGE_DURATION,
-  DODGE_SPEED,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   SIM_DT,
   SPRINT_SPEED,
   TILE_SIZE,
-  isInvulnerable,
+  NO_MOVE_MODS,
   sanitizeInput,
   stepPlayer,
   type Dungeon,
@@ -39,10 +36,6 @@ const initial = (): KinematicState => ({
   x: center,
   z: center,
   facing: 0,
-  dodgeTime: 0,
-  dodgeCooldown: 0,
-  dodgeDirX: 0,
-  dodgeDirZ: 0,
   y: 0,
   vy: 0,
 });
@@ -51,11 +44,11 @@ const input = (p: Partial<PlayerInput> = {}): PlayerInput => ({
   moveX: 0,
   moveZ: 0,
   facing: 0,
-  dodge: false,
   sprint: false,
   jump: false,
   attack: false,
   interact: false,
+  abilities: 0,
   viewTick: 0,
   ...p,
 });
@@ -92,16 +85,6 @@ describe("correr y saltar", () => {
     const vyBefore = s.vy;
     s = stepPlayer(s, input({ jump: true }), d, SIM_DT);
     expect(s.vy).toBeLessThan(vyBefore); // solo la gravedad, sin nuevo impulso
-  });
-
-  it("no se puede esquivar en el aire ni saltar durante un esquive", () => {
-    let air = stepPlayer(initial(), input({ jump: true }), d, SIM_DT);
-    air = stepPlayer(air, input({ moveX: 1, dodge: true }), d, SIM_DT);
-    expect(air.dodgeTime).toBe(0);
-
-    let dodging = stepPlayer(initial(), input({ moveX: 1, dodge: true }), d, SIM_DT);
-    dodging = stepPlayer(dodging, input({ moveX: 1, jump: true }), d, SIM_DT);
-    expect(dodging.y).toBe(0);
   });
 
   it("se puede saltar corriendo y moverse en el aire", () => {
@@ -149,60 +132,57 @@ describe("stepPlayer", () => {
     expect(s.x).toBeCloseTo(11 * TILE_SIZE - PLAYER_RADIUS, 6);
   });
 
-  it("esquive recorre exactamente DODGE_SPEED * DODGE_DURATION", () => {
-    let s = stepPlayer(initial(), input({ moveX: 1, dodge: true }), d, SIM_DT);
-    expect(isInvulnerable(s)).toBe(true);
-    expect(s.dodgeCooldown).toBeCloseTo(DODGE_COOLDOWN, 9);
-    for (let i = 0; i < 8; i++) s = stepPlayer(s, input(), d, SIM_DT);
-    expect(s.x - center).toBeCloseTo(DODGE_SPEED * DODGE_DURATION, 6);
-    expect(isInvulnerable(s)).toBe(false);
-    expect(s.dodgeTime).toBe(0);
+  it("con speedMult 1.5 avanza PLAYER_SPEED × 1.5 × dt", () => {
+    const s = stepPlayer(initial(), input({ moveX: 1 }), d, SIM_DT, { speedMult: 1.5 });
+    expect(s.x - center).toBeCloseTo(PLAYER_SPEED * 1.5 * SIM_DT, 9);
   });
 
-  it("un segundo esquive antes del cooldown no hace nada", () => {
-    let s = stepPlayer(initial(), input({ moveX: 1, dodge: true }), d, SIM_DT);
-    for (let i = 0; i < 8; i++) s = stepPlayer(s, input(), d, SIM_DT);
-    expect(s.dodgeCooldown).toBeGreaterThan(0);
-    s = stepPlayer(s, input({ moveX: 1, dodge: true }), d, SIM_DT);
-    expect(isInvulnerable(s)).toBe(false);
+  it("con sprint y speedMult 1.5 avanza SPRINT_SPEED × 1.5 × dt", () => {
+    const s = stepPlayer(initial(), input({ moveX: 1, sprint: true }), d, SIM_DT, { speedMult: 1.5 });
+    expect(s.x - center).toBeCloseTo(SPRINT_SPEED * 1.5 * SIM_DT, 9);
   });
 
-  it("esquivar sin movimiento no hace nada ni gasta cooldown", () => {
-    const s = stepPlayer(initial(), input({ dodge: true }), d, SIM_DT);
-    expect(isInvulnerable(s)).toBe(false);
-    expect(s.dodgeCooldown).toBe(0);
-  });
-
-  it("el cooldown vuelve a permitir esquivar y los timers no son negativos", () => {
-    let s = stepPlayer(initial(), input({ moveX: 1, dodge: true }), d, SIM_DT);
-    for (let i = 0; i < 40; i++) s = stepPlayer(s, input(), d, SIM_DT);
-    expect(s.dodgeCooldown).toBe(0);
-    s = stepPlayer(s, input({ moveZ: 1, dodge: true }), d, SIM_DT);
-    expect(isInvulnerable(s)).toBe(true);
+  it("sin mods es lo mismo que NO_MOVE_MODS (speedMult 1)", () => {
+    expect(NO_MOVE_MODS).toEqual({ speedMult: 1 });
+    const a = stepPlayer(initial(), input({ moveX: 1 }), d, SIM_DT);
+    const b = stepPlayer(initial(), input({ moveX: 1 }), d, SIM_DT, NO_MOVE_MODS);
+    expect(a).toEqual(b);
   });
 
   it("no muta su argumento", () => {
     const s = initial();
     const copy = JSON.parse(JSON.stringify(s)) as KinematicState;
-    stepPlayer(s, input({ moveX: 1, dodge: true }), d, SIM_DT);
+    stepPlayer(s, input({ moveX: 1, jump: true }), d, SIM_DT);
     expect(s).toEqual(copy);
   });
 });
 
 describe("sanitizeInput", () => {
   it("limpia valores inválidos", () => {
-    expect(sanitizeInput({ seq: 1, moveX: NaN, moveZ: 5, facing: 0, dodge: "yes" })).toEqual({
+    expect(sanitizeInput({ seq: 1, moveX: NaN, moveZ: 5, facing: 0, dodge: true })).toEqual({
       seq: 1,
       moveX: 0,
       moveZ: 1,
       facing: 0,
-      dodge: false,
       sprint: false,
       jump: false,
       attack: false,
       interact: false,
+      abilities: 0,
       viewTick: 0,
     });
+  });
+  it("acota abilities a un entero de 0 a 15", () => {
+    expect(sanitizeInput({ seq: 1, abilities: 5 })?.abilities).toBe(5);
+    expect(sanitizeInput({ seq: 1, abilities: 15 })?.abilities).toBe(15);
+    expect(sanitizeInput({ seq: 1, abilities: 16 })?.abilities).toBe(15);
+    expect(sanitizeInput({ seq: 1, abilities: -1 })?.abilities).toBe(0);
+    expect(sanitizeInput({ seq: 1, abilities: "3" })?.abilities).toBe(0);
+    expect(sanitizeInput({ seq: 1, abilities: 2.7 })?.abilities).toBe(2);
+    expect(sanitizeInput({ seq: 1, abilities: NaN })?.abilities).toBe(0);
+  });
+  it("ignora un dodge que venga", () => {
+    expect(sanitizeInput({ seq: 1, dodge: true })).not.toHaveProperty("dodge");
   });
   it("rechaza entradas que no son input", () => {
     expect(sanitizeInput("x")).toBeNull();

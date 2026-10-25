@@ -1,7 +1,4 @@
 import {
-  DODGE_COOLDOWN,
-  DODGE_DURATION,
-  DODGE_SPEED,
   GRAVITY,
   JUMP_VELOCITY,
   PLAYER_RADIUS,
@@ -15,11 +12,6 @@ export interface KinematicState {
   x: number;
   z: number;
   facing: number;
-  /** segundos restantes de esquive */
-  dodgeTime: number;
-  dodgeCooldown: number;
-  dodgeDirX: number;
-  dodgeDirZ: number;
   /** altura sobre el suelo (m); 0 = en el suelo */
   y: number;
   /** velocidad vertical (m/s) */
@@ -31,16 +23,25 @@ export interface PlayerInput {
   moveX: number;
   moveZ: number;
   facing: number;
-  dodge: boolean;
   sprint: boolean;
   jump: boolean;
   attack: boolean;
   interact: boolean;
+  /** máscara de 4 bits: bit i = tecla de habilidad i+1 mantenida */
+  abilities: number;
   /** tick del servidor que el cliente estaba viendo al atacar (para rebobinar) */
   viewTick: number;
 }
 
+/** Modificadores de movimiento (mejoras, Bloqueo); el servidor y la predicción usan los mismos. */
+export interface MoveMods {
+  speedMult: number;
+}
+
+export const NO_MOVE_MODS: MoveMods = { speedMult: 1 };
+
 const EPS = 1e-6;
+const ABILITIES_MASK_MAX = 15;
 
 function finiteOrZero(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
@@ -62,17 +63,19 @@ export function sanitizeInput(raw: unknown): PlayerInput | null {
     moveX,
     moveZ,
     facing: finiteOrZero(r.facing),
-    dodge: r.dodge === true,
     sprint: r.sprint === true,
     jump: r.jump === true,
     attack: r.attack === true,
     interact: r.interact === true,
+    abilities: sanitizeAbilities(r.abilities),
     viewTick: typeof r.viewTick === "number" && Number.isFinite(r.viewTick) && r.viewTick >= 0 ? r.viewTick : 0,
   };
 }
 
-export function isInvulnerable(s: KinematicState): boolean {
-  return s.dodgeTime > 0;
+/** La máscara de habilidades como entero de 0 a 15; cualquier otra cosa da 0. */
+function sanitizeAbilities(v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  return Math.min(ABILITIES_MASK_MAX, Math.max(0, Math.floor(v)));
 }
 
 /** Mueve el círculo en un eje contra las casillas de muro; el otro eje queda fijo. */
@@ -132,40 +135,18 @@ export function stepPlayer(
   input: PlayerInput,
   d: Dungeon,
   dt: number,
+  mods: MoveMods = NO_MOVE_MODS,
 ): KinematicState {
-  let { dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ, y, vy } = s;
-  const grounded = y <= 0;
-  const cooldownReady = dodgeCooldown <= 0;
-  dodgeCooldown = Math.max(0, dodgeCooldown - dt);
+  let { y, vy } = s;
 
-  // Salto: solo desde el suelo y fuera de un esquive. Esquive: solo en el suelo.
-  if (input.jump && grounded && dodgeTime <= 0) vy = JUMP_VELOCITY;
-  if (input.dodge && grounded && vy === 0 && cooldownReady && dodgeTime <= 0) {
-    const len = Math.hypot(input.moveX, input.moveZ);
-    if (len > 0) {
-      dodgeDirX = input.moveX / len;
-      dodgeDirZ = input.moveZ / len;
-      dodgeTime = DODGE_DURATION;
-      dodgeCooldown = DODGE_COOLDOWN;
-    }
-  }
+  // Salto: solo desde el suelo.
+  if (input.jump && y <= 0) vy = JUMP_VELOCITY;
 
-  let dx: number;
-  let dz: number;
-  let facing = input.facing;
-  if (dodgeTime > 0) {
-    const t = Math.min(dt, dodgeTime);
-    dx = dodgeDirX * DODGE_SPEED * t;
-    dz = dodgeDirZ * DODGE_SPEED * t;
-    dodgeTime = Math.max(0, dodgeTime - dt);
-    facing = s.facing;
-  } else {
-    const len = Math.hypot(input.moveX, input.moveZ);
-    const k = len > 1 ? 1 / len : 1;
-    const speed = input.sprint ? SPRINT_SPEED : PLAYER_SPEED;
-    dx = input.moveX * k * speed * dt;
-    dz = input.moveZ * k * speed * dt;
-  }
+  const len = Math.hypot(input.moveX, input.moveZ);
+  const k = len > 1 ? 1 / len : 1;
+  const speed = (input.sprint ? SPRINT_SPEED : PLAYER_SPEED) * mods.speedMult;
+  const dx = input.moveX * k * speed * dt;
+  const dz = input.moveZ * k * speed * dt;
 
   // Euler semi-implícito; el suelo es plano (y = 0) y los muros se resuelven solo en XZ.
   if (vy !== 0 || y > 0) {
@@ -178,5 +159,5 @@ export function stepPlayer(
   }
 
   const { x, z } = moveCircle(d, s.x, s.z, dx, dz, PLAYER_RADIUS);
-  return { x, z, facing, dodgeTime, dodgeCooldown, dodgeDirX, dodgeDirZ, y, vy };
+  return { x, z, facing: input.facing, y, vy };
 }

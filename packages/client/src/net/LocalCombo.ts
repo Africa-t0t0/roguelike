@@ -25,15 +25,15 @@ export class LocalCombo {
 
   /**
    * Un paso de simulación con el `attack` enviado y el arma equipada (la que informa el servidor).
-   * Devuelve el golpe que arrancó (1..n) o 0.
+   * `locked`: algo impide atacar (p. ej. una habilidad en curso). Devuelve el golpe que arrancó (1..n) o 0.
    */
-  tick(attack: boolean, blocked: { dead: boolean; dodging: boolean }, nowMs: number, weaponId: WeaponId): number {
+  tick(attack: boolean, blocked: { dead: boolean; locked: boolean }, nowMs: number, weaponId: WeaponId): number {
     if (weaponId !== this.weaponId) {
       this.weaponId = weaponId;
       this.c = newComboTimers();
     }
     advanceCombo(this.c, SIM_DT);
-    if (!attack || blocked.dead || blocked.dodging) return 0;
+    if (!attack || blocked.dead || blocked.locked) return 0;
     const started = tryStartSwing(this.c, weaponId);
     if (started) this.lastEndMs = nowMs + this.c.swingTimer * 1000;
     return started;

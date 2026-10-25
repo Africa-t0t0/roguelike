@@ -25,15 +25,11 @@ const initial: KinematicState = {
   x: 10,
   z: 40,
   facing: 0,
-  dodgeTime: 0,
-  dodgeCooldown: 0,
-  dodgeDirX: 0,
-  dodgeDirZ: 0,
   y: 0,
   vy: 0,
 };
 
-const input = (seq: number): PlayerInput => ({ seq, moveX: 1, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false, attack: false, interact: false, viewTick: 0 });
+const input = (seq: number): PlayerInput => ({ seq, moveX: 1, moveZ: 0, facing: 0, sprint: false, jump: false, attack: false, interact: false, abilities: 0, viewTick: 0 });
 
 function setup() {
   const p = new Predictor(initial, dungeon);
@@ -72,5 +68,24 @@ describe("Predictor", () => {
     const p = new Predictor(initial, dungeon);
     for (let seq = 1; seq <= 200; seq++) p.applyLocal(input(seq));
     expect(p.pendingCount).toBe(MAX_PENDING_INPUTS);
+  });
+
+  it("con setMoveMods predice igual que stepPlayer con esos mods, también al reconciliar", () => {
+    const mods = { speedMult: 1.2 };
+    const p = new Predictor(initial, dungeon);
+    p.setMoveMods(mods);
+    let expected = initial;
+    for (let seq = 1; seq <= 10; seq++) {
+      p.applyLocal(input(seq));
+      expected = stepPlayer(expected, input(seq), dungeon, SIM_DT, mods);
+    }
+    expect(p.current.x).toBeCloseTo(expected.x, 9);
+    expect(p.current.x).toBeGreaterThan(stepPlayer(initial, input(1), dungeon, SIM_DT).x + 9 * SIM_DT);
+
+    let server = initial;
+    for (let seq = 1; seq <= 4; seq++) server = stepPlayer(server, input(seq), dungeon, SIM_DT, mods);
+    p.reconcile(server, 4);
+    expect(p.current.x).toBeCloseTo(expected.x, 9);
+    expect(p.pendingCount).toBe(6);
   });
 });

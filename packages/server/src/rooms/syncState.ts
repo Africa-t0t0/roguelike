@@ -10,10 +10,6 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord): void {
   ps.x = k.x;
   ps.z = k.z;
   ps.facing = k.facing;
-  ps.dodgeTime = k.dodgeTime;
-  ps.dodgeCooldown = k.dodgeCooldown;
-  ps.dodgeDirX = k.dodgeDirX;
-  ps.dodgeDirZ = k.dodgeDirZ;
   ps.y = k.y;
   ps.vy = k.vy;
   ps.lastSeq = record.lastSeq;

@@ -3,7 +3,7 @@ import { MOVESETS, SIM_DT, type WeaponId } from "@roguelike/shared";
 import { LocalCombo } from "../src/net/LocalCombo";
 
 const [c1, c2, c3] = MOVESETS["one-hand-sword"].combo;
-const free = { dead: false, dodging: false };
+const free = { dead: false, locked: false };
 
 /** Avanza `seconds` de simulación con el clic en `attack`; devuelve los pasos que arrancaron. */
 function run(combo: LocalCombo, seconds: number, attack: boolean, nowMs = 0, weaponId: WeaponId = "kingslayer-sword"): number[] {
@@ -55,10 +55,10 @@ describe("LocalCombo", () => {
     expect(combo.tick(true, free, 0, "kingslayer-sword")).toBe(2);
   });
 
-  it("muerto o esquivando no arranca golpes", () => {
+  it("muerto o bloqueado (locked) no arranca golpes", () => {
     const combo = new LocalCombo();
-    expect(combo.tick(true, { dead: true, dodging: false }, 0, "kingslayer-sword")).toBe(0);
-    expect(combo.tick(true, { dead: false, dodging: true }, 0, "kingslayer-sword")).toBe(0);
+    expect(combo.tick(true, { dead: true, locked: false }, 0, "kingslayer-sword")).toBe(0);
+    expect(combo.tick(true, { dead: false, locked: true }, 0, "kingslayer-sword")).toBe(0);
     expect(combo.tick(true, free, 0, "kingslayer-sword")).toBe(1);
   });
 

@@ -21,7 +21,6 @@ export interface HeroAnimInput {
   /** dirección del movimiento respecto de hacia dónde mira, en rad: 0 adelante, π/2 derecha, −π/2 izquierda */
   moveAngle: number;
   airborne: boolean;
-  dodging: boolean;
   comboStep: number;
   swingTimer: number;
   dead: boolean;
@@ -39,8 +38,6 @@ export interface EnemyAnimInput {
 
 const MOVING_SPEED = 0.2; // m/s
 const SPRINT_SPEED = 6; // m/s
-/** La esquiva no tiene clip propio: corre con el clip del estilo a esta velocidad. */
-const DODGE_RUN_SPEED = 2;
 
 /** Límites de la velocidad de reproducción al ajustar el paso: fuera de ellos el clip se ve mal. */
 const MIN_STRIDE_RATE = 0.6;
@@ -77,13 +74,12 @@ const once = (clip: string, speed = 1): AnimChoice => ({ clip, loop: false, spee
 const looped = (clip: string, speed = 1): AnimChoice => ({ clip, loop: true, speed });
 
 /**
- * Clips del estilo del arma. Reglas por prioridad: muerte, esquiva, ataque, aire, golpe recibido,
+ * Clips del estilo del arma. Reglas por prioridad: muerte, ataque, aire, golpe recibido,
  * correr, quieto.
  */
 export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): AnimChoice {
   const { locomotion, combo } = MOVESETS[WEAPONS[a.weaponId].movesetId];
   if (a.dead) return once(locomotion.death);
-  if (a.dodging) return looped(locomotion.run, DODGE_RUN_SPEED);
   if (a.swingTimer > 0 && a.comboStep >= 1 && a.comboStep <= combo.length) {
     const strike = strikeOf(a.weaponId, a.comboStep);
     return once(strike.clip, fitTo(strike.clip, strike.duration, clipLengths));
@@ -98,7 +94,7 @@ export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): Ani
 
 /** Giro del cuerpo (rad) respecto de la mirada: solo al correr, para que el clip apunte a donde va. */
 export function heroBodyYaw(a: HeroAnimInput): number {
-  const running = !a.dead && !a.dodging && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1);
+  const running = !a.dead && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1);
   return running && a.speed > MOVING_SPEED ? moveSector(a.moveAngle).yaw : 0;
 }
 

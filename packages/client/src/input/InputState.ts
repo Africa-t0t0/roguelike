@@ -3,16 +3,14 @@ import type { PlayerInput } from "@roguelike/shared";
 /** Teclado y clic izquierdo ("Mouse0") → `PlayerInput`, relativo a la cámara. Lógica pura, sin DOM. */
 export class InputState {
   private readonly held = new Set<string>();
-  private dodgeQueued = false;
   private jumpQueued = false;
   private attackQueued = false;
   private interactQueued = false;
   private facing = 0;
 
   keyDown(code: string): void {
-    // La autorepetición del teclado no vuelve a disparar el esquive ni el salto.
+    // La autorepetición del teclado no vuelve a disparar el salto.
     if (!this.held.has(code)) {
-      if (code === "KeyC") this.dodgeQueued = true;
       if (code === "Space") this.jumpQueued = true;
       if (code === "Mouse0") this.attackQueued = true;
       // Una vez por pulsación: el servidor cambia de arma con cada input que traiga `interact`.
@@ -28,7 +26,6 @@ export class InputState {
   /** Suelta todo: la ventana perdió el foco y no vamos a recibir los keyup. */
   blur(): void {
     this.held.clear();
-    this.dodgeQueued = false;
     this.jumpQueued = false;
     this.attackQueued = false;
     this.interactQueued = false;
@@ -58,14 +55,12 @@ export class InputState {
     const attack = this.attackQueued || this.held.has("Mouse0");
     this.attackQueued = false;
     if (attack) this.facing = cameraYaw; // se golpea hacia donde mira la cámara
-    const dodge = this.dodgeQueued;
     const jump = this.jumpQueued;
-    this.dodgeQueued = false;
     this.jumpQueued = false;
     const interact = this.interactQueued;
     this.interactQueued = false;
     const sprint = this.held.has("ShiftLeft") || this.held.has("ShiftRight");
-    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump, attack, interact, viewTick };
+    return { seq, moveX, moveZ, facing: this.facing, sprint, jump, attack, interact, abilities: 0, viewTick };
   }
 
   private axis(positive: string, negative: string): number {
@@ -73,7 +68,7 @@ export class InputState {
   }
 }
 
-/** El mismo input sin acciones (p. ej. muerto): sin moverse, saltar, esquivar, correr, atacar ni tomar armas. */
+/** El mismo input sin acciones (p. ej. muerto): sin moverse, saltar, correr, atacar, tomar armas ni usar habilidades. */
 export function withoutActions(input: PlayerInput): PlayerInput {
-  return { ...input, moveX: 0, moveZ: 0, dodge: false, sprint: false, jump: false, attack: false, interact: false };
+  return { ...input, moveX: 0, moveZ: 0, sprint: false, jump: false, attack: false, interact: false, abilities: 0 };
 }

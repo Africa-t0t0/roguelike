@@ -29,7 +29,7 @@ pulsa **Crear sala**. El código de la sala aparece arriba a la derecha: compár
 con **Unirse**.
 
 Controles: haz clic en el juego para mirar con el mouse (Esc suelta el puntero), WASD para caminar,
-Shift (mantener) para correr, Espacio para saltar, C para esquivar, clic izquierdo para atacar
+Shift (mantener) para correr, Espacio para saltar, clic izquierdo para atacar
 (mantener para encadenar el combo) y E para tomar un arma del suelo.
 
 Armas: empiezas con la Espada del Kingslayer. En la sala inicial hay armas tiradas que solo ves tú

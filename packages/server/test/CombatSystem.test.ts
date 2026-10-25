@@ -44,10 +44,10 @@ function world(x: number, z: number, hp = 20) {
 }
 
 const kin = (over: Partial<KinematicState> = {}): KinematicState => ({
-  x: 0, z: 0, facing: 0, dodgeTime: 0, dodgeCooldown: 0, dodgeDirX: 0, dodgeDirZ: 0, y: 0, vy: 0, ...over,
+  x: 0, z: 0, facing: 0, y: 0, vy: 0, ...over,
 });
 const input = (over: Partial<PlayerInput> = {}): PlayerInput => ({
-  seq: 1, moveX: 0, moveZ: 0, facing: 0, dodge: false, sprint: false, jump: false, attack: true, interact: false, viewTick: 0, ...over,
+  seq: 1, moveX: 0, moveZ: 0, facing: 0, sprint: false, jump: false, attack: true, interact: false, abilities: 0, viewTick: 0, ...over,
 });
 
 /** Un input procesado (combo e impacto) y, si trae `attack`, su ataque (como hace RunRoom). */
@@ -62,7 +62,7 @@ function press(
   const inp = input({ attack, ...over.inp });
   const k = kin(over.k);
   const r = cs.onInputProcessed(c, k, inp, over.now ?? 100, sys, h);
-  const swing = attack ? cs.attack(c, k, inp) : undefined;
+  const swing = attack ? cs.attack(c, inp) : undefined;
   return { swing, impact: r.impact, r };
 }
 const noEnemies = () => world(0, 50).sys;
@@ -110,7 +110,7 @@ describe("combo", () => {
     const c = newCombatState("warrior", 1);
     const h = new PositionHistory();
     expect(press(cs, c, sys, h, true).swing!.swung).toBe(true);
-    for (let t = 1; t <= 30; t++) cs.step(new Map([["a", c]]), new Map([["a", kin()]]), 100 + t, SIM_DT);
+    for (let t = 1; t <= 30; t++) cs.step(new Map([["a", c]]), 100 + t, SIM_DT);
     expect(c.swingTimer).toBeGreaterThan(0);
     expect(c.impactPending).toBe(true);
     expect(e.hp).toBe(20);
@@ -144,7 +144,7 @@ describe("combo", () => {
               sent++;
               result = press(cs, c, sys, h, sent === gap);
             }
-            cs.step(new Map([["a", c]]), new Map([["a", kin()]]), ++tick, SIM_DT);
+            cs.step(new Map([["a", c]]), ++tick, SIM_DT);
           }
           expect(result!.swing!.swung, `golpe ${k + 1}, ${gap} inputs`).toBe(gap === n);
         }
@@ -169,7 +169,7 @@ describe("combo", () => {
     const c = newCombatState("warrior", 1);
     const h = new PositionHistory();
     let swings = 0;
-    for (let i = 0; i < 50; i++) if (cs.attack(c, kin(), input({ viewTick: 100 })).swung) swings++;
+    for (let i = 0; i < 50; i++) if (cs.attack(c, input({ viewTick: 100 })).swung) swings++;
     expect(swings).toBe(1);
     expect(e.hp).toBe(500);
     let impacts = 0;
@@ -186,13 +186,12 @@ describe("combo", () => {
     expect(e.hp).toBe(488);
   });
 
-  it("no ataca muerto, esquivando ni sin input.attack", () => {
+  it("no ataca muerto ni sin input.attack", () => {
     const cs = new CombatSystem();
     const dead = newCombatState("warrior", 1);
     dead.dead = true;
-    expect(cs.attack(dead, kin(), input()).swung).toBe(false);
-    expect(cs.attack(newCombatState("warrior", 1), kin({ dodgeTime: 0.1 }), input()).swung).toBe(false);
-    expect(cs.attack(newCombatState("warrior", 1), kin(), input({ attack: false })).swung).toBe(false);
+    expect(cs.attack(dead, input()).swung).toBe(false);
+    expect(cs.attack(newCombatState("warrior", 1), input({ attack: false })).swung).toBe(false);
   });
 
   it("newCombatState usa STARTING_WEAPON por defecto y acepta otra arma", () => {
@@ -326,29 +325,6 @@ describe("impacto", () => {
 });
 
 describe("Foco 1: golpe cancelado", () => {
-  it("empezar una esquiva entre el clic y el impacto anula el impacto (el swing sí se hizo)", () => {
-    const { sys, e } = world(0, 1, 100);
-    const cs = new CombatSystem();
-    const c = newCombatState("warrior", 1);
-    const h = new PositionHistory();
-    expect(press(cs, c, sys, h, true).swing!.swung).toBe(true);
-    press(cs, c, sys, h, false);
-    expect(press(cs, c, sys, h, false, { k: { dodgeTime: 0.3 } }).impact).toBeNull();
-    for (let i = 0; i < 30; i++) expect(press(cs, c, sys, h, false).impact).toBeNull();
-    expect(e.hp).toBe(100);
-  });
-
-  it("una esquiva en el mismo input en que vencería el impacto también lo anula", () => {
-    const { sys, e } = world(0, 1, 100);
-    const cs = new CombatSystem();
-    const c = newCombatState("warrior", 1);
-    const h = new PositionHistory();
-    press(cs, c, sys, h, true);
-    for (let i = 1; i < 5; i++) press(cs, c, sys, h, false);
-    expect(press(cs, c, sys, h, false, { k: { dodgeTime: 0.3 } }).impact).toBeNull();
-    expect(e.hp).toBe(100);
-  });
-
   it("morir en step() entre el clic y el impacto lo anula, también tras reaparecer", () => {
     const { sys, e } = world(0, 1, 100);
     const cs = new CombatSystem();
@@ -358,11 +334,11 @@ describe("Foco 1: golpe cancelado", () => {
     const states = new Map([["a", c]]);
     press(cs, c, sys, h, true);
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 0);
-    expect(cs.step(states, new Map([["a", kin()]]), REWIND_MAX_TICKS, SIM_DT).died).toEqual(["a"]);
+    expect(cs.step(states, REWIND_MAX_TICKS, SIM_DT).died).toEqual(["a"]);
     expect(c.impactPending).toBe(false);
     for (let i = 0; i < 10; i++) expect(press(cs, c, sys, h, false).impact).toBeNull();
     c.respawnIn = SIM_DT;
-    cs.step(states, new Map([["a", kin()]]), REWIND_MAX_TICKS + 1, SIM_DT);
+    cs.step(states, REWIND_MAX_TICKS + 1, SIM_DT);
     expect(c.dead).toBe(false);
     for (let i = 0; i < 10; i++) expect(press(cs, c, sys, h, false).impact).toBeNull();
     expect(e.hp).toBe(100);
@@ -417,7 +393,7 @@ describe("Foco 2: la misma arma rápida y lenta", () => {
           expect(sent - 1).toBe(5);
         }
       }
-      cs.step(states, new Map([["a", kin()]]), tick + 1, SIM_DT);
+      cs.step(states, tick + 1, SIM_DT);
     }
     expect(impacts).toBe(1);
     expect(e.hp).toBe(90);
@@ -470,12 +446,12 @@ describe("golpes de enemigos", () => {
   function ctx(c: CombatState) {
     const states = new Map([["a", c]]);
     const cs = new CombatSystem();
-    const tick = (t: number, k = kin()) => cs.step(states, new Map([["a", k]]), t, SIM_DT);
+    const tick = (t: number) => cs.step(states, t, SIM_DT);
     return { states, cs, tick };
   }
   const idle = (viewTick: number) => input({ attack: false, interact: false, viewTick });
 
-  it("se aplica en cuanto llega un input con viewTick >= H sin esquivar", () => {
+  it("se aplica en cuanto llega un input con viewTick >= H", () => {
     const c = newCombatState("warrior", 1);
     const { states, cs, tick } = ctx(c);
     cs.queueEnemyHits(states, hit(6), H);
@@ -486,18 +462,6 @@ describe("golpes de enemigos", () => {
     expect(cs.onInputProcessed(c, kin(), idle(H), H + 1, noEnemies(), new PositionHistory())).toEqual({ damage: 6, died: false, impact: null });
     expect(c.hp).toBe(114);
     expect(c.pendingHits).toHaveLength(0);
-  });
-
-  it("se descarta si un input (aunque con viewTick < H) empieza una esquiva", () => {
-    const c = newCombatState("warrior", 1);
-    const { states, cs, tick } = ctx(c);
-    cs.queueEnemyHits(states, hit(6), H);
-    for (let t = H; t <= H + 2; t++) tick(t);
-    // procesado en el tick 103
-    expect(cs.onInputProcessed(c, kin({ dodgeTime: 0.2 }), idle(H - 1), H + 3, noEnemies(), new PositionHistory()).damage).toBe(0);
-    expect(c.pendingHits).toHaveLength(0);
-    for (let t = H + 3; t <= H + REWIND_MAX_TICKS + 2; t++) expect(tick(t).damaged).toEqual([]);
-    expect(c.hp).toBe(120);
   });
 
   it("sin inputs se aplica en el tick H + REWIND_MAX_TICKS", () => {
@@ -533,10 +497,9 @@ describe("muerte y reaparición", () => {
     const c = newCombatState("warrior", 1);
     c.hp = 10;
     const states = new Map([["a", c]]);
-    const kins = new Map([["a", kin()]]);
     const cs = new CombatSystem();
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 0);
-    const r = cs.step(states, kins, REWIND_MAX_TICKS, 0.2);
+    const r = cs.step(states, REWIND_MAX_TICKS, 0.2);
     expect(r.died).toEqual(["a"]);
     expect(c.dead).toBe(true);
     expect(c.respawnIn).toBe(5);
@@ -544,7 +507,7 @@ describe("muerte y reaparición", () => {
 
     let respawned: string[] = [];
     for (let i = 0; i < 10; i++) {
-      const rr = cs.step(states, kins, REWIND_MAX_TICKS + 1 + i, 0.5);
+      const rr = cs.step(states, REWIND_MAX_TICKS + 1 + i, 0.5);
       if (rr.respawned.length) respawned = rr.respawned;
     }
     expect(respawned).toEqual(["a"]);
@@ -555,7 +518,7 @@ describe("muerte y reaparición", () => {
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
     expect(cs.onInputProcessed(c, kin(), input({ attack: false, interact: false, viewTick: 100 }), 100, noEnemies(), new PositionHistory()).damage).toBe(0);
     cs.queueEnemyHits(states, [{ targetKey: "a", damage: 12, sourceId: "e" }], 100);
-    cs.step(states, kins, 100 + REWIND_MAX_TICKS, 0.2);
+    cs.step(states, 100 + REWIND_MAX_TICKS, 0.2);
     expect(c.hp).toBe(120);
     expect(c.pendingHits).toHaveLength(0);
   });
