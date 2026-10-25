@@ -1,6 +1,7 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import type { Scene } from "@babylonjs/core/scene";
 import {
+  BLOCK_MOVE_MULT,
   generateDungeon,
   INTERP_DELAY_MS,
   JOIN_ERROR_STATUS,
@@ -14,6 +15,7 @@ import { InputState, withoutActions } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
 import { connect, parseFloorTimeStart, type GameConnection, type PlayerSnapshot } from "./net/connection";
 import { parseLagParams } from "./net/LagSimulator";
+import { LocalAbility } from "./net/LocalAbility";
 import { LocalCombo } from "./net/LocalCombo";
 import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
@@ -142,6 +144,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const hurtFlash = new HurtFlash();
   const tickClock = createTickClock(); // tick del servidor que se está viendo → viewTick
   const combo = new LocalCombo();
+  const ability = new LocalAbility();
 
   const remotes = new Map<string, SnapshotBuffer<PlayerSnapshot>>();
   const smoother = new CorrectionSmoother();
@@ -163,6 +166,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       }
       mine = p;
       hud.setPlayer(p);
+      ability.setServer(p.abilities, performance.now());
       if (!predictor || !prev) {
         predictor = new Predictor(p, dungeon);
         prev = { ...p };
@@ -194,6 +198,10 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     const now = performance.now();
     if (event.type === "swing") {
       if (event.key !== conn.myKey) views.swing(event.key, event.step, now);
+    } else if (event.type === "ability") {
+      // La propia se predice al apretar la tecla; el evento solo cuenta si no se predijo.
+      if (event.key === conn.myKey) ability.fromServer(event.id, now);
+      else views.ability(event.key, event.id, now);
     } else if (event.type === "damage") {
       const t = damageTiming(event, conn.myKey, now);
       hits.hit(`${event.targetKind}:${event.targetId}`, t.hitAt);
@@ -221,11 +229,17 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const sampled = sanitizeInput(dead ? withoutActions(raw) : raw);
         if (!sampled) continue;
         prev = predictor.current;
+        // Como el servidor: se mueve con el Bloqueo del input anterior y luego se actualiza.
+        const moveSpeedMult = mine?.moveSpeedMult ?? 1;
+        predictor.setMoveMods({ speedMult: moveSpeedMult * (ability.isBlocking ? BLOCK_MOVE_MULT : 1) });
         predictor.applyLocal(sampled);
-        // El golpe propio arranca su clip ya (como el servidor: tras moverse); el daño lo decide él.
-        // Con el arma que dice el servidor: al tomar otra, el combo local vuelve a empezar.
+        // El golpe y la habilidad propios arrancan su clip ya (como el servidor: tras moverse, el combo
+        // avanza, luego la habilidad y al final el ataque); el daño lo decide él. Con el arma que dice el
+        // servidor: al tomar otra, el combo local vuelve a empezar.
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
-        combo.tick(sampled.attack, { dead, locked: false }, now, weaponId);
+        combo.advance(weaponId);
+        ability.tick(sampled.abilities, { dead, swingTimer: combo.state().swingTimer }, now);
+        combo.attack(sampled.attack, { dead, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
       }
       smoother.decay(dt);
@@ -237,18 +251,23 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       const pose = { x, y, z, facing: lerpAngle(prev.facing, cur.facing, a) };
       // El arranque del golpe es predicho; la muerte viene del servidor.
       const swing = combo.heroCombat({ comboStep: mine?.comboStep ?? 0, swingTimer: mine?.swingTimer ?? 0 }, now);
+      const heroAbility = ability.heroAbility(now);
       const state = {
         ...swing,
         dead: mine?.dead ?? false,
         weaponId: mine?.weaponId ?? STARTING_WEAPON,
         weaponTier: mine?.weaponTier ?? 1,
+        blocking: ability.isBlocking,
+        attackSpeedMult: mine?.attackSpeedMult ?? 1,
+        ability: heroAbility,
       };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
       camera.follow(x, z);
       torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
-      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp: !(mine?.dead ?? true) && swing.swingTimer <= 0 });
+      const canPickUp = !(mine?.dead ?? true) && swing.swingTimer <= 0 && !heroAbility;
+      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp });
     }
 
     const renderAt = now - INTERP_DELAY_MS;

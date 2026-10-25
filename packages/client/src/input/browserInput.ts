@@ -1,6 +1,6 @@
-import type { InputState } from "./InputState";
+import { ABILITY_KEYS, type InputState } from "./InputState";
 
-const GAME_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
+const GAME_KEYS = new Set<string>(["KeyW", "KeyA", "KeyS", "KeyD", "Space", ...ABILITY_KEYS]);
 
 /**
  * Conecta el teclado, el clic izquierdo y la pérdida de foco con `InputState`. Devuelve la función
@@ -10,7 +10,7 @@ export function attachBrowserInput(input: InputState, canvas: HTMLCanvasElement)
   const isTyping = (e: KeyboardEvent) => e.target instanceof HTMLInputElement;
   const onKeyDown = (e: KeyboardEvent) => {
     if (isTyping(e)) return;
-    if (GAME_KEYS.has(e.code)) e.preventDefault(); // que Space no haga scroll ni pulse botones
+    if (GAME_KEYS.has(e.code)) e.preventDefault(); // que Space no haga scroll ni pulse botones, ni 1-4 escriban
     input.keyDown(e.code);
   };
   const onKeyUp = (e: KeyboardEvent) => input.keyUp(e.code);

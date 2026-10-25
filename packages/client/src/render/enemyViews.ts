@@ -117,7 +117,14 @@ export class EnemyViews {
       view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, gripScale: ENEMY_LOOKS[e.kind].gripScale });
       view.character.play(
         chooseEnemyAnim(
-          { kind: e.kind, ai: e.ai, speed: view.speed.sample(e.x, e.z, dtS), hurtRecently: hurt(id), weaponId: e.weaponId },
+          {
+            kind: e.kind,
+            ai: e.ai,
+            speed: view.speed.sample(e.x, e.z, dtS),
+            hurtRecently: hurt(id),
+            weaponId: e.weaponId,
+            stunned: e.stunned,
+          },
           this.clipLengths,
         ),
       );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARMED_CHANCE, MOVESETS, WEAPONS, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ABILITIES, ARMED_CHANCE, MOVESETS, WEAPONS, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import { chooseEnemyAnim } from "../src/render/animState";
 import { allClipIds, ENEMY_LOOKS, PLAYER_LOOK, WEAPON_LOOKS } from "../src/render/looks";
 
@@ -19,6 +19,15 @@ describe("looks", () => {
     for (const look of Object.values(ENEMY_LOOKS)) {
       for (const c of Object.values(look.clips)) expect(ids).toContain(c);
     }
+  });
+
+  it("allClipIds incluye los clips de las habilidades (y el Bloqueo), y existen en public/", () => {
+    const ids = allClipIds();
+    for (const clip of ["ss_kick", "ss_power_up", "ss_block_idle", "ss_jump_2", "gs_high_spin_attack"]) {
+      expect(ids).toContain(clip);
+      expect(ANIM_FILES).toContain(clip);
+    }
+    for (const def of Object.values(ABILITIES)) if (def.clip) expect(ids).toContain(def.clip);
   });
 
   it("WEAPON_LOOKS tiene una entrada por cada arma", () => {

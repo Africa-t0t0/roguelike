@@ -129,6 +129,28 @@ describe("InputState", () => {
     expect(input.sample(2, 0).interact).toBe(true);
   });
 
+  it("las teclas 1-4 mantenidas dan la máscara de habilidades (1 y 3 → 0b0101)", () => {
+    const input = new InputState();
+    expect(input.sample(1, 0).abilities).toBe(0);
+    input.keyDown("Digit1");
+    input.keyDown("Digit3");
+    expect(input.sample(2, 0).abilities).toBe(0b0101);
+    expect(input.sample(3, 0).abilities).toBe(0b0101); // mantenida, no por pulsación
+    input.keyUp("Digit1");
+    input.keyDown("Digit4");
+    expect(input.sample(4, 0).abilities).toBe(0b1100);
+    input.blur();
+    expect(input.sample(5, 0).abilities).toBe(0);
+  });
+
+  it("una pulsación corta de una tecla de habilidad entre dos samples cuenta una vez", () => {
+    const input = new InputState();
+    input.keyDown("Digit2");
+    input.keyUp("Digit2");
+    expect(input.sample(1, 0).abilities).toBe(0b0010);
+    expect(input.sample(2, 0).abilities).toBe(0);
+  });
+
   it("sample lleva el viewTick que se le pasa (0 si no)", () => {
     const input = new InputState();
     expect(input.sample(1, 0).viewTick).toBe(0);
@@ -139,8 +161,8 @@ describe("InputState", () => {
 describe("withoutActions", () => {
   it("anula movimiento, salto, sprint, ataque y habilidades; conserva seq, facing y viewTick", () => {
     const input = new InputState();
-    for (const k of ["KeyW", "Space", "ShiftLeft", "Mouse0", "KeyE"]) input.keyDown(k);
-    const s = withoutActions({ ...input.sample(7, 0.5, 12), abilities: 0b0101 });
+    for (const k of ["KeyW", "Space", "ShiftLeft", "Mouse0", "KeyE", "Digit1", "Digit3"]) input.keyDown(k);
+    const s = withoutActions(input.sample(7, 0.5, 12));
     expect(s).toEqual({
       seq: 7, moveX: 0, moveZ: 0, facing: 0.5, sprint: false, jump: false, attack: false, interact: false, abilities: 0, viewTick: 12,
     });

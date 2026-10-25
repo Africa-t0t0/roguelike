@@ -42,7 +42,7 @@ const CHARACTERS = {
 
 /** clipId → ruta relativa a glb/ */
 const CLIPS = {};
-for (const x of ['idle', 'run', 'run_2', 'jump', 'impact', 'death', 'slash', 'slash_3', 'attack_4', 'strafe_3', 'strafe_4']) {
+for (const x of ['idle', 'run', 'run_2', 'jump', 'impact', 'death', 'slash', 'slash_3', 'attack_4', 'strafe_3', 'strafe_4', 'kick', 'power_up', 'block_idle', 'jump_2']) {
   CLIPS[`ss_${x}`] = `pack/sword_and_shield_${x}.glb`;
 }
 for (const x of ['idle', 'run', 'run_2', 'jump', 'impact', 'impact_2', 'impact_4', 'slash', 'high_spin_attack', 'strafe_3', 'strafe_4']) {

@@ -88,4 +88,19 @@ describe("Predictor", () => {
     expect(p.current.x).toBeCloseTo(expected.x, 9);
     expect(p.pendingCount).toBe(6);
   });
+
+  it("al reconciliar, cada pendiente se re-simula con los mods con que se predijo (el Bloqueo cambia a mitad)", () => {
+    const p = new Predictor(initial, dungeon);
+    let expected = initial;
+    for (let seq = 1; seq <= 10; seq++) {
+      const mods = { speedMult: seq > 6 ? 0.5 : 1 };
+      p.setMoveMods(mods);
+      p.applyLocal(input(seq));
+      expected = stepPlayer(expected, input(seq), dungeon, SIM_DT, mods);
+    }
+    let server = initial;
+    for (let seq = 1; seq <= 4; seq++) server = stepPlayer(server, input(seq), dungeon, SIM_DT);
+    p.reconcile(server, 4);
+    expect(p.current.x).toBeCloseTo(expected.x, 9);
+  });
 });

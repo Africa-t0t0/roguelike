@@ -123,3 +123,27 @@ describe("LocalCombo", () => {
     });
   });
 });
+
+describe("LocalCombo con attackSpeedMult", () => {
+  it("con Furia el siguiente golpe se libera antes, igual que tryStartSwing con ese multiplicador", () => {
+    const combo = new LocalCombo();
+    const mult = 1.3;
+    expect(combo.tick(true, free, 0, "kingslayer-sword", mult)).toBe(1);
+    expect(combo.state().swingTimer).toBeCloseTo(c1!.duration / mult);
+    const n = Math.ceil(c1!.duration / mult / SIM_DT - 1e-9);
+    for (let i = 0; i < n - 2; i++) combo.tick(false, free, 0, "kingslayer-sword", mult);
+    expect(combo.tick(true, free, 0, "kingslayer-sword", mult)).toBe(0);
+    expect(combo.tick(true, free, 0, "kingslayer-sword", mult)).toBe(2);
+  });
+
+  it("advance + attack por separado equivale a tick", () => {
+    const a = new LocalCombo();
+    const b = new LocalCombo();
+    for (let i = 0; i < 80; i++) {
+      const attack = i % 3 === 0;
+      const ta = a.tick(attack, free, 0, "great-sword", 1.1);
+      b.advance("great-sword");
+      expect(b.attack(attack, free, 0, "great-sword", 1.1)).toBe(ta);
+    }
+  });
+});

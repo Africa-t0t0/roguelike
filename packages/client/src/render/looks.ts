@@ -1,4 +1,4 @@
-import { MOVESETS, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import type { AssetId } from "./assets";
 
 /**
@@ -82,13 +82,14 @@ export const HERO_STRIDE_MPS: Record<string, number> = {
 
 export const PLAYER_LOOK: { asset: AssetId; height: number } = { asset: "kingslayer", height: 1.8 };
 
-/** Todos los clips que usa el juego (estilos de combate y enemigos), sin repetir. */
+/** Todos los clips que usa el juego (estilos de combate, habilidades y enemigos), sin repetir. */
 export function allClipIds(): string[] {
   const ids = new Set<string>();
   for (const m of Object.values(MOVESETS)) {
     for (const c of Object.values(m.locomotion)) ids.add(c);
     for (const s of m.combo) ids.add(s.clip);
   }
+  for (const def of Object.values(ABILITIES)) if (def.clip) ids.add(def.clip);
   for (const look of Object.values(ENEMY_LOOKS)) for (const c of Object.values(look.clips)) ids.add(c);
   return [...ids];
 }

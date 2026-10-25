@@ -21,6 +21,7 @@ const hero = (over: Partial<HeroAnimInput> = {}): HeroAnimInput => ({
   swingTimer: 0,
   dead: false,
   hurtRecently: false,
+  blocking: false,
   ...over,
 });
 
@@ -131,6 +132,41 @@ describe("chooseHeroAnim", () => {
     expect(chooseHeroAnim(hero({ speed: 10, moveAngle: Math.PI / 2 })).speed).toBeCloseTo(2.2);
   });
 
+  it("habilidad: whirlwind → gs_high_spin_attack ajustado a 0,9 s, sin bucle, y gana al ataque", () => {
+    const lengths = new Map([["gs_high_spin_attack", 2.4]]);
+    const c = chooseHeroAnim(
+      hero({ ability: { id: "whirlwind", elapsed: 0.1 }, comboStep: 1, swingTimer: 0.2, airborne: true, blocking: true }),
+      lengths,
+    );
+    expect(c.clip).toBe("gs_high_spin_attack");
+    expect(c.loop).toBe(false);
+    expect(c.speed).toBeCloseTo(2.4 / 0.9);
+  });
+
+  it("habilidad: cada activa usa su clip; la muerte gana a la habilidad", () => {
+    expect(chooseHeroAnim(hero({ ability: { id: "kick", elapsed: 0 } })).clip).toBe("ss_kick");
+    expect(chooseHeroAnim(hero({ ability: { id: "warcry", elapsed: 0 } })).clip).toBe("ss_power_up");
+    expect(chooseHeroAnim(hero({ ability: { id: "slam", elapsed: 0 } })).clip).toBe("ss_jump_2");
+    expect(chooseHeroAnim(hero({ dead: true, ability: { id: "kick", elapsed: 0 } })).clip).toBe("ss_death");
+  });
+
+  it("habilidad ya terminada (elapsed ≥ animS) no se muestra", () => {
+    expect(chooseHeroAnim(hero({ ability: { id: "kick", elapsed: 0.6 } })).clip).toBe("ss_idle");
+  });
+
+  it("bloqueando → ss_block_idle en bucle, también al moverse o con el mandoble", () => {
+    expect(chooseHeroAnim(hero({ blocking: true }))).toEqual({ clip: "ss_block_idle", loop: true, speed: 1 });
+    expect(chooseHeroAnim(hero({ blocking: true, speed: 3 })).clip).toBe("ss_block_idle");
+    expect(chooseHeroAnim(hero({ blocking: true, weaponId: "great-sword" })).clip).toBe("ss_block_idle");
+    expect(chooseHeroAnim(hero({ blocking: true, dead: true })).clip).toBe("ss_death");
+  });
+
+  it("con attackSpeedMult el clip del golpe dura lo mismo que el swing acelerado", () => {
+    const lengths = new Map([["ss_slash", 1.0]]);
+    const c = chooseHeroAnim(hero({ comboStep: 1, swingTimer: 0.1, attackSpeedMult: 1.2 }), lengths);
+    expect(1.0 / c.speed).toBeCloseTo(MOVESETS["one-hand-sword"].combo[0]!.duration / 1.2);
+  });
+
   it("speed ≤ 0,2 → idle", () => {
     expect(chooseHeroAnim(hero({ speed: 0.2 })).clip).toBe("ss_idle");
   });
@@ -154,6 +190,8 @@ describe("moveSector / heroBodyYaw", () => {
     expect(heroBodyYaw(hero({ ...diag, comboStep: 1, swingTimer: 0.1 }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, airborne: true }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, dead: true }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, blocking: true }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, ability: { id: "kick", elapsed: 0.1 } }))).toBe(0);
   });
 });
 
@@ -211,6 +249,16 @@ describe("chooseEnemyAnim", () => {
       loop: true,
       speed: ENEMY_LOOKS.minion.runSpeed,
     });
+  });
+
+  it("aturdido → hit del enemigo en bucle lento (gana a telegrafía y a correr; la muerte gana)", () => {
+    const c = chooseEnemyAnim(enemy({ stunned: 1, ai: "telegraph", speed: 3, hurtRecently: true }));
+    expect(c.clip).toBe(ENEMY_LOOKS.brute.clips.hit);
+    expect(c.loop).toBe(true);
+    expect(c.speed).toBeGreaterThan(0);
+    expect(c.speed).toBeLessThan(1);
+    expect(chooseEnemyAnim(enemy({ stunned: 1, ai: "dead" })).clip).toBe(ENEMY_LOOKS.brute.clips.death);
+    expect(chooseEnemyAnim(enemy({ stunned: 0, ai: "idle" })).clip).toBe(ENEMY_LOOKS.brute.clips.idle);
   });
 
   it("recover sin moverse → idle", () => {

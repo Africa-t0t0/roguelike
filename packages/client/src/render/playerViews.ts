@@ -5,7 +5,7 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { MOVESETS, WEAPONS, strikeOf, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
@@ -24,6 +24,14 @@ export interface HeroState {
   dead: boolean;
   weaponId: WeaponId;
   weaponTier: WeaponTier;
+  blocking: boolean;
+  /** velocidad de ataque (Furia): ajusta la duración de los golpes */
+  attackSpeedMult: number;
+  /**
+   * Habilidad en curso y cuánto lleva (s), para el propio jugador (predicha). Sin ella, la que anuncie
+   * el evento `ability` (los remotos).
+   */
+  ability?: { id: AbilityId; elapsed: number } | null;
 }
 
 interface PlayerView {
@@ -31,6 +39,10 @@ interface PlayerView {
   speed: SpeedMeter;
   /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
   swing?: { step: number; startMs: number; restart: boolean };
+  /** Habilidad anunciada por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
+  ability?: { id: AbilityId; startMs: number };
+  /** cuánto llevaba la habilidad dibujada en el cuadro anterior (para reiniciar el clip si empieza otra) */
+  abilityElapsed?: number;
   dispose(): void;
 }
 
@@ -86,6 +98,12 @@ export class PlayerViews {
     if (view) view.swing = { step, startMs, restart: true };
   }
 
+  /** Otro jugador empezó una habilidad en `startMs` (mismo reloj que se pasa a `render`). */
+  ability(key: string, id: AbilityId, startMs: number): void {
+    const view = this.views.get(key);
+    if (view) view.ability = { id, startMs };
+  }
+
   /**
    * Dibuja al jugador en la pose dada y elige su animación. `nowMs` es el instante que representa la
    * pose (ahora para el propio, ahora − retardo de interpolación para los remotos).
@@ -107,7 +125,7 @@ export class PlayerViews {
     const s = view.swing;
     if (s) {
       const inCombo = s.step >= 1 && s.step <= MOVESETS[WEAPONS[state.weaponId].movesetId].combo.length;
-      const strike = inCombo ? strikeOf(state.weaponId, s.step) : undefined;
+      const strike = inCombo ? strikeOf(state.weaponId, s.step, state.attackSpeedMult) : undefined;
       const left = (strike?.duration ?? 0) - (nowMs - s.startMs) / 1000;
       if (left <= 0) view.swing = undefined;
       else if (nowMs >= s.startMs) {
@@ -118,6 +136,19 @@ export class PlayerViews {
         s.restart = false;
       }
     }
+    let ability = state.ability ?? undefined;
+    const ev = view.ability;
+    if (state.ability === undefined && ev) {
+      const elapsed = (nowMs - ev.startMs) / 1000;
+      if (elapsed >= ABILITIES[ev.id].animS) view.ability = undefined;
+      else if (elapsed >= 0) ability = { id: ev.id, elapsed };
+    }
+    // Una habilidad nueva (o la misma otra vez) reinicia su clip aunque ya sonara (p. ej. el Torbellino
+    // usa el clip del golpe 2 del mandoble).
+    if (ability && (view.abilityElapsed === undefined || ability.elapsed < view.abilityElapsed)) {
+      attackClip = ABILITIES[ability.id].clip;
+    }
+    view.abilityElapsed = ability?.elapsed;
     const input: HeroAnimInput = {
       weaponId: state.weaponId,
       speed: view.speed.sample(pose.x, pose.z, dtS),
@@ -127,6 +158,9 @@ export class PlayerViews {
       swingTimer,
       dead: state.dead,
       hurtRecently,
+      ability,
+      blocking: state.blocking,
+      attackSpeedMult: state.attackSpeedMult,
     };
     const choice = chooseHeroAnim(input, this.clipLengths);
     view.character.setBodyYaw(heroBodyYaw(input));

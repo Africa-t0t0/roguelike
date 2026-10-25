@@ -1,4 +1,4 @@
-import { ENEMY_DEFS, MOVESETS, WEAPONS, strikeOf, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ABILITIES, ENEMY_DEFS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import { ENEMY_LOOKS, HERO_STRIDE_MPS } from "./looks";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
@@ -25,6 +25,12 @@ export interface HeroAnimInput {
   swingTimer: number;
   dead: boolean;
   hurtRecently: boolean;
+  /** habilidad activa en curso y cuánto lleva (s) */
+  ability?: { id: AbilityId; elapsed: number };
+  /** mantiene el Bloqueo */
+  blocking: boolean;
+  /** velocidad de ataque (Furia): el golpe dura `duration / attackSpeedMult`; por defecto 1 */
+  attackSpeedMult?: number;
 }
 
 export interface EnemyAnimInput {
@@ -34,10 +40,14 @@ export interface EnemyAnimInput {
   hurtRecently: boolean;
   /** arma en la mano (`null` si va desarmado): armado, ataca con el primer golpe de su arma */
   weaponId: WeaponId | null;
+  /** segundos que le quedan aturdido (0 o sin dato: no lo está) */
+  stunned?: number;
 }
 
 const MOVING_SPEED = 0.2; // m/s
 const SPRINT_SPEED = 6; // m/s
+/** Aturdido: el clip de golpe recibido en bucle, a esta velocidad (tambaleo lento). */
+const STUN_ANIM_SPEED = 0.35;
 
 /** Límites de la velocidad de reproducción al ajustar el paso: fuera de ellos el clip se ve mal. */
 const MIN_STRIDE_RATE = 0.6;
@@ -73,17 +83,28 @@ function fitTo(clip: string, durationS: number, clipLengths?: ClipLengths): numb
 const once = (clip: string, speed = 1): AnimChoice => ({ clip, loop: false, speed });
 const looped = (clip: string, speed = 1): AnimChoice => ({ clip, loop: true, speed });
 
+/** La habilidad en curso que tiene clip, o undefined (sin habilidad, ya terminada o sin clip). */
+function abilityClip(a: HeroAnimInput): { clip: string; animS: number } | undefined {
+  if (!a.ability) return undefined;
+  const def = ABILITIES[a.ability.id];
+  if (!def.clip || def.animS <= 0 || a.ability.elapsed >= def.animS) return undefined;
+  return { clip: def.clip, animS: def.animS };
+}
+
 /**
- * Clips del estilo del arma. Reglas por prioridad: muerte, ataque, aire, golpe recibido,
- * correr, quieto.
+ * Clips del estilo del arma (las habilidades y el Bloqueo tienen los suyos). Reglas por prioridad:
+ * muerte, habilidad, ataque, Bloqueo, aire, golpe recibido, correr, quieto.
  */
 export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): AnimChoice {
   const { locomotion, combo } = MOVESETS[WEAPONS[a.weaponId].movesetId];
   if (a.dead) return once(locomotion.death);
+  const ability = abilityClip(a);
+  if (ability) return once(ability.clip, fitTo(ability.clip, ability.animS, clipLengths));
   if (a.swingTimer > 0 && a.comboStep >= 1 && a.comboStep <= combo.length) {
-    const strike = strikeOf(a.weaponId, a.comboStep);
+    const strike = strikeOf(a.weaponId, a.comboStep, a.attackSpeedMult ?? 1);
     return once(strike.clip, fitTo(strike.clip, strike.duration, clipLengths));
   }
+  if (a.blocking) return looped(ABILITIES.block.clip!);
   if (a.airborne) return once(locomotion.jump);
   if (a.hurtRecently) return once(locomotion.hit);
   if (a.speed <= MOVING_SPEED) return looped(locomotion.idle);
@@ -94,18 +115,20 @@ export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): Ani
 
 /** Giro del cuerpo (rad) respecto de la mirada: solo al correr, para que el clip apunte a donde va. */
 export function heroBodyYaw(a: HeroAnimInput): number {
-  const running = !a.dead && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1);
+  const running =
+    !a.dead && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1) && !a.blocking && !abilityClip(a);
   return running && a.speed > MOVING_SPEED ? moveSector(a.moveAngle).yaw : 0;
 }
 
 /**
- * Clips de `ENEMY_LOOKS`. Reglas por prioridad: muerte, telegrafía, golpe recibido, correr, quieto. Si va
- * armado, la telegrafía usa el primer golpe de su arma; el resto de los clips no cambia.
+ * Clips de `ENEMY_LOOKS`. Reglas por prioridad: muerte, aturdido, telegrafía, golpe recibido, correr, quieto.
+ * Si va armado, la telegrafía usa el primer golpe de su arma; el resto de los clips no cambia.
  */
 export function chooseEnemyAnim(e: EnemyAnimInput, clipLengths?: ClipLengths): AnimChoice {
   const look = ENEMY_LOOKS[e.kind];
   const { clips } = look;
   if (e.ai === "dead") return once(clips.death);
+  if ((e.stunned ?? 0) > 0) return looped(clips.hit, STUN_ANIM_SPEED);
   if (e.ai === "telegraph") {
     const attack = e.weaponId ? strikeOf(e.weaponId, 1).clip : clips.attack;
     return once(attack, fitTo(attack, ENEMY_DEFS[e.kind].telegraphS, clipLengths));

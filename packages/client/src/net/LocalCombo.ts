@@ -24,17 +24,45 @@ export class LocalCombo {
   private lastEndMs: number | undefined;
 
   /**
-   * Un paso de simulación con el `attack` enviado y el arma equipada (la que informa el servidor).
-   * `locked`: algo impide atacar (p. ej. una habilidad en curso). Devuelve el golpe que arrancó (1..n) o 0.
+   * Un paso de simulación con el `attack` enviado y el arma equipada (la que informa el servidor):
+   * `advance` y luego `attack`. Devuelve el golpe que arrancó (1..n) o 0.
    */
-  tick(attack: boolean, blocked: { dead: boolean; locked: boolean }, nowMs: number, weaponId: WeaponId): number {
+  tick(
+    attack: boolean,
+    blocked: { dead: boolean; locked: boolean },
+    nowMs: number,
+    weaponId: WeaponId,
+    attackSpeedMult = 1,
+  ): number {
+    this.advance(weaponId);
+    return this.attack(attack, blocked, nowMs, weaponId, attackSpeedMult);
+  }
+
+  /**
+   * Primera mitad del paso: avanza el combo (como `onInputProcessed` en el servidor). Entre `advance` y
+   * `attack` va la habilidad del mismo input, que mira el swing ya avanzado.
+   */
+  advance(weaponId: WeaponId): void {
     if (weaponId !== this.weaponId) {
       this.weaponId = weaponId;
       this.c = newComboTimers();
     }
     advanceCombo(this.c, SIM_DT);
-    if (!attack || blocked.dead || blocked.locked) return 0;
-    const started = tryStartSwing(this.c, weaponId);
+  }
+
+  /**
+   * Segunda mitad del paso: intenta arrancar un golpe. `locked`: algo impide atacar (una habilidad en curso
+   * o el Bloqueo). `attackSpeedMult`: el sincronizado (Furia), el mismo que usa el servidor.
+   */
+  attack(
+    attack: boolean,
+    blocked: { dead: boolean; locked: boolean },
+    nowMs: number,
+    weaponId: WeaponId,
+    attackSpeedMult = 1,
+  ): number {
+    if (!attack || blocked.dead || blocked.locked || weaponId !== this.weaponId) return 0;
+    const started = tryStartSwing(this.c, weaponId, attackSpeedMult);
     if (started) this.lastEndMs = nowMs + this.c.swingTimer * 1000;
     return started;
   }

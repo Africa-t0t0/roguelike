@@ -6,6 +6,7 @@ import {
   TAKEOVER_CLOSE_CODE,
   isWeaponId,
   isWeaponTier,
+  type AbilityId,
   type CombatEvent,
   type EnemyKind,
   type JoinOptions,
@@ -14,6 +15,7 @@ import {
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
+import { isAbilityId, type AbilitySlotView } from "./LocalAbility";
 import { generateToken } from "./token";
 import { LagSimulator, type LagConfig } from "./LagSimulator";
 
@@ -28,6 +30,18 @@ export type PlayerSnapshot = KinematicState & {
   swingTimer: number;
   weaponId: WeaponId;
   weaponTier: WeaponTier;
+  /** casillas en orden (la tecla i+1 usa la i-ésima), sin la pasiva; `cooldown` en s */
+  abilities: (AbilitySlotView & { rank: number })[];
+  /** rango de la Onda de corte; 0 si no la tiene */
+  passiveRank: number;
+  blocking: boolean;
+  /** el mayor Grito activo sobre él (0 si ninguno) */
+  buffDamage: number;
+  /** multiplicador de movimiento de sus cartas (sin el del Bloqueo) */
+  moveSpeedMult: number;
+  attackSpeedMult: number;
+  /** tiene una elección de carta abierta */
+  choosing: boolean;
 };
 export type PlayerSnapshots = Map<string, PlayerSnapshot>;
 
@@ -43,6 +57,8 @@ export interface EnemySnapshot {
   /** null si va desarmado */
   weaponId: WeaponId | null;
   weaponTier: WeaponTier | null;
+  /** segundos que le quedan aturdido */
+  stunned: number;
 }
 
 export interface ProjectileSnapshot {
@@ -57,6 +73,15 @@ export interface OrbSnapshot {
   value: number;
 }
 
+/** Onda de corte de un jugador. */
+export interface PlayerShotSnapshot {
+  x: number;
+  z: number;
+  dirX: number;
+  dirZ: number;
+  radius: number;
+}
+
 /** Todo lo del estado que no son jugadores. */
 export interface WorldSnapshot {
   tick: number;
@@ -68,6 +93,11 @@ export interface WorldSnapshot {
   enemies: Map<string, EnemySnapshot>;
   projectiles: Map<string, ProjectileSnapshot>;
   orbs: Map<string, OrbSnapshot>;
+  playerShots: Map<string, PlayerShotSnapshot>;
+  /** el grupo está eligiendo cartas: la simulación no avanza */
+  paused: boolean;
+  /** segundos que quedan de la elección en curso de la pausa */
+  pauseLeft: number;
 }
 
 export type { CombatEvent };
@@ -145,8 +175,17 @@ function browserToken(): string {
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
-  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier"> & { weaponId: string; weaponTier: number };
+  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier" | "abilities"> & {
+    weaponId: string;
+    weaponTier: number;
+    abilities: { forEach(cb: (s: { id: string; rank: number; cooldown: number }) => void): void };
+  };
   room.state.players.forEach((p: RawPlayer, key: string) => {
+    const abilities: PlayerSnapshot["abilities"] = [];
+    // Con la misma PROTOCOL_VERSION toda id es conocida; una que no lo sea (no debería pasar) se descarta.
+    p.abilities?.forEach((s) => {
+      if (isAbilityId(s.id)) abilities.push({ id: s.id as AbilityId, rank: s.rank, cooldown: s.cooldown });
+    });
     out.set(key, {
       name: p.name,
       x: p.x,
@@ -163,6 +202,13 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       swingTimer: p.swingTimer,
       weaponId: isWeaponId(p.weaponId) ? p.weaponId : STARTING_WEAPON,
       weaponTier: isWeaponTier(p.weaponTier) ? p.weaponTier : 1,
+      abilities,
+      passiveRank: p.passiveRank ?? 0,
+      blocking: p.blocking ?? false,
+      buffDamage: p.buffDamage ?? 0,
+      moveSpeedMult: p.moveSpeedMult || 1,
+      attackSpeedMult: p.attackSpeedMult || 1,
+      choosing: p.choosing ?? false,
     });
   });
   return out;
@@ -185,6 +231,7 @@ function snapshotWorld(room: Room): WorldSnapshot {
       aiTime: e.aiTime,
       weaponId: armed ? (e.weaponId as WeaponId) : null,
       weaponTier: armed ? (e.weaponTier as WeaponTier) : null,
+      stunned: e.stunned ?? 0,
     });
   });
   const projectiles = new Map<string, ProjectileSnapshot>();
@@ -194,6 +241,10 @@ function snapshotWorld(room: Room): WorldSnapshot {
   const orbs = new Map<string, OrbSnapshot>();
   room.state.orbs.forEach((o: OrbSnapshot, id: string) => {
     orbs.set(id, { x: o.x, z: o.z, value: o.value });
+  });
+  const playerShots = new Map<string, PlayerShotSnapshot>();
+  room.state.playerShots?.forEach((w: PlayerShotSnapshot, id: string) => {
+    playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius });
   });
   const st = room.state;
   return {
@@ -205,6 +256,9 @@ function snapshotWorld(room: Room): WorldSnapshot {
     enemies,
     projectiles,
     orbs,
+    playerShots,
+    paused: st.paused ?? false,
+    pauseLeft: st.pauseLeft ?? 0,
   };
 }
 
