@@ -32,6 +32,7 @@ import {
 } from "@roguelike/shared";
 import { CombatSystem, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
+import { LevelUpSystem, type ChoiceEvent } from "../sim/LevelUpSystem";
 import { OrbSystem } from "../sim/OrbSystem";
 import { PositionHistory } from "../sim/PositionHistory";
 import { WaveDirector } from "../sim/WaveDirector";
@@ -47,6 +48,7 @@ const ALLY_SPAWN_RADIUS = 2;
 const ENEMY_RNG_SALT = 0x5eed;
 const WAVE_RNG_SALT = 0x7a3e;
 const ORB_RNG_SALT = 0x0b5e;
+const CARD_RNG_SALT = 0xca7d;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -71,6 +73,7 @@ export class RunRoom extends Room<{ state: RunState }> {
   private enemySystem!: EnemySystem;
   private director!: WaveDirector;
   private orbs!: OrbSystem;
+  private levelUp!: LevelUpSystem;
   private floorTime = 0;
   private readonly history = new PositionHistory();
   private readonly combat = new CombatSystem();
@@ -88,14 +91,18 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.enemySystem = new EnemySystem(this.dungeon, createRng(seed ^ ENEMY_RNG_SALT));
     this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
     this.orbs = new OrbSystem(createRng(seed ^ ORB_RNG_SALT));
+    this.levelUp = new LevelUpSystem(createRng(seed ^ CARD_RNG_SALT));
     this.floorTime = floorTimeStart;
-    this.state = new RunState({ seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart });
+    this.state = new RunState({
+      seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart, paused: false, pauseLeft: 0,
+    });
     syncWorld(this.state, [], [], this.combat, []);
 
     this.autoDispose = false;
     this.setPatchRate(PATCH_RATE_MS);
     this.setTimestep(() => this.tick(), 1000 / SIM_HZ);
     this.onMessage(MSG.input, (client, raw) => this.enqueueInput(client, raw));
+    this.onMessage(MSG.chooseCard, (client, raw) => this.chooseCard(client, raw));
     // Una sala creada a la que nadie llega a entrar (reserva vencida) no pasa por onLeave.
     this.armEmptyTimer();
   }
@@ -120,16 +127,22 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
 
     const { record } = result;
+    // Quien entra a mitad de run elige las cartas de los niveles que ya subió el grupo.
+    if (result.kind === "new") record.pendingChoices = this.combat.level - 1;
     let ps = this.state.players.get(record.key);
     if (!ps) {
       ps = new PlayerState();
       this.state.players.set(record.key, ps);
     }
     ps.name = record.displayName;
-    syncPlayer(ps, record);
     client.send(MSG.welcome, { key: record.key });
     // Nuevo, reconexión o toma de control: sus armas del suelo, solo a él.
     this.sendFloorWeapons(client, record);
+    // Sus elecciones pendientes, sin pausa; en una pausa entra en la siguiente elección del grupo o al final.
+    // Si ya tenía una abierta (takeover), se le reenvía.
+    if (this.levelUp.isChoosing(record.key)) this.handleChoices(this.levelUp.openOffer(record.key));
+    else if (!this.levelUp.paused) this.handleChoices(this.levelUp.offerSolo(record));
+    syncPlayer(ps, record, this.levelUp.isChoosing(record.key));
 
     this.emptyTimer?.clear();
     this.emptyTimer = undefined;
@@ -163,6 +176,27 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
   }
 
+  private chooseCard(client: Client, raw: unknown): void {
+    const record = this.registry.bySession(client.sessionId);
+    const index = (raw as { index?: unknown } | null)?.index;
+    if (!record || typeof index !== "number") return;
+    this.handleChoices(this.levelUp.choose(record, index));
+  }
+
+  /**
+   * Único lugar donde se atienden los eventos de elección: la oferta va solo a ese cliente y "applied"
+   * llega con la carta ya registrada en `progress` (sus efectos sobre los stats se enganchan aquí).
+   */
+  private handleChoices(events: ChoiceEvent[]): void {
+    for (const e of events) {
+      if (e.type === "offer") {
+        const record = this.registry.all().find((r) => r.key === e.key);
+        const client = record && this.clients.find((c) => c.sessionId === record.sessionId);
+        client?.send(MSG.levelChoice, { cards: e.cards, index: e.index, total: e.total, deadlineS: e.deadlineS });
+      }
+    }
+  }
+
   private emit(event: CombatEvent): void {
     this.broadcast(MSG.combat, event);
   }
@@ -174,6 +208,13 @@ export class RunRoom extends Room<{ state: RunState }> {
   private tick(): void {
     const connected = this.registry.connected();
     const allStates = new Map(this.registry.all().map((r) => [r.key, r.combat] as const));
+
+    // Elecciones de cartas: corre en la pausa y fuera de ella (las sin pausa vencen igual).
+    this.handleChoices(this.levelUp.step(SIM_DT, connected));
+    if (this.levelUp.paused) {
+      this.pausedTick(connected);
+      return;
+    }
 
     // 1. Inputs (y ataques) de cada jugador conectado.
     for (const record of connected) {
@@ -211,7 +252,10 @@ export class RunRoom extends Room<{ state: RunState }> {
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
     // Orbes: los atraen y recogen los vivos; la xp es del grupo y sube la vida máxima de todos los registros.
-    for (const level of this.combat.grantXp(allStates, this.orbs.step(alive, SIM_DT))) this.emit({ type: "levelUp", level });
+    // Si se sube de nivel, la pausa empieza al final de este tick.
+    const levels = this.combat.grantXp(allStates, this.orbs.step(alive, SIM_DT));
+    for (const level of levels) this.emit({ type: "levelUp", level });
+    if (levels.length > 0) this.levelUp.onLevelsGained(levels.length, connected, this.registry.all());
 
     // 5. Golpes vencidos, muertes y reapariciones (los desconectados quedan congelados).
     const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
@@ -226,12 +270,31 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.history.record(this.state.tick, this.enemySystem.enemies);
 
     // 7. Schema.
-    for (const record of connected) {
-      const ps = this.state.players.get(record.key);
-      if (ps) syncPlayer(ps, record);
-    }
+    this.syncPlayers(connected);
     this.state.floorTime = this.floorTime;
     syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat, this.orbs.orbs);
+  }
+
+  /**
+   * Tick en pausa: no avanza nada (ni state.tick, ni el reloj, ni enemigos, orbes o combate). Los inputs se
+   * descartan, pero su seq se confirma para que el cliente no los reenvíe al reanudar.
+   */
+  private pausedTick(connected: PlayerRecord[]): void {
+    for (const record of connected) {
+      const last = record.inputQueue.at(-1);
+      record.inputQueue = [];
+      if (last) record.lastSeq = last.seq;
+    }
+    this.syncPlayers(connected);
+  }
+
+  private syncPlayers(connected: PlayerRecord[]): void {
+    for (const record of connected) {
+      const ps = this.state.players.get(record.key);
+      if (ps) syncPlayer(ps, record, this.levelUp.isChoosing(record.key));
+    }
+    this.state.paused = this.levelUp.paused;
+    this.state.pauseLeft = this.levelUp.pauseLeft;
   }
 
   /**

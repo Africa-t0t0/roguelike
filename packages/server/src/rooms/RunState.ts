@@ -19,6 +19,8 @@ export const PlayerState = schema(
     weaponId: t.string(),
     /** WeaponTier del arma equipada */
     weaponTier: t.number(),
+    /** tiene una elección de carta abierta sin elegir */
+    choosing: t.boolean(),
   },
   "PlayerState",
 );
@@ -67,6 +69,10 @@ export const RunState = schema(
     projectiles: t.map(ProjectileState),
     /** orbes de XP compartidos, indexados por id ("o1", …) */
     orbs: t.map(OrbState),
+    /** el grupo está eligiendo cartas: la simulación no avanza */
+    paused: t.boolean(),
+    /** segundos que quedan de la elección en curso de la pausa */
+    pauseLeft: t.number(),
   },
   "RunState",
 );

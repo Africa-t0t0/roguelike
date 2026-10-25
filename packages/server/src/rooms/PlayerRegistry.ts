@@ -1,10 +1,12 @@
 import {
   MAX_PLAYERS,
   newComboTimers,
+  newProgress,
   normalizeName,
   type JoinErrorCode,
   type KinematicState,
   type PlayerInput,
+  type Progress,
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
@@ -33,6 +35,10 @@ export interface PlayerRecord {
   combat: CombatState;
   /** Se crean con el registro; reconnect y takeover las conservan. */
   floorWeapons: FloorWeapon[];
+  /** Cartas y habilidades elegidas; reconnect y takeover las conservan. */
+  progress: Progress;
+  /** Elecciones de carta que le faltan (también se suman estando desconectado). */
+  pendingChoices: number;
 }
 
 export type JoinResult =
@@ -84,6 +90,8 @@ export class PlayerRegistry {
       inputQueue: [],
       combat: makeCombat(),
       floorWeapons: [],
+      progress: newProgress(),
+      pendingChoices: 0,
     };
     record.floorWeapons = makeFloorWeapons(record.combat.weaponId);
     this.records.set(record.key, record);

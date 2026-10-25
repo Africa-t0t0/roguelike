@@ -5,7 +5,7 @@ import type { Orb } from "../sim/OrbSystem";
 import type { PlayerRecord } from "./PlayerRegistry";
 import { EnemyState, OrbState, ProjectileState, type PlayerState, type RunState } from "./RunState";
 
-export function syncPlayer(ps: PlayerState, record: PlayerRecord): void {
+export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: boolean): void {
   const k = record.kinematic;
   ps.x = k.x;
   ps.z = k.z;
@@ -22,6 +22,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord): void {
   ps.swingTimer = c.swingTimer;
   ps.weaponId = c.weaponId;
   ps.weaponTier = c.weaponTier;
+  ps.choosing = choosing;
 }
 
 /** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles` y `orbs`. */

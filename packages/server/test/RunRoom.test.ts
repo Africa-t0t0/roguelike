@@ -24,6 +24,7 @@ import {
   ENEMY_DEFS,
   xpToNext,
   TIERS,
+  CHOICE_TIME_S,
   type CombatEvent,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
@@ -58,17 +59,20 @@ afterEach(async () => {
 });
 
 type FloorMsg = { items: { weaponId: string; tier: number; x: number; z: number }[] };
+type ChoiceMsg = { cards: unknown[]; index: number; total: number; deadlineS: number };
 
 async function join(
   name: string,
   token: string,
-): Promise<{ client: ClientRoom; welcome: Promise<unknown>; floors: FloorMsg[] }> {
+): Promise<{ client: ClientRoom; welcome: Promise<unknown>; floors: FloorMsg[]; choices: ChoiceMsg[] }> {
   const client = await colyseus.sdk.joinById(room.roomId, { name, token, version: PROTOCOL_VERSION });
   // Sin reconexión automática del SDK: la reconexión del juego es por nombre.
   client.reconnection.enabled = false;
   const floors: FloorMsg[] = [];
   client.onMessage(MSG.floorWeapons, (m: FloorMsg) => floors.push(m));
-  return { client, welcome: client.waitForMessage(MSG.welcome), floors };
+  const choices: ChoiceMsg[] = [];
+  client.onMessage(MSG.levelChoice, (m: ChoiceMsg) => choices.push(m));
+  return { client, welcome: client.waitForMessage(MSG.welcome), floors, choices };
 }
 
 async function ticksUntil(cond: () => boolean, maxTicks = 90): Promise<void> {
@@ -872,6 +876,117 @@ describe("RunRoom: orbes y botín", () => {
       10,
     );
     expect(back.client.state.floorTime).toBeGreaterThan(0);
+  });
+});
+
+describe("RunRoom: subir de nivel y elegir cartas", () => {
+  const moveInput = (seq: number) => ({ ...attackInput(seq, 0, room.state.tick), attack: false, moveX: 1 });
+
+  it("Foco 2: al subir de nivel el juego se pausa y nada se mueve; al elegir sigue", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room["enemySystem"].enemies.length >= 4, 5);
+    // Un orbe lejano que no se recoge y uno bajo los pies con la xp justa para subir.
+    room["orbs"].spawn(1000, 1000, 1, room.state.tick);
+    const me = record("ana").kinematic;
+    room["orbs"].spawn(me.x, me.z, xpToNext(1), room.state.tick);
+    await ticksUntil(() => room.state.paused, 30);
+    expect(room.state.level).toBe(2);
+    await ticksUntil(() => ana.choices.length === 1, 10);
+    expect(ana.choices[0]).toMatchObject({ index: 1, total: 1, deadlineS: CHOICE_TIME_S });
+    expect(ana.choices[0]!.cards).toHaveLength(3);
+    expect(player("ana").choosing).toBe(true);
+    await ticksUntil(() => ana.client.state.paused === true, 10);
+
+    const tick = room.state.tick;
+    const floorTime = room.state.floorTime;
+    const pos = record("ana").kinematic;
+    const enemies = room["enemySystem"].enemies.map((e) => [e.x, e.z]);
+    const orbs = room["orbs"].orbs.map((o) => [o.x, o.z]);
+    expect(orbs.length).toBeGreaterThan(0);
+    const pauseLeft = room.state.pauseLeft;
+    for (let seq = 1; seq <= 30; seq++) ana.client.send(MSG.input, moveInput(seq));
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect(room.state.tick).toBe(tick);
+    expect(room.state.floorTime).toBe(floorTime);
+    expect(record("ana").kinematic).toEqual(pos);
+    expect(room["enemySystem"].enemies.map((e) => [e.x, e.z])).toEqual(enemies);
+    expect(room["orbs"].orbs.map((o) => [o.x, o.z])).toEqual(orbs);
+    expect(player("ana").lastSeq).toBe(30);
+    expect(room.state.pauseLeft).toBeLessThan(pauseLeft);
+    expect(room.state.paused).toBe(true);
+
+    ana.client.send(MSG.chooseCard, { index: 0 });
+    await ticksUntil(() => !room.state.paused, 10);
+    expect(player("ana").choosing).toBe(false);
+    expect(record("ana").pendingChoices).toBe(0);
+    const p = record("ana").progress;
+    expect(Object.keys(p.stats).length + p.abilities.length).toBe(1);
+    const t1 = room.state.tick;
+    await room.waitForNextTimestep();
+    await room.waitForNextTimestep();
+    expect(room.state.tick).toBeGreaterThan(t1);
+  });
+
+  it("Foco 5: al volver con una elección pendiente la recibe sin pausar y conserva sus cartas", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ana.client.leave();
+    await ticksUntil(() => !room.state.players.has("ana"));
+    const r = record("ana");
+    r.progress.stats.strength = 2;
+    r.progress.abilities.push({ id: "kick", rank: 2 });
+    room["levelUp"].onLevelsGained(1, [], room["registry"].all());
+    expect(r.pendingChoices).toBe(1);
+
+    const back = await join("Ana", "t-otro");
+    await back.welcome;
+    await ticksUntil(() => back.choices.length === 1, 10);
+    expect(back.choices[0]).toMatchObject({ index: 1, total: 1, deadlineS: CHOICE_TIME_S });
+    expect(room.state.paused).toBe(false);
+    expect(player("ana").choosing).toBe(true);
+    expect(record("ana").progress.stats.strength).toBe(2);
+    expect(record("ana").progress.abilities).toEqual([{ id: "kick", rank: 2 }]);
+    // Sigue jugando mientras elige.
+    const t0 = room.state.tick;
+    back.client.send(MSG.input, moveInput(1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    expect(room.state.tick).toBeGreaterThan(t0);
+
+    back.client.send(MSG.chooseCard, { index: 1 });
+    await ticksUntil(() => !player("ana").choosing, 10);
+    expect(record("ana").pendingChoices).toBe(0);
+    expect(room.state.paused).toBe(false);
+  });
+
+  it("un takeover en plena pausa recibe de nuevo la oferta abierta", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => ana.choices.length === 1, 10);
+    const other = await join("Ana", "t-ana");
+    await other.welcome;
+    await ticksUntil(() => other.choices.length === 1, 10);
+    expect(other.choices[0]!.cards).toEqual(ana.choices[0]!.cards);
+    expect(room.state.paused).toBe(true);
+    other.client.send(MSG.chooseCard, { index: 0 });
+    await ticksUntil(() => !room.state.paused, 10);
+  });
+
+  it("quien entra tarde recibe level − 1 elecciones sin pausa", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    room["combat"].level = 3;
+    const beto = await join("Beto", "t-beto");
+    await beto.welcome;
+    expect(record("beto").pendingChoices).toBe(2);
+    expect(record("ana").pendingChoices).toBe(0);
+    await ticksUntil(() => beto.choices.length === 1, 10);
+    expect(beto.choices[0]).toMatchObject({ index: 1, total: 2 });
+    expect(ana.choices).toEqual([]);
+    expect(room.state.paused).toBe(false);
   });
 });
 
