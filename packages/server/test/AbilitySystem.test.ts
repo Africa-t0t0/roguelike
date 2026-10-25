@@ -251,7 +251,7 @@ describe("Grito de guerra", () => {
   });
 });
 
-describe("Azote", () => {
+describe("Golpe sísmico", () => {
   it("daña en radio 3,5 a los 0,5 s", () => {
     const env = setup([{ id: "slam", rank: 1 }]);
     const [inside, outside] = spawn(env.sys, [{ x: 31, z: 28 }, { x: 28, z: 23.8 }]);
@@ -261,6 +261,15 @@ describe("Azote", () => {
     expect(hits.map((x) => x.enemyId)).toEqual([inside!.id]);
     expect(inside!.hp).toBe(9999 - Math.round(BASE * 1.5));
     expect(outside!.hp).toBe(9999);
+  });
+
+  it("el impacto usa el rango del momento de lanzarla aunque suba de rango antes del impacto", () => {
+    const env = setup([{ id: "slam", rank: 1 }]);
+    spawn(env.sys, [{ x: 31, z: 28 }]);
+    feed(env, { abilities: 1 });
+    env.c.abilities[0]!.rank = 2;
+    const { hits } = untilHits(env, 0);
+    expect(hits[0]!.amount).toBe(Math.round(BASE * 1.5));
   });
 });
 
@@ -309,7 +318,7 @@ describe("Bloqueo", () => {
   });
 });
 
-describe("Tajo ondulante", () => {
+describe("Onda de corte", () => {
   /** Ataca en cada input hasta que exista la onda; devuelve los pasos de los impactos vistos. */
   function comboUntilShot(env: Env, k: KinematicState): number[] {
     const steps: number[] = [];

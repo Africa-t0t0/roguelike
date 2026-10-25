@@ -45,6 +45,8 @@ export interface PendingHit {
 /** Animación de una habilidad activa en curso; avanza por input procesado, como el combo. */
 export interface AbilityAnim {
   id: AbilityId;
+  /** rango al lanzarla; los impactos lo usan aunque suba de rango en una pausa intermedia */
+  rank: number;
   /** segundos que le quedan */
   left: number;
   /** segundos que faltan para cada impacto pendiente */

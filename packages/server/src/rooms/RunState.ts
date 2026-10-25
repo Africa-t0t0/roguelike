@@ -40,7 +40,7 @@ export const PlayerState = schema(
     attackSpeedMult: t.number(),
     /** habilidades en orden de casilla (la tecla i+1 usa la i-ésima), sin la pasiva */
     abilities: t.array(AbilitySlotState),
-    /** rango de Tajo ondulante; 0 si no la tiene */
+    /** rango de la Onda de corte; 0 si no la tiene */
     passiveRank: t.number(),
     /** mantiene el Bloqueo */
     blocking: t.boolean(),
@@ -75,7 +75,7 @@ export type EnemyState = SchemaType<typeof EnemyState>;
 export const ProjectileState = schema({ x: t.number(), z: t.number() }, "ProjectileState");
 export type ProjectileState = SchemaType<typeof ProjectileState>;
 
-/** Onda de Tajo ondulante de un jugador. */
+/** Onda de corte de un jugador. */
 export const PlayerShotState = schema(
   { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number() },
   "PlayerShotState",

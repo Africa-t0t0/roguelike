@@ -14,7 +14,7 @@ export const MIN_DAMAGE_TAKEN_MULT = 0.4;
 export const WHIRLWIND_IMPACT_AT = 0.5;
 /** impacto de la Patada, como fracción de su animación */
 export const KICK_IMPACT_AT = 0.4;
-/** segundos desde el inicio del Azote hasta su impacto */
+/** segundos desde el inicio del Golpe sísmico hasta su impacto */
 export const SLAM_IMPACT_S = 0.5;
 /** apertura total del cono de la Patada, en grados */
 export const KICK_ARC_DEG = 90;
@@ -24,7 +24,7 @@ export const WARCRY_DURATION_S = 8;
 export const BLOCK_HALF_ARC_DEG = 60;
 /** multiplicador de la velocidad de movimiento mientras bloquea */
 export const BLOCK_MOVE_MULT = 0.5;
-/** velocidad (m/s) y vida (s) de la onda de Tajo ondulante */
+/** velocidad (m/s) y vida (s) de la Onda de corte */
 export const CLEAVE_SPEED = 14;
 export const CLEAVE_LIFE_S = 0.5;
 
@@ -106,7 +106,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     text: (r) => `Todo el grupo hace +${pct(ABILITIES.warcry.ranks[r - 1]!.buff!)} de daño durante ${WARCRY_DURATION_S} s`,
   },
   slam: {
-    name: "Azote",
+    name: "Golpe sísmico",
     kind: "active",
     cooldownS: 10,
     animS: 0.9,
@@ -131,7 +131,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     text: (r) => `Mantén la tecla: -${pct(ABILITIES.block.ranks[r - 1]!.reduction!)} de daño de frente (±${BLOCK_HALF_ARC_DEG}°); te mueves a la mitad y no atacas`,
   },
   cleave: {
-    name: "Tajo ondulante",
+    name: "Onda de corte",
     kind: "passive",
     cooldownS: 0,
     animS: 0,

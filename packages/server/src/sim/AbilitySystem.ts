@@ -22,7 +22,7 @@ import {
   type KinematicState,
   type PlayerInput,
 } from "@roguelike/shared";
-import { abilityRank, rewindTick, type CombatState, type CombatSystem, type ImpactResult } from "./CombatSystem";
+import { abilityRank, rewindTick, type AbilityAnim, type CombatState, type CombatSystem, type ImpactResult } from "./CombatSystem";
 import type { EnemySystem } from "./EnemySystem";
 import type { PositionHistory } from "./PositionHistory";
 
@@ -33,7 +33,7 @@ export interface AbilityResult {
   kills: ImpactResult["kills"];
 }
 
-/** Onda de Tajo ondulante: atraviesa enemigos, golpea a cada uno una sola vez y muere contra un muro. */
+/** Onda de corte: atraviesa enemigos, golpea a cada uno una sola vez y muere contra un muro. */
 export interface PlayerShot {
   id: string;
   ownerKey: string;
@@ -134,7 +134,7 @@ export class AbilitySystem {
       for (const t of anim.impacts) {
         const left = countDown(t, SIM_DT);
         if (left > 0) keep.push(left);
-        else this.resolveImpact(c, k, anim.id, anim.facing, input, nowTick, enemies, history, res);
+        else this.resolveImpact(c, k, anim, input, nowTick, enemies, history, res);
       }
       anim.impacts = keep;
       if (anim.left === 0 && keep.length === 0) c.abilityAnim = null;
@@ -147,7 +147,7 @@ export class AbilitySystem {
       const def = ABILITIES[id];
       if (def.kind !== "active" || (c.abilityCd[id] ?? 0) > 0 || c.swingTimer > 0 || c.abilityAnim) continue;
       c.abilityCd[id] = def.cooldownS;
-      c.abilityAnim = { id, left: def.animS, impacts: impactTimes(id, rank), facing: input.facing };
+      c.abilityAnim = { id, rank, left: def.animS, impacts: impactTimes(id, rank), facing: input.facing };
       if (id === "warcry") this.warcry(c, party, def.ranks[rank - 1]!.buff!);
       res.started = id;
       break;
@@ -241,15 +241,15 @@ export class AbilitySystem {
   private resolveImpact(
     c: CombatState,
     k: KinematicState,
-    id: AbilityId,
-    facing: number,
+    anim: AbilityAnim,
     input: PlayerInput,
     nowTick: number,
     enemies: EnemySystem,
     history: PositionHistory,
     res: AbilityResult,
   ): void {
-    const r = ABILITIES[id].ranks[abilityRank(c, id) - 1];
+    const { id, facing } = anim;
+    const r = ABILITIES[id].ranks[anim.rank - 1];
     if (!r) return;
     const t = rewindTick(nowTick, input.viewTick);
     const origin = { x: k.x, z: k.z, facing };
@@ -270,9 +270,10 @@ export class AbilitySystem {
         continue;
       }
       if (id === "kick") {
-        // Lejos del jugador; encima de él, hacia donde mira.
-        const dx = e.x - k.x;
-        const dz = e.z - k.z;
+        // Lejos del jugador, desde la posición rebobinada con la que se decidió el cono; encima de él, hacia
+        // donde mira.
+        const dx = pos.x - k.x;
+        const dz = pos.z - k.z;
         const far = Math.hypot(dx, dz) > EPS;
         enemies.knockback(e.id, far ? dx : Math.sin(facing), far ? dz : Math.cos(facing), r.knockback!);
         enemies.stun(e.id, r.stunS!);
