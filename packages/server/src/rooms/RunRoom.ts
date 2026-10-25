@@ -13,6 +13,7 @@ import {
   newComboTimers,
   normalizeName,
   PATCH_RATE_MS,
+  playerMods,
   PICKUP_RANGE,
   PROTOCOL_VERSION,
   roomSpawnPoints,
@@ -49,6 +50,8 @@ const ENEMY_RNG_SALT = 0x5eed;
 const WAVE_RNG_SALT = 0x7a3e;
 const ORB_RNG_SALT = 0x0b5e;
 const CARD_RNG_SALT = 0xca7d;
+/** lo que cura la carta Vitalidad al aplicarse */
+const VITALITY_HEAL = 20;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -178,21 +181,30 @@ export class RunRoom extends Room<{ state: RunState }> {
 
   private chooseCard(client: Client, raw: unknown): void {
     const record = this.registry.bySession(client.sessionId);
-    const index = (raw as { index?: unknown } | null)?.index;
-    if (!record || typeof index !== "number") return;
-    this.handleChoices(this.levelUp.choose(record, index));
+    const msg = raw as { offerId?: unknown; index?: unknown } | null;
+    const offerId = msg?.offerId;
+    const index = msg?.index;
+    if (!record || typeof offerId !== "number" || typeof index !== "number") return;
+    this.handleChoices(this.levelUp.choose(record, offerId, index));
   }
 
   /**
    * Único lugar donde se atienden los eventos de elección: la oferta va solo a ese cliente y "applied"
-   * llega con la carta ya registrada en `progress` (sus efectos sobre los stats se enganchan aquí).
+   * llega con la carta ya registrada en `progress`: se recalculan sus multiplicadores (y su vida máxima) y
+   * Vitalidad cura 20.
    */
   private handleChoices(events: ChoiceEvent[]): void {
     for (const e of events) {
+      const record = this.registry.all().find((r) => r.key === e.key);
+      if (!record) continue;
       if (e.type === "offer") {
-        const record = this.registry.all().find((r) => r.key === e.key);
-        const client = record && this.clients.find((c) => c.sessionId === record.sessionId);
-        client?.send(MSG.levelChoice, { cards: e.cards, index: e.index, total: e.total, deadlineS: e.deadlineS });
+        const client = this.clients.find((c) => c.sessionId === record.sessionId);
+        client?.send(MSG.levelChoice, {
+          offerId: e.offerId, cards: e.cards, index: e.index, total: e.total, deadlineS: e.deadlineS,
+        });
+      } else {
+        this.combat.setMods(record.combat, playerMods(record.progress));
+        if (e.card.kind === "stat" && e.card.id === "vitality") this.combat.heal(record.combat, VITALITY_HEAL);
       }
     }
   }
@@ -220,7 +232,9 @@ export class RunRoom extends Room<{ state: RunState }> {
     for (const record of connected) {
       for (const raw of record.inputQueue.splice(0, MAX_INPUTS_PER_TICK)) {
         const input = record.combat.dead ? deadInput(raw, record.kinematic) : raw;
-        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT);
+        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT, {
+          speedMult: record.combat.mods.moveSpeedMult,
+        });
         record.lastSeq = input.seq;
         // Combo, impacto y golpes pendientes avanzan por input, antes de empezar el swing de ese input.
         const res = this.combat.onInputProcessed(
@@ -243,7 +257,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     // 3-4. Enemigos (solo ven a los conectados vivos).
     const alive: SimPlayer[] = connected
       .filter((r) => !r.combat.dead)
-      .map((r) => ({ key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true }));
+      .map((r) => ({ key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true, magnetMult: r.combat.mods.magnetMult }));
     // El reloj avanza solo con jugadores conectados; el sorteo de tiers de lo que se cree usa el reloj actual.
     if (connected.length > 0) this.floorTime += SIM_DT;
     this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor);

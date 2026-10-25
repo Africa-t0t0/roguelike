@@ -5,7 +5,12 @@ import {
   REWIND_MAX_TICKS,
   SIM_DT,
   STARTING_WEAPON,
+  BASE_REGEN,
   createRng,
+  newProgress,
+  playerMods,
+  strikeDamage,
+  type Progress,
   type Dungeon,
   type KinematicState,
   type PlayerInput,
@@ -554,5 +559,131 @@ describe("niveles", () => {
     expect(c.hp).toBe(0);
     expect(c.dead).toBe(true);
     expect(c.maxHp).toBe(132);
+  });
+});
+
+describe("mejoras de stat", () => {
+  const mods = (stats: Progress["stats"]) => playerMods({ ...newProgress(), stats });
+
+  it("con strength 2 el golpe hace round(base × 1.2)", () => {
+    const { sys, e } = world(0, 1, 100);
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    c.mods = mods({ strength: 2 });
+    const base = strikeDamage(c.weaponId, c.cls, 1, 1, 1);
+    const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
+    expect(impact!.hits[0]!.amount).toBe(Math.round(base * 1.2));
+    expect(e.hp).toBe(100 - Math.round(base * 1.2));
+  });
+
+  it("con reach 1 un enemigo a 2,4 m (borde) entra en el golpe 1 de la Kingslayer (2,2 × 1,15 = 2,53)", () => {
+    const r = ENEMY_DEFS.minion.radius;
+    for (const reach of [0, 1]) {
+      const { sys, e } = world(0, 2.4 + r, 100);
+      const cs = new CombatSystem();
+      const c = newCombatState("warrior", 1, "kingslayer-sword");
+      c.mods = mods({ reach });
+      const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
+      expect(impact!.hits.map((h) => h.enemyId), `reach ${reach}`).toEqual(reach ? [e.id] : []);
+    }
+  });
+
+  it("con fury 2 el siguiente golpe se libera tras ceil((0,35 / 1,2) / dt) inputs", () => {
+    const free = inputsFor(0.35 / 1.2);
+    expect(free).toBe(9);
+    for (const gap of [free - 1, free]) {
+      const { sys } = world(0, 50);
+      const cs = new CombatSystem();
+      const c = newCombatState("warrior", 1);
+      c.mods = mods({ fury: 2 });
+      const h = new PositionHistory();
+      expect(press(cs, c, sys, h, true).swing!.swung).toBe(true);
+      for (let i = 0; i < gap - 1; i++) press(cs, c, sys, h, false);
+      expect(press(cs, c, sys, h, true).swing!.swung, `${gap} inputs`).toBe(gap === free);
+    }
+  });
+
+  it("con ironskin 1 un golpe de 10 hace 9,2 (sin redondear: la vida es decimal)", () => {
+    const c = newCombatState("warrior", 1);
+    c.mods = mods({ ironskin: 1 });
+    const states = new Map([["a", c]]);
+    const cs = new CombatSystem();
+    cs.queueEnemyHits(states, [{ targetKey: "a", damage: 10, sourceId: "e" }], 100);
+    const r = cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 }), 101, noEnemies(), new PositionHistory());
+    expect(r.damage).toBeCloseTo(9.2, 9);
+    expect(c.hp).toBeCloseTo(120 - 9.2, 9);
+  });
+
+  it("la regeneración sube 0,5 por segundo sin cartas, suma regen y no pasa de la vida máxima", () => {
+    expect(BASE_REGEN).toBe(0.5);
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    c.hp = 100;
+    const states = new Map([["a", c]]);
+    for (let t = 1; t <= 30; t++) cs.step(states, t, SIM_DT);
+    expect(c.hp).toBeCloseTo(100.5, 9);
+    c.mods = mods({ regen: 2 });
+    for (let t = 31; t <= 60; t++) cs.step(states, t, SIM_DT);
+    expect(c.hp).toBeCloseTo(103, 9);
+    c.hp = c.maxHp - 0.01;
+    cs.step(states, 61, SIM_DT);
+    expect(c.hp).toBe(c.maxHp);
+  });
+
+  it("los muertos no regeneran", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    c.mods = mods({ regen: 3 });
+    c.hp = 0;
+    c.dead = true;
+    c.respawnIn = 100;
+    cs.step(new Map([["a", c]]), 1, 1);
+    expect(c.hp).toBe(0);
+  });
+
+  it("bloodlust cura 2 por kill, hasta la vida máxima", () => {
+    const { sys } = world(0, 1, 5);
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    c.mods = mods({ bloodlust: 1 });
+    c.hp = 50;
+    const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
+    expect(impact!.kills).toHaveLength(1);
+    expect(c.hp).toBe(52);
+    const w2 = world(0, 1, 5);
+    const c2 = newCombatState("warrior", 1);
+    c2.mods = mods({ bloodlust: 1 });
+    c2.hp = c2.maxHp - 1;
+    swingToImpact(cs, c2, w2.sys, new PositionHistory());
+    expect(c2.hp).toBe(c2.maxHp);
+  });
+
+  it("setMods ajusta la vida máxima (base + maxHpBonus) y grantXp la conserva", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    c.hp = 100;
+    cs.setMods(c, mods({ vitality: 2 }));
+    expect(c.maxHp).toBe(160);
+    expect(c.hp).toBe(100);
+    expect(c.mods.damageMult).toBe(1);
+    cs.grantXp(new Map([["a", c]]), xpToNext(1));
+    expect(c.maxHp).toBe(132 + 40);
+    // Bajar la vida máxima recorta la vida.
+    c.hp = c.maxHp;
+    cs.setMods(c, mods({}));
+    expect(c.maxHp).toBe(132);
+    expect(c.hp).toBe(132);
+  });
+
+  it("heal cura hasta la vida máxima y no cura a los muertos", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    c.hp = 110;
+    cs.heal(c, 20);
+    expect(c.hp).toBe(120);
+    c.hp = 0;
+    c.dead = true;
+    cs.heal(c, 20);
+    expect(c.hp).toBe(0);
   });
 });

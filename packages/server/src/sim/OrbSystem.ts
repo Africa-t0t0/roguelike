@@ -34,8 +34,8 @@ export class OrbSystem {
   }
 
   /**
-   * Cada orbe a ≤ ORB_MAGNET_RADIUS del jugador vivo más cercano avanza hacia él ORB_SPEED × dt y se
-   * recoge si queda a ≤ ORB_PICKUP_RADIUS. Devuelve la XP recogida en este tick.
+   * Cada orbe avanza ORB_SPEED × dt hacia el jugador vivo más cercano que lo tenga a ≤ ORB_MAGNET_RADIUS ×
+   * su `magnetMult` (1 por defecto) y se recoge si queda a ≤ ORB_PICKUP_RADIUS. Devuelve la XP recogida.
    */
   step(alive: readonly SimPlayer[], dt: number): number {
     if (alive.length === 0) return 0;
@@ -46,9 +46,9 @@ export class OrbSystem {
       let bestD = Infinity;
       for (const p of alive) {
         const d = Math.hypot(p.x - o.x, p.z - o.z);
-        if (d < bestD) [best, bestD] = [p, d];
+        if (d <= ORB_MAGNET_RADIUS * (p.magnetMult ?? 1) && d < bestD) [best, bestD] = [p, d];
       }
-      if (best && bestD <= ORB_MAGNET_RADIUS) {
+      if (best) {
         const move = Math.min(ORB_SPEED * dt, bestD);
         if (bestD > 0) {
           o.x += ((best.x - o.x) / bestD) * move;

@@ -1,4 +1,5 @@
 import {
+  BASE_REGEN,
   STARTING_WEAPON,
   newComboTimers,
   strikeOf,
@@ -11,6 +12,8 @@ import {
   advanceCombo,
   cancelImpact,
   inArc,
+  newProgress,
+  playerMods,
   playerStats,
   tryStartSwing,
   xpToNext,
@@ -19,6 +22,7 @@ import {
   type EnemyLoadout,
   type KinematicState,
   type PlayerInput,
+  type PlayerMods,
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
@@ -44,6 +48,8 @@ export interface CombatState extends ComboTimers {
   respawnIn: number;
   invulnFor: number;
   pendingHits: PendingHit[];
+  /** multiplicadores de sus cartas de stat; se recalculan con setMods al aplicar una carta */
+  mods: PlayerMods;
 }
 
 export function newCombatState(
@@ -65,6 +71,7 @@ export function newCombatState(
     invulnFor: 0,
     ...newComboTimers(),
     pendingHits: [],
+    mods: playerMods(newProgress()),
   };
 }
 
@@ -125,7 +132,7 @@ export class CombatSystem {
   attack(c: CombatState, input: PlayerInput): AttackResult {
     const none: AttackResult = { swung: false, step: 0 };
     if (!input.attack || c.dead) return none;
-    const step = tryStartSwing(c, c.weaponId);
+    const step = tryStartSwing(c, c.weaponId, c.mods.attackSpeedMult);
     if (step === 0) return none;
     c.swingFacing = input.facing;
     return { swung: true, step };
@@ -140,9 +147,11 @@ export class CombatSystem {
     enemies: EnemySystem,
     history: PositionHistory,
   ): ImpactResult {
-    const strike = strikeOf(c.weaponId, step);
+    const strike = strikeOf(c.weaponId, step, c.mods.attackSpeedMult);
+    const range = strike.range * c.mods.reachMult;
+    const arcDeg = Math.min(360, strike.arcDeg * c.mods.reachMult);
     const t = Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(input.viewTick)));
-    const amount = strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier);
+    const amount = Math.round(strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier) * c.mods.damageMult);
     const origin = { x: k.x, z: k.z, facing: c.swingFacing };
     const result: ImpactResult = { step, hits: [], kills: [] };
 
@@ -150,11 +159,13 @@ export class CombatSystem {
     for (const e of [...enemies.enemies]) {
       if (e.ai === "dead" || e.hp <= 0) continue;
       const pos = history.at(t, e.id) ?? { x: e.x, z: e.z };
-      if (!inArc(origin, { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius }, strike.range, strike.arcDeg)) continue;
+      if (!inArc(origin, { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius }, range, arcDeg)) continue;
       const r = enemies.damage(e.id, amount);
       result.hits.push({ enemyId: e.id, amount, killed: r.killed, x: e.x, z: e.z });
       if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
     }
+    // Sed de sangre: cada kill propio cura.
+    this.heal(c, c.mods.lifeOnKill * result.kills.length);
     return result;
   }
 
@@ -162,11 +173,15 @@ export class CombatSystem {
     for (const h of hits) {
       const c = states.get(h.targetKey);
       if (!c || c.dead) continue;
-      c.pendingHits.push({ damage: h.damage, resolveTick: nowTick });
+      // Piel de hierro: se aplica al encolar, sin redondear (la vida es decimal).
+      c.pendingHits.push({ damage: h.damage * c.mods.damageTakenMult, resolveTick: nowTick });
     }
   }
 
-  /** Una vez por tick: reapariciones, invulnerabilidad y el plazo máximo de los golpes pendientes. */
+  /**
+   * Una vez por tick (solo fuera de la pausa): reapariciones, invulnerabilidad, regeneración de los vivos
+   * (antes de los golpes del tick) y el plazo máximo de los golpes pendientes.
+   */
   step(
     states: Map<string, CombatState>,
     nowTick: number,
@@ -191,6 +206,8 @@ export class CombatSystem {
         continue;
       }
 
+      this.heal(c, (BASE_REGEN + c.mods.regen) * dt);
+
       if (c.invulnFor > 0) {
         c.pendingHits = [];
         continue;
@@ -201,6 +218,22 @@ export class CombatSystem {
       if (r.died) died.push(key);
     }
     return { damaged, died, respawned };
+  }
+
+  /**
+   * Cambia los multiplicadores de sus cartas. La vida máxima pasa a ser la del nivel más `maxHpBonus`;
+   * la vida no sube con ella (la cura de Vitalidad la da `heal`) y se recorta si la máxima baja.
+   */
+  setMods(c: CombatState, mods: PlayerMods): void {
+    c.mods = mods;
+    c.maxHp = playerStats(c.cls, this.level).maxHp + mods.maxHpBonus;
+    c.hp = Math.min(c.hp, c.maxHp);
+  }
+
+  /** Cura `amount` hasta la vida máxima; a los muertos no. */
+  heal(c: CombatState, amount: number): void {
+    if (c.dead || amount <= 0) return;
+    c.hp = Math.min(c.maxHp, c.hp + amount);
   }
 
   /** Aplica (y quita de la lista) los golpes pendientes que cumplen `due`. */
@@ -232,7 +265,7 @@ export class CombatSystem {
     }
     if (reached.length > 0) {
       for (const c of states.values()) {
-        const maxHp = playerStats(c.cls, this.level).maxHp;
+        const maxHp = playerStats(c.cls, this.level).maxHp + c.mods.maxHpBonus;
         const diff = maxHp - c.maxHp;
         c.maxHp = maxHp;
         if (!c.dead) c.hp += diff;

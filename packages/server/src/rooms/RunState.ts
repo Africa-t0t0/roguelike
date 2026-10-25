@@ -21,6 +21,10 @@ export const PlayerState = schema(
     weaponTier: t.number(),
     /** tiene una elección de carta abierta sin elegir */
     choosing: t.boolean(),
+    /** multiplicador de velocidad de movimiento de sus cartas (la predicción del cliente lo usa) */
+    moveSpeedMult: t.number(),
+    /** multiplicador de velocidad de ataque de sus cartas (la predicción del combo lo usa) */
+    attackSpeedMult: t.number(),
   },
   "PlayerState",
 );

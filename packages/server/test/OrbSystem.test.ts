@@ -78,6 +78,19 @@ describe("OrbSystem", () => {
     expect(sys.orbs[0]!.z).toBeCloseTo(0, 9);
   });
 
+  it("con magnet 2 un orbe a 5 m va hacia ese jugador (radio 6 m) y no hacia otro más cercano sin la carta", () => {
+    const sys = single(0, 0);
+    const magnet: SimPlayer = { ...P("a", 5, 0), magnetMult: 2 };
+    const plain = P("b", 0, -4);
+    sys.step([plain, magnet], SIM_DT);
+    expect(sys.orbs[0]!.x).toBeCloseTo(ORB_SPEED * SIM_DT, 9);
+    expect(sys.orbs[0]!.z).toBeCloseTo(0, 9);
+    // Sin la carta, a 5 m no se mueve.
+    const still = single(0, 0);
+    still.step([P("a", 5, 0)], SIM_DT);
+    expect(still.orbs[0]).toMatchObject({ x: 0, z: 0 });
+  });
+
   it("con alive vacío nada se mueve ni se recoge", () => {
     const sys = single(0.1, 0);
     for (let i = 0; i < 5; i++) expect(sys.step([], SIM_DT)).toBe(0);

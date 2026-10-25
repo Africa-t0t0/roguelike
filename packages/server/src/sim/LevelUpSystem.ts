@@ -9,11 +9,13 @@ export interface ChoiceRecord {
 }
 
 export type ChoiceEvent =
-  | { type: "offer"; key: string; cards: CardOffer[]; index: number; total: number; deadlineS: number }
+  | { type: "offer"; key: string; offerId: number; cards: CardOffer[]; index: number; total: number; deadlineS: number }
   | { type: "applied"; key: string; card: CardOffer };
 
 /** Oferta abierta de un jugador. `left` solo la usa la elección sin pausa; en la pausa manda `pauseLeft`. */
 interface OpenOffer {
+  /** id creciente por oferta abierta: una elección con otro id (clic viejo o doble) se ignora */
+  offerId: number;
   record: ChoiceRecord;
   cards: CardOffer[];
   solo: boolean;
@@ -45,6 +47,7 @@ export class LevelUpSystem {
   private participants = new Set<string>();
   /** conectados según el último step u onLevelsGained */
   private roster: ChoiceRecord[] = [];
+  private nextOfferId = 1;
 
   constructor(private readonly rng: Rng) {}
 
@@ -107,12 +110,14 @@ export class LevelUpSystem {
     return events;
   }
 
-  /** Aplica la carta elegida si hay oferta abierta y el índice es válido; si no, se ignora. */
-  choose(record: ChoiceRecord, cardIndex: number): ChoiceEvent[] {
+  /**
+   * Aplica la carta elegida si `offerId` es el de su oferta abierta y el índice es válido; si no, se ignora
+   * (p. ej., un clic viejo que llega cuando ya se abrió la siguiente oferta).
+   */
+  choose(record: ChoiceRecord, offerId: number, cardIndex: number): ChoiceEvent[] {
     const o = this.offers.get(record.key);
-    if (!o || o.record !== record || !Number.isInteger(cardIndex) || cardIndex < 0 || cardIndex >= o.cards.length) {
-      return [];
-    }
+    if (!o || o.record !== record || o.offerId !== offerId) return [];
+    if (!Number.isInteger(cardIndex) || cardIndex < 0 || cardIndex >= o.cards.length) return [];
     const events = this.apply(o, o.cards[cardIndex]!);
     if (this.pausedFlag && !o.solo) events.push(...this.advance());
     return events;
@@ -125,7 +130,7 @@ export class LevelUpSystem {
     const index = o.solo ? o.index : this.round;
     const total = o.solo ? o.total : this.rounds;
     const deadlineS = Math.max(0, o.solo ? o.left : this.left);
-    return [{ type: "offer", key, cards: o.cards, index, total, deadlineS }];
+    return [{ type: "offer", key, offerId: o.offerId, cards: o.cards, index, total, deadlineS }];
   }
 
   /** Elección sin pausa para quien vuelve o entra tarde con elecciones pendientes. */
@@ -145,8 +150,9 @@ export class LevelUpSystem {
 
   private open(record: ChoiceRecord, solo: boolean, index: number, total: number): ChoiceEvent {
     const cards = rollOffer(this.rng, record.progress);
-    this.offers.set(record.key, { record, cards, solo, left: CHOICE_TIME_S, index, total });
-    return { type: "offer", key: record.key, cards, index, total, deadlineS: CHOICE_TIME_S };
+    const offerId = this.nextOfferId++;
+    this.offers.set(record.key, { offerId, record, cards, solo, left: CHOICE_TIME_S, index, total });
+    return { type: "offer", key: record.key, offerId, cards, index, total, deadlineS: CHOICE_TIME_S };
   }
 
   /** Abre la siguiente elección del grupo para los conectados con elecciones pendientes. */

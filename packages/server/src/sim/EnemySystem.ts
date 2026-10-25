@@ -60,6 +60,8 @@ export interface SimPlayer {
   x: number;
   z: number;
   alive: boolean;
+  /** multiplicador del radio de imán de orbes (carta Imán); 1 si falta */
+  magnetMult?: number;
 }
 
 export interface EnemyDamageResult {

@@ -25,6 +25,10 @@ import {
   xpToNext,
   TIERS,
   CHOICE_TIME_S,
+  BASE_REGEN,
+  applyCard,
+  playerMods,
+  type CardOffer,
   type CombatEvent,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
@@ -59,7 +63,7 @@ afterEach(async () => {
 });
 
 type FloorMsg = { items: { weaponId: string; tier: number; x: number; z: number }[] };
-type ChoiceMsg = { cards: unknown[]; index: number; total: number; deadlineS: number };
+type ChoiceMsg = { offerId: number; cards: unknown[]; index: number; total: number; deadlineS: number };
 
 async function join(
   name: string,
@@ -401,29 +405,30 @@ describe("RunRoom: combate", () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
     record("ana").combat.hp = 50;
-    await ticksUntil(() => player("ana").hp === 50, 3);
+    // La regeneración (0,5/s) la mueve apenas: se compara con margen.
+    await ticksUntil(() => Math.abs(player("ana").hp - 50) < 0.5, 3);
     await ana.client.leave();
     await ticksUntil(() => !room.state.players.has("ana"));
 
     const back = await join("Ana", "t-otro");
     await back.welcome;
-    expect(player("ana").hp).toBe(50);
+    expect(player("ana").hp).toBeCloseTo(50, 0);
     expect(player("ana").maxHp).toBe(120);
     await room.waitForNextTimestep();
-    expect(player("ana").hp).toBe(50);
+    expect(player("ana").hp).toBeCloseTo(50, 0);
   });
 
   it("Foco 2: un takeover conserva la vida y el estado de muerte", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
     record("ana").combat.hp = 50;
-    await ticksUntil(() => player("ana").hp === 50, 3);
+    await ticksUntil(() => Math.abs(player("ana").hp - 50) < 0.5, 3);
 
     const ana2 = await join("Ana", "t-ana");
     await ana2.welcome;
-    expect(player("ana").hp).toBe(50);
+    expect(player("ana").hp).toBeCloseTo(50, 0);
     await room.waitForNextTimestep();
-    expect(player("ana").hp).toBe(50);
+    expect(player("ana").hp).toBeCloseTo(50, 0);
 
     const c = record("ana").combat;
     c.hp = 0;
@@ -918,12 +923,16 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     expect(room.state.pauseLeft).toBeLessThan(pauseLeft);
     expect(room.state.paused).toBe(true);
 
-    ana.client.send(MSG.chooseCard, { index: 0 });
+    ana.client.send(MSG.chooseCard, { offerId: ana.choices[0]!.offerId, index: 0 });
     await ticksUntil(() => !room.state.paused, 10);
     expect(player("ana").choosing).toBe(false);
     expect(record("ana").pendingChoices).toBe(0);
     const p = record("ana").progress;
     expect(Object.keys(p.stats).length + p.abilities.length).toBe(1);
+    // Al aplicarse, los multiplicadores salen del progreso y se sincronizan.
+    expect(record("ana").combat.mods).toEqual(playerMods(p));
+    expect(player("ana").moveSpeedMult).toBe(playerMods(p).moveSpeedMult);
+    expect(player("ana").attackSpeedMult).toBe(playerMods(p).attackSpeedMult);
     const t1 = room.state.tick;
     await room.waitForNextTimestep();
     await room.waitForNextTimestep();
@@ -955,7 +964,7 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     await ticksUntil(() => player("ana").lastSeq === 1, 5);
     expect(room.state.tick).toBeGreaterThan(t0);
 
-    back.client.send(MSG.chooseCard, { index: 1 });
+    back.client.send(MSG.chooseCard, { offerId: back.choices[0]!.offerId, index: 1 });
     await ticksUntil(() => !player("ana").choosing, 10);
     expect(record("ana").pendingChoices).toBe(0);
     expect(room.state.paused).toBe(false);
@@ -971,7 +980,8 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     await ticksUntil(() => other.choices.length === 1, 10);
     expect(other.choices[0]!.cards).toEqual(ana.choices[0]!.cards);
     expect(room.state.paused).toBe(true);
-    other.client.send(MSG.chooseCard, { index: 0 });
+    expect(other.choices[0]!.offerId).toBe(ana.choices[0]!.offerId);
+    other.client.send(MSG.chooseCard, { offerId: other.choices[0]!.offerId, index: 0 });
     await ticksUntil(() => !room.state.paused, 10);
   });
 
@@ -987,6 +997,97 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     expect(beto.choices[0]).toMatchObject({ index: 1, total: 2 });
     expect(ana.choices).toEqual([]);
     expect(room.state.paused).toBe(false);
+  });
+
+  it("un chooseCard con un offerId viejo, llegado tras abrirse la siguiente oferta, se ignora", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    room["levelUp"].onLevelsGained(2, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => ana.choices.length === 1, 10);
+    const oldId = ana.choices[0]!.offerId;
+    ana.client.send(MSG.chooseCard, { offerId: oldId, index: 0 });
+    await ticksUntil(() => ana.choices.length === 2, 10);
+    expect(ana.choices[1]).toMatchObject({ index: 2, total: 2 });
+    expect(ana.choices[1]!.offerId).not.toBe(oldId);
+    expect(record("ana").pendingChoices).toBe(1);
+    // El doble clic llega con la oferta ya cambiada.
+    ana.client.send(MSG.chooseCard, { offerId: oldId, index: 1 });
+    ana.client.send(MSG.chooseCard, { index: 1 });
+    for (let i = 0; i < 5; i++) await room.waitForNextTimestep();
+    expect(record("ana").pendingChoices).toBe(1);
+    expect(player("ana").choosing).toBe(true);
+    expect(room.state.paused).toBe(true);
+    ana.client.send(MSG.chooseCard, { offerId: ana.choices[1]!.offerId, index: 1 });
+    await ticksUntil(() => !room.state.paused, 10);
+    expect(record("ana").pendingChoices).toBe(0);
+  });
+});
+
+describe("RunRoom: efectos de las mejoras de stat", () => {
+  /** Registra la carta y la atiende como el "applied" de LevelUpSystem. */
+  const grant = (key: string, card: CardOffer) => {
+    applyCard(record(key).progress, card);
+    room["handleChoices"]([{ type: "applied", key, card }]);
+  };
+  const stat = (id: Extract<CardOffer, { kind: "stat" }>["id"]): CardOffer => ({ kind: "stat", id });
+
+  it("Foco 4: con agility el servidor mueve PLAYER_SPEED × 1,08 × dt y sincroniza moveSpeedMult 1,08", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    grant("ana", stat("agility"));
+    expect(record("ana").combat.mods.moveSpeedMult).toBeCloseTo(1.08, 12);
+    const x0 = player("ana").x;
+    ana.client.send(MSG.input, input(1));
+    await ticksUntil(() => player("ana").lastSeq === 1);
+    expect(player("ana").x - x0).toBeCloseTo(PLAYER_SPEED * 1.08 * SIM_DT, 9);
+    expect(player("ana").moveSpeedMult).toBeCloseTo(1.08, 12);
+    expect(player("ana").attackSpeedMult).toBe(1);
+    await ticksUntil(() => ana.client.state.players.get("ana")?.moveSpeedMult > 1, 10);
+  });
+
+  it("vitality sube 20 la vida máxima y cura 20; fury se sincroniza", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const base = record("ana").combat.maxHp;
+    record("ana").combat.hp = 50;
+    grant("ana", stat("vitality"));
+    expect(record("ana").combat.maxHp).toBe(base + 20);
+    expect(record("ana").combat.hp).toBe(70);
+    grant("ana", stat("fury"));
+    await room.waitForNextTimestep();
+    expect(player("ana").maxHp).toBe(base + 20);
+    expect(player("ana").attackSpeedMult).toBeCloseTo(1.1, 12);
+  });
+
+  it("regenera BASE_REGEN por segundo fuera de la pausa y nada en la pausa", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const c = record("ana").combat;
+    c.hp = 50;
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect(c.hp).toBeGreaterThan(50);
+    expect(c.hp).toBeLessThanOrEqual(50 + BASE_REGEN * 1.2);
+    room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => room.state.paused, 5);
+    const hp = c.hp;
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect(room.state.paused).toBe(true);
+    expect(c.hp).toBe(hp);
+  });
+
+  it("con magnet 2 atrae un orbe a 5 m", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    grant("ana", stat("magnet"));
+    grant("ana", stat("magnet"));
+    const me = record("ana").kinematic;
+    room["orbs"].spawn(me.x, me.z, 1, room.state.tick);
+    const orb = room["orbs"].orbs[0]!;
+    orb.x = me.x;
+    orb.z = me.z + 5;
+    await room.waitForNextTimestep();
+    await room.waitForNextTimestep();
+    expect(Math.hypot(orb.x - me.x, orb.z - me.z)).toBeLessThan(5);
   });
 });
 

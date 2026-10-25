@@ -6,6 +6,12 @@ const rec = (key: string, pendingChoices = 0): ChoiceRecord => ({ key, progress:
 const offers = (events: ChoiceEvent[]) => events.filter((e) => e.type === "offer");
 const applied = (events: ChoiceEvent[]) => events.filter((e) => e.type === "applied");
 
+/** Elige con el offerId de la oferta abierta de `r` (−1 si no tiene: se ignora). */
+function choose(sys: LevelUpSystem, r: ChoiceRecord, index: number): ChoiceEvent[] {
+  const [o] = sys.openOffer(r.key);
+  return sys.choose(r, o?.type === "offer" ? o.offerId : -1, index);
+}
+
 /** Avanza `seconds` en pasos de 1/30 s y junta los eventos. */
 function run(sys: LevelUpSystem, seconds: number, connected: ChoiceRecord[]): ChoiceEvent[] {
   const events: ChoiceEvent[] = [];
@@ -42,13 +48,13 @@ describe("LevelUpSystem: pausa del grupo", () => {
     }
     expect(sys.isChoosing("ana")).toBe(true);
 
-    const a = sys.choose(ana, 0);
+    const a = choose(sys, ana, 0);
     const card = o.find((e) => e.key === "ana")!;
     expect(a).toEqual([{ type: "applied", key: "ana", card: card.type === "offer" && card.cards[0] }]);
     expect(sys.isChoosing("ana")).toBe(false);
     expect(ana.pendingChoices).toBe(0);
     expect(sys.paused).toBe(true);
-    sys.choose(beto, 2);
+    choose(sys, beto, 2);
     expect(sys.paused).toBe(false);
     expect(beto.pendingChoices).toBe(0);
     expect(ana.progress).not.toEqual(newProgress());
@@ -57,7 +63,7 @@ describe("LevelUpSystem: pausa del grupo", () => {
   it("Foco 1: si uno no elige, a los 20 s se le asigna una carta al azar y la pausa termina", () => {
     const { sys, ana, beto } = setup();
     gain(sys, 1, [ana, beto], [ana, beto]);
-    sys.choose(ana, 1);
+    choose(sys, ana, 1);
     const before = run(sys, CHOICE_TIME_S - 1, [ana, beto]);
     expect(applied(before)).toEqual([]);
     expect(sys.paused).toBe(true);
@@ -71,7 +77,7 @@ describe("LevelUpSystem: pausa del grupo", () => {
   it("Foco 1: si el que no elige se desconecta, la pausa termina en el siguiente step y su elección queda pendiente", () => {
     const { sys, ana, beto } = setup();
     gain(sys, 1, [ana, beto], [ana, beto]);
-    sys.choose(ana, 0);
+    choose(sys, ana, 0);
     const ev = sys.step(1 / 30, [ana]);
     expect(sys.paused).toBe(false);
     expect(ev).toEqual([]);
@@ -116,7 +122,7 @@ describe("LevelUpSystem: pausa del grupo", () => {
     const { sys, ana } = setup();
     gain(sys, 2, [ana], [ana]);
     run(sys, 5, [ana]);
-    const ev = sys.choose(ana, 0);
+    const ev = choose(sys, ana, 0);
     expect(applied(ev)).toHaveLength(1);
     expect(offers(ev)).toMatchObject([{ key: "ana", index: 2, total: 2 }]);
     expect(sys.pauseLeft).toBe(CHOICE_TIME_S);
@@ -124,18 +130,50 @@ describe("LevelUpSystem: pausa del grupo", () => {
 
   it("ignora índices fuera de rango, elecciones repetidas o sin oferta abierta", () => {
     const { sys, ana, beto } = setup();
-    expect(sys.choose(ana, 0)).toEqual([]);
+    expect(choose(sys, ana, 0)).toEqual([]);
     expect(ana.progress).toEqual(newProgress());
 
     gain(sys, 1, [ana, beto], [ana, beto]);
-    for (const bad of [-1, 3, 1.5, Number.NaN]) expect(sys.choose(ana, bad)).toEqual([]);
+    for (const bad of [-1, 3, 1.5, Number.NaN]) expect(choose(sys, ana, bad)).toEqual([]);
     expect(ana.pendingChoices).toBe(1);
-    expect(applied(sys.choose(ana, 0))).toHaveLength(1);
-    expect(sys.choose(ana, 1)).toEqual([]);
+    expect(applied(choose(sys, ana, 0))).toHaveLength(1);
+    expect(choose(sys, ana, 1)).toEqual([]);
     expect(ana.pendingChoices).toBe(0);
     const p = ana.progress;
     const total = Object.values(p.stats).reduce((s, n) => s + (n ?? 0), 0) + p.abilities.length;
     expect(total).toBe(1);
+  });
+});
+
+describe("LevelUpSystem: offerId", () => {
+  it("cada oferta abierta lleva un offerId creciente y openOffer devuelve el mismo", () => {
+    const { sys, ana, beto } = setup();
+    const ev = offers(gain(sys, 2, [ana, beto], [ana, beto]));
+    const ids = ev.map((e) => (e.type === "offer" ? e.offerId : -1));
+    expect(new Set(ids).size).toBe(2);
+    const [again] = sys.openOffer("ana");
+    expect(again!.type === "offer" && again!.offerId).toBe(ids[ev.findIndex((e) => e.key === "ana")]);
+    choose(sys, ana, 0);
+    const next = offers(choose(sys, beto, 0));
+    expect(next).toHaveLength(2);
+    for (const e of next) expect(e.type === "offer" && e.offerId).toBeGreaterThan(Math.max(...ids));
+  });
+
+  it("una elección con un offerId viejo, llegada tras abrirse la siguiente oferta, se ignora", () => {
+    const { sys, ana } = setup();
+    const [first] = offers(gain(sys, 2, [ana], [ana]));
+    const oldId = first!.type === "offer" ? first!.offerId : -1;
+    const [second] = offers(sys.choose(ana, oldId, 0));
+    expect(second).toMatchObject({ key: "ana", index: 2, total: 2 });
+    expect(ana.pendingChoices).toBe(1);
+    // Doble clic: el mismo mensaje llega otra vez.
+    expect(sys.choose(ana, oldId, 0)).toEqual([]);
+    expect(ana.pendingChoices).toBe(1);
+    expect(sys.isChoosing("ana")).toBe(true);
+    expect(sys.paused).toBe(true);
+    const newId = second!.type === "offer" ? second!.offerId : -1;
+    expect(applied(sys.choose(ana, newId, 0))).toHaveLength(1);
+    expect(ana.pendingChoices).toBe(0);
   });
 });
 
@@ -157,7 +195,7 @@ describe("LevelUpSystem: elección sin pausa", () => {
     expect(offers(ev1)).toMatchObject([{ key: "ana", index: 2, total: 2 }]);
     expect(ana.pendingChoices).toBe(1);
 
-    expect(applied(sys.choose(ana, 2))).toHaveLength(1);
+    expect(applied(choose(sys, ana, 2))).toHaveLength(1);
     expect(ana.pendingChoices).toBe(0);
     expect(sys.isChoosing("ana")).toBe(false);
     expect(sys.paused).toBe(false);
@@ -197,8 +235,8 @@ describe("LevelUpSystem: elección sin pausa", () => {
     expect(sys.paused).toBe(true);
     expect(ana.pendingChoices).toBe(2);
     expect(offers(ev).map((e) => e.key).sort()).toEqual(["ana", "beto"]);
-    sys.choose(ana, 0);
-    sys.choose(beto, 0);
+    choose(sys, ana, 0);
+    choose(sys, beto, 0);
     // Termina la pausa; a Ana le queda una pendiente y la recibe sin pausa.
     const after = sys.step(1 / 30, [ana, beto]);
     expect(sys.paused).toBe(false);

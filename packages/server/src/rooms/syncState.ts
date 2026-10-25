@@ -23,6 +23,8 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.weaponId = c.weaponId;
   ps.weaponTier = c.weaponTier;
   ps.choosing = choosing;
+  ps.moveSpeedMult = c.mods.moveSpeedMult;
+  ps.attackSpeedMult = c.mods.attackSpeedMult;
 }
 
 /** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles` y `orbs`. */
