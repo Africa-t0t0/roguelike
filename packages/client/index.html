@@ -68,6 +68,45 @@
       .hud-death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         background: radial-gradient(rgba(40, 0, 0, 0.25), rgba(30, 0, 0, 0.7)); font: 700 2rem var(--caps);
         letter-spacing: 0.06em; color: #e7c9b0; text-shadow: 0 2px 8px #000; }
+      /* Grito de guerra activo: la tarjeta brilla en dorado (fijo; el buff también queda quieto en la pausa). */
+      .hud-buffed .hud-portrait::before { border-color: var(--gold-hi); box-shadow: 0 0 0 4px rgba(9, 8, 7, 0.85),
+        0 0 0 5px var(--gold-hi), 0 0 1.6rem 0.45rem rgba(240, 190, 90, 0.7), 0 0.4rem 1.2rem rgba(0, 0, 0, 0.7); }
+      .hud-buffed .hud-portrait { filter: drop-shadow(0 0 0.5rem rgba(255, 205, 110, 0.95)) drop-shadow(0 0 1.3rem rgba(240, 170, 60, 0.7)); }
+      .hud-buffed .hud-bars { filter: drop-shadow(0 0 0.5rem rgba(240, 190, 90, 0.7)); }
+      .hud-buffed .hud-weapon::after { content: " ✶"; color: var(--gold-hi); }
+      .hud-choosing .hud-banner { display: none; }
+
+      /* Barra de habilidades abajo a la derecha: casillas con filete dorado, tecla, glifo, rango y enfriamiento. */
+      .ability-bar { position: absolute; right: 1.6rem; bottom: 1.6rem; display: flex; align-items: flex-end; gap: 0.6rem;
+        pointer-events: none; font-family: var(--serif); }
+      .ab-slot { position: relative; width: 3.7rem; height: 3.7rem; display: grid; place-items: center; overflow: visible;
+        background: linear-gradient(#1a1510, #0c0a07 70%); border: 1px solid var(--gold);
+        box-shadow: 0 0 0 3px rgba(9, 8, 7, 0.85), 0 0 0 4px var(--gold-dim), 0 0.4rem 1.2rem rgba(0, 0, 0, 0.7);
+        transition: box-shadow 0.15s, border-color 0.15s; }
+      .ab-glyph { font: 700 2.05rem/1 var(--serif); color: var(--gold-hi); margin-top: -0.3rem;
+        text-shadow: 0 1px 3px #000, 0 0 10px rgba(201, 163, 92, 0.45); }
+      .ab-sweep { position: absolute; inset: 0; background: conic-gradient(rgba(5, 4, 3, 0.8) calc(var(--cd, 0) * 360deg), transparent 0); }
+      .ab-cd { position: absolute; inset: 0; display: grid; place-items: center; font: 700 1.4rem var(--caps); color: #f6ead2;
+        text-shadow: 0 1px 3px #000, 0 0 6px #000; font-variant-numeric: tabular-nums; }
+      .ab-key { position: absolute; left: -0.5rem; top: -0.5rem; width: 1.25rem; height: 1.25rem; display: grid; place-items: center;
+        font: 700 0.75rem/1 var(--caps); color: #f6ead2; background: #120f0b; border: 1px solid var(--gold-hi); }
+      .ab-pips { position: absolute; left: 0; right: 0; bottom: 0.15rem; text-align: center; font-size: 0.55rem; line-height: 1;
+        letter-spacing: 0.14em; color: var(--gold); text-shadow: 0 1px 2px #000; }
+      .ab-cooling .ab-glyph { color: rgba(236, 208, 143, 0.45); }
+      .ab-active { border-color: var(--gold-hi); box-shadow: 0 0 0 3px rgba(9, 8, 7, 0.85), 0 0 0 4px var(--gold-hi),
+        0 0 1.2rem rgba(236, 208, 143, 0.65), 0 0.4rem 1.2rem rgba(0, 0, 0, 0.7); }
+      .ab-active .ab-glyph { color: #fff3d0; }
+      .ab-empty { opacity: 0.35; border-color: var(--gold-dim); background: rgba(9, 8, 7, 0.6); }
+      .ab-empty .ab-key { border-color: var(--gold-dim); color: rgba(233, 220, 192, 0.6); }
+      .ab-passive { position: relative; width: 2.7rem; height: 2.7rem; margin: 0 0.3rem 0.75rem 0; display: grid; place-items: center;
+        isolation: isolate; }
+      .ab-passive::before { content: ""; position: absolute; inset: 0.4rem; z-index: -1; transform: rotate(45deg); background: #15110c;
+        border: 1px solid var(--gold); box-shadow: 0 0 0 2px rgba(9, 8, 7, 0.85), 0 0 0 3px var(--gold-dim), 0 0 8px rgba(236, 208, 143, 0.35); }
+      .ab-passive-glyph { font: 700 1.1rem/1 var(--serif); color: var(--gold-hi); text-shadow: 0 1px 2px #000; }
+      .ab-passive .ab-pips { bottom: -0.95rem; }
+      @media (max-width: 62rem) {
+        .ability-bar { bottom: 11rem; }
+      }
 
       /* Brújula arriba al centro, con el reloj del piso debajo. */
       .compass { position: absolute; top: 0.9rem; left: 50%; transform: translateX(-50%); width: min(34rem, 56vw);
@@ -177,7 +216,7 @@
 
     <div id="hud" hidden>
       Sala <span id="hud-code"></span>
-      <div class="hint">Clic para mirar · WASD moverse · Shift correr · Espacio saltar · Clic izq. atacar · E tomar arma</div>
+      <div class="hint">Clic para mirar · WASD moverse · Shift correr · Espacio saltar · Clic izq. atacar · 1-4 habilidades · E tomar arma</div>
     </div>
 
     <div id="lost" class="panel" hidden>

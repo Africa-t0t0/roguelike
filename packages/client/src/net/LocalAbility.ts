@@ -122,6 +122,17 @@ export class LocalAbility {
   }
 
   /**
+   * Enfriamiento que le queda a `id` (s), para la barra: el mayor entre el local (reacciona al apretar la
+   * tecla) y el del servidor, que sigue corriendo desde que llegó. Con el reloj de juego, quieto en la pausa.
+   */
+  cooldownLeft(id: AbilityId, nowMs: number): number {
+    const s = this.server.get(id);
+    const server = s ? s.cd - (nowMs - s.atMs) / 1000 : 0;
+    const left = Math.max(this.localCd.get(id) ?? 0, server);
+    return left > EPS ? left : 0;
+  }
+
+  /**
    * Sin enfriamiento. Tras lanzarla localmente vale el enfriamiento local (el del servidor llega atrasado y
    * la retendría de más); si no, el que informa el servidor, que sigue corriendo desde que llegó.
    */

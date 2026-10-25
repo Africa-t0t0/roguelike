@@ -34,9 +34,11 @@ import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolat
 import { createTorches } from "./render/lighting";
 import { allClipIds } from "./render/looks";
 import { OrbViews } from "./render/orbViews";
+import { PlayerShotViews } from "./render/playerShotViews";
 import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
+import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
 import { CardPanel } from "./ui/cardPanel";
 import { joinErrorMessage } from "./ui/errors";
 import { Compass } from "./ui/compass";
@@ -131,6 +133,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const views = new PlayerViews(scene, assets, anims);
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
+  const playerShots = new PlayerShotViews(scene);
   const floorWeapons = new FloorWeaponViews(scene, assets);
   const orbs = new OrbViews(scene);
   const hits = new RecentHits();
@@ -139,6 +142,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const input = new InputState();
   const browserInput = attachBrowserInput(input, canvas);
   const hud = new Hud();
+  const abilityBar = new AbilityBar();
   const compass = new Compass();
   const minimap = new Minimap(dungeon);
   const allies: { x: number; z: number }[] = [];
@@ -209,6 +213,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     tickClock.push(at, world.tick);
     enemies.push(world, at);
     projectiles.push(world, at);
+    playerShots.push(world, at);
   });
 
   // La cuenta sin pausa es local, en tiempo real (el juego sigue).
@@ -248,6 +253,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     if (shown && !panelShown) browserInput.releasePointer();
     camera.pointerLockAllowed = !shown;
     panelShown = shown;
+    hud.setChoiceOpen(shown);
 
     if (predictor && prev) {
       // En la pausa no se predice ni se envía nada (seq queda igual; el servidor descarta lo que llegue y
@@ -314,6 +320,12 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     if (predictor) minimap.render(predictor.current, camera.yaw, allies);
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
+    playerShots.render(renderAt);
+    // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
+    abilityBar.render(
+      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), ability.isBlocking),
+      mine?.passiveRank ?? 0,
+    );
     orbs.render(dt, now);
     scene.render();
     damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame
@@ -325,6 +337,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     browserInput.detach();
     cardPanel.dispose();
     hud.dispose();
+    abilityBar.dispose();
     compass.dispose();
     minimap.dispose();
     damageNumbers.dispose();
@@ -333,6 +346,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     views.dispose();
     enemies.dispose();
     projectiles.dispose();
+    playerShots.dispose();
     floorWeapons.dispose();
     orbs.dispose();
     torches.dispose();

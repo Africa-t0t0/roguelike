@@ -2,6 +2,7 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
+import { CreatePolyhedron } from "@babylonjs/core/Meshes/Builders/polyhedronBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -23,6 +24,11 @@ const BAR_H = 0.12;
 /** El aro marca el alcance del golpe (o un mínimo, para el mago): así se ve fuera de la cabeza. */
 const RING_MIN_RADIUS = 1.2; // m
 const RING_Y = 0.03; // m: apenas sobre el suelo
+/** Aturdido: un anillo de estrellas que gira sobre la cabeza (emisivas, sin luces). */
+const STUN_STARS = 5;
+const STUN_RADIUS = 0.38; // m
+const STUN_ABOVE_HEAD = 0.08; // m: bajo la barra de vida
+const STUN_SPIN = 3.2; // rad/s, con el reloj de juego (quieto en la pausa)
 
 function lerpEnemy(a: EnemySnapshot, b: EnemySnapshot, t: number): EnemySnapshot {
   return {
@@ -57,6 +63,7 @@ interface EnemyView {
   barFill: Mesh;
   ring: TransformNode;
   ringFill: Mesh;
+  stars: TransformNode;
   /** Instante (reloj de recepción) en que dejó de estar en el estado; se borra al dibujarlo. */
   goneAtMs?: number;
 }
@@ -64,7 +71,7 @@ interface EnemyView {
 /** Enemigos de Mixamo interpolados, con su arma (si la llevan), barra de vida y aro de telegrafía. */
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
-  private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill", StandardMaterial>;
+  private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star", StandardMaterial>;
   private readonly clipLengths: ClipLengths;
 
   constructor(
@@ -78,6 +85,7 @@ export class EnemyViews {
       barFill: flatMaterial(scene, "enemyBarFill", new Color3(0.85, 0.12, 0.1)),
       ringEdge: flatMaterial(scene, "telegraphEdge", new Color3(0.9, 0.1, 0.05), 0.7),
       ringFill: flatMaterial(scene, "telegraphFill", new Color3(0.9, 0.1, 0.05), 0.35),
+      star: flatMaterial(scene, "stunStar", new Color3(1, 0.86, 0.45)),
     };
   }
 
@@ -138,6 +146,10 @@ export class EnemyViews {
       const fill = e.ai === "telegraph" ? Math.min(1, e.aiTime / telegraphS) : 0;
       view.ring.setEnabled(e.ai === "telegraph");
       view.ringFill.scaling.setAll(Math.max(0.001, fill));
+
+      const stunned = e.stunned > 0 && e.ai !== "dead";
+      view.stars.setEnabled(stunned);
+      if (stunned) view.stars.rotation.y = ((renderAtMs / 1000) * STUN_SPIN) % (Math.PI * 2);
     }
   }
 
@@ -185,6 +197,20 @@ export class EnemyViews {
     ring.setEnabled(false);
     for (const m of [back, barFill, edge, ringFill]) m.isPickable = false;
 
+    // Estrellas del aturdido: octaedros pequeños en círculo; el nodo gira.
+    const stars = new TransformNode(`stunStars-${id}`, scene);
+    stars.parent = character.root;
+    stars.position.y = look.height + STUN_ABOVE_HEAD;
+    for (let i = 0; i < STUN_STARS; i++) {
+      const a = (i / STUN_STARS) * Math.PI * 2;
+      const star = CreatePolyhedron(`stunStar-${id}-${i}`, { type: 1, size: 0.06 }, scene);
+      star.material = this.mats.star;
+      star.parent = stars;
+      star.position.set(Math.cos(a) * STUN_RADIUS, (i % 2) * 0.05, Math.sin(a) * STUN_RADIUS);
+      star.isPickable = false;
+    }
+    stars.setEnabled(false);
+
     return {
       kind,
       weaponId,
@@ -195,6 +221,7 @@ export class EnemyViews {
       barFill,
       ring,
       ringFill,
+      stars,
     };
   }
 }

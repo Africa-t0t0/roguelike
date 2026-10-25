@@ -64,11 +64,13 @@ export class Hud {
   private readonly level: HTMLDivElement;
   private readonly banner: HTMLDivElement;
   private readonly death: HTMLDivElement;
+  private readonly card: HTMLDivElement;
   private bannerTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(parent: HTMLElement = document.body) {
     this.root.className = "combat-hud";
     const card = div("hud-card", this.root);
+    this.card = card;
     const frame = div("hud-portrait", card);
     const img = document.createElement("img");
     img.src = PORTRAIT_URL;
@@ -102,7 +104,10 @@ export class Hud {
     respawnIn: number;
     weaponId: WeaponId;
     weaponTier: WeaponTier;
+    buffDamage: number;
   }): void {
+    // Grito de guerra activo: brillo dorado alrededor de la tarjeta.
+    this.card.classList.toggle("hud-buffed", p.buffDamage > 0);
     const name = formatWeapon(p.weaponId, p.weaponTier);
     if (this.weapon.textContent !== name) {
       this.weapon.textContent = name;
@@ -125,6 +130,11 @@ export class Hud {
     this.banner.hidden = false;
     clearTimeout(this.bannerTimer);
     this.bannerTimer = setTimeout(() => (this.banner.hidden = true), LEVEL_BANNER_MS);
+  }
+
+  /** Con el panel de cartas a la vista, el aviso "¡Nivel N!" no se le encima (ni asoma detrás). */
+  setChoiceOpen(open: boolean): void {
+    this.root.classList.toggle("hud-choosing", open);
   }
 
   dispose(): void {
