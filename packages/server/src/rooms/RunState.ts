@@ -54,6 +54,8 @@ export const RunState = schema(
     level: t.number(),
     xp: t.number(),
     xpToNext: t.number(),
+    /** segundos del piso; avanza solo con al menos un jugador conectado */
+    floorTime: t.number(),
     /** indexado por id de enemigo ("e1", …) */
     enemies: t.map(EnemyState),
     /** indexado por id de proyectil ("p1", …) */

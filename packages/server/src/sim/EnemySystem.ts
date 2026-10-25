@@ -232,7 +232,7 @@ export class EnemySystem {
   }
 
   /** Recalcula el flujo solo si cambió el conjunto de casillas de los jugadores vivos. */
-  private refreshFlow(alive: readonly SimPlayer[]): void {
+  refreshFlow(alive: readonly SimPlayer[]): void {
     const sources = alive.map((p) => ({ tx: tileOf(p.x), tz: tileOf(p.z) }));
     if (flowSourcesKey(sources) !== this.field.sourcesKey) this.field.rebuild(sources);
   }

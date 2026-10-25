@@ -20,6 +20,7 @@ import {
   TAKEOVER_CLOSE_CODE,
   TILE_SIZE,
   tileCenter,
+  waveGroupSize,
   type CombatEvent,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
@@ -82,6 +83,40 @@ const player = (key: string) => {
 };
 const input = (seq: number) => ({ seq, moveX: 1, moveZ: 0, facing: Math.PI / 2, dodge: false });
 const tileOf = (v: number) => Math.floor(v / TILE_SIZE);
+
+describe("RunRoom: reloj del piso y oleadas", () => {
+  it("floorTime crece ~1/30 por tick con un cliente y se detiene cuando se va", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await room.waitForNextTimestep();
+    const t0 = room.state.floorTime;
+    const k0 = room.state.tick;
+    for (let i = 0; i < 10; i++) await room.waitForNextTimestep();
+    const ticks = room.state.tick - k0;
+    expect(ticks).toBeGreaterThanOrEqual(10);
+    expect(room.state.floorTime - t0).toBeCloseTo(ticks * SIM_DT, 6);
+
+    await ana.client.leave();
+    await ticksUntil(() => room.clients.length === 0);
+    await room.waitForNextTimestep();
+    const frozen = room.state.floorTime;
+    for (let i = 0; i < 5; i++) await room.waitForNextTimestep();
+    expect(room.state.floorTime).toBe(frozen);
+  });
+
+  it("con el reloj adelantado a 120 s aparecen enemigos de oleada en pocos ticks", async () => {
+    await colyseus.cleanup();
+    room = await colyseus.createRoom<RunRoom>("run", { seed: SEED, emptyRoomTtlMs: 200, floorTimeStart: 120 });
+    expect(room.state.floorTime).toBe(120);
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => room.state.enemies.size > 0, 10);
+    // Los de oleada no pertenecen a ninguna sala y persiguen desde que nacen.
+    expect(room.state.enemies.size).toBeLessThanOrEqual(waveGroupSize(120, 1));
+    const aiStates = new Set([...room.state.enemies.values()].map((e) => e.ai));
+    expect([...aiStates].every((a) => a === "chase" || a === "telegraph" || a === "recover")).toBe(true);
+  });
+});
 
 describe("RunRoom", () => {
   it("usa un código de sala válido y la semilla de las opciones", () => {

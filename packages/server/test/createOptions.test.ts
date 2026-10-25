@@ -9,7 +9,17 @@ describe("resolveCreateOptions", () => {
     expect(resolveCreateOptions({ seed: 123, emptyRoomTtlMs: 200 }, dev, () => 7)).toEqual({
       seed: 123,
       emptyRoomTtlMs: 200,
+      floorTimeStart: 0,
     });
+  });
+
+  it("floorTimeStart: respeta un número finito >= 0 fuera de producción", () => {
+    const start = (v: unknown, env = dev) => resolveCreateOptions({ floorTimeStart: v as number }, env, () => 7).floorTimeStart;
+    expect(start(120)).toBe(120);
+    expect(start(-5)).toBe(0);
+    expect(start(Number.NaN)).toBe(0);
+    expect(start("9")).toBe(0);
+    expect(start(120, "production")).toBe(0);
   });
 
   it("acota emptyRoomTtlMs a [100, EMPTY_ROOM_TTL_MS] y descarta NaN", () => {
@@ -33,6 +43,7 @@ describe("resolveCreateOptions", () => {
     expect(resolveCreateOptions({ seed: 123, emptyRoomTtlMs: 200 }, "production", () => 7)).toEqual({
       seed: 7,
       emptyRoomTtlMs: EMPTY_ROOM_TTL_MS,
+      floorTimeStart: 0,
     });
   });
 });

@@ -33,6 +33,7 @@ import {
 import { CombatSystem, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
 import { PositionHistory } from "../sim/PositionHistory";
+import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
 import { PlayerRegistry, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
@@ -43,6 +44,7 @@ const ROOM_CODE_ATTEMPTS = 5;
 const ALLY_SPAWN_RADIUS = 2;
 
 const ENEMY_RNG_SALT = 0x5eed;
+const WAVE_RNG_SALT = 0x7a3e;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -65,6 +67,8 @@ export class RunRoom extends Room<{ state: RunState }> {
   private emptyRoomTtlMs = EMPTY_ROOM_TTL_MS;
   private emptyTimer: { clear(): void } | undefined;
   private enemySystem!: EnemySystem;
+  private director!: WaveDirector;
+  private floorTime = 0;
   private readonly history = new PositionHistory();
   private readonly combat = new CombatSystem();
 
@@ -75,11 +79,13 @@ export class RunRoom extends Room<{ state: RunState }> {
       if ((await matchMaker.query({ roomId: this.roomId })).length === 0) break;
     }
 
-    const { seed, emptyRoomTtlMs } = resolveCreateOptions(options, process.env.NODE_ENV);
+    const { seed, emptyRoomTtlMs, floorTimeStart } = resolveCreateOptions(options, process.env.NODE_ENV);
     this.emptyRoomTtlMs = emptyRoomTtlMs;
     this.dungeon = generateDungeon(seed, 1);
     this.enemySystem = new EnemySystem(this.dungeon, createRng(seed ^ ENEMY_RNG_SALT));
-    this.state = new RunState({ seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0 });
+    this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
+    this.floorTime = floorTimeStart;
+    this.state = new RunState({ seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart });
     syncWorld(this.state, [], [], this.combat);
 
     this.autoDispose = false;
@@ -193,7 +199,11 @@ export class RunRoom extends Room<{ state: RunState }> {
     const alive: SimPlayer[] = connected
       .filter((r) => !r.combat.dead)
       .map((r) => ({ key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true }));
+    // El reloj avanza solo con jugadores conectados; el sorteo de tiers de lo que se cree usa el reloj actual.
+    if (connected.length > 0) this.floorTime += SIM_DT;
+    this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor);
     this.enemySystem.activateRooms(alive, this.registry.size());
+    if (connected.length > 0) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
 
@@ -214,6 +224,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       const ps = this.state.players.get(record.key);
       if (ps) syncPlayer(ps, record);
     }
+    this.state.floorTime = this.floorTime;
     syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat);
   }
 
