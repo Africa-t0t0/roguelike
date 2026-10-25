@@ -12,7 +12,7 @@ import {
 } from "@roguelike/shared";
 import { InputState, withoutActions } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
-import { connect, type GameConnection, type PlayerSnapshot } from "./net/connection";
+import { connect, parseFloorTimeStart, type GameConnection, type PlayerSnapshot } from "./net/connection";
 import { parseLagParams } from "./net/LagSimulator";
 import { LocalCombo } from "./net/LocalCombo";
 import { Predictor } from "./net/Predictor";
@@ -30,6 +30,7 @@ import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
 import { createTorches } from "./render/lighting";
 import { allClipIds } from "./render/looks";
+import { OrbViews } from "./render/orbViews";
 import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
@@ -43,6 +44,8 @@ const canvas = document.getElementById("game") as HTMLCanvasElement;
 const engine = new Engine(canvas, true);
 window.addEventListener("resize", () => engine.resize());
 const lag = parseLagParams(location.search);
+// Solo en desarrollo: crear la sala con el reloj del piso adelantado (`?floorTimeStart=300`).
+const floorTimeStart = import.meta.env.DEV ? parseFloorTimeStart(location.search) : undefined;
 
 let lastJoin: { code: string; name: string } | undefined;
 const lobby = new Lobby(
@@ -67,7 +70,7 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
   }
   let conn: GameConnection;
   try {
-    conn = await connect({ ...opts, lag });
+    conn = await connect({ ...opts, lag, floorTimeStart });
   } catch (err) {
     lobby.showLobby(joinErrorMessage(err));
     return;
@@ -123,6 +126,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
   const floorWeapons = new FloorWeaponViews(scene, assets);
+  const orbs = new OrbViews(scene);
   const hits = new RecentHits();
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
@@ -175,6 +179,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     hud.setWorld(world);
     enemies.push(world, receivedAt);
     projectiles.push(world, receivedAt);
+    orbs.sync(world.orbs);
   });
 
   // Los eventos se marcan en el reloj de recepción; lo remoto se dibuja INTERP_DELAY_MS después.
@@ -247,6 +252,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     }
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
+    orbs.render(dt, now);
     scene.render();
     damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame
   };
@@ -263,6 +269,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.dispose();
     projectiles.dispose();
     floorWeapons.dispose();
+    orbs.dispose();
     torches.dispose();
     dungeonMeshes.dispose();
     scene.dispose();

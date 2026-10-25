@@ -5,12 +5,14 @@ import {
   STARTING_WEAPON,
   TAKEOVER_CLOSE_CODE,
   isWeaponId,
+  isWeaponTier,
   type CombatEvent,
   type EnemyKind,
   type JoinOptions,
   type KinematicState,
   type PlayerInput,
   type WeaponId,
+  type WeaponTier,
 } from "@roguelike/shared";
 import { generateToken } from "./token";
 import { LagSimulator, type LagConfig } from "./LagSimulator";
@@ -25,6 +27,7 @@ export type PlayerSnapshot = KinematicState & {
   comboStep: number;
   swingTimer: number;
   weaponId: WeaponId;
+  weaponTier: WeaponTier;
 };
 export type PlayerSnapshots = Map<string, PlayerSnapshot>;
 
@@ -37,11 +40,21 @@ export interface EnemySnapshot {
   maxHp: number;
   ai: string;
   aiTime: number;
+  /** null si va desarmado */
+  weaponId: WeaponId | null;
+  weaponTier: WeaponTier | null;
 }
 
 export interface ProjectileSnapshot {
   x: number;
   z: number;
+}
+
+/** Orbe de XP en el suelo (compartido por el grupo). */
+export interface OrbSnapshot {
+  x: number;
+  z: number;
+  value: number;
 }
 
 /** Todo lo del estado que no son jugadores. */
@@ -50,8 +63,11 @@ export interface WorldSnapshot {
   level: number;
   xp: number;
   xpToNext: number;
+  /** segundos desde que empezó el piso */
+  floorTime: number;
   enemies: Map<string, EnemySnapshot>;
   projectiles: Map<string, ProjectileSnapshot>;
+  orbs: Map<string, OrbSnapshot>;
 }
 
 export type { CombatEvent };
@@ -59,19 +75,24 @@ export type { CombatEvent };
 /** Arma tirada en el suelo, propia de este jugador. */
 export interface FloorWeapon {
   weaponId: WeaponId;
+  tier: WeaponTier;
   x: number;
   z: number;
 }
 
-/** Valida el mensaje `floorWeapons` (`{ items: { weaponId, x, z }[] }`); descarta lo que no encaje. */
+/**
+ * Valida el mensaje `floorWeapons` (`{ items: { weaponId, tier, x, z }[] }`); descarta lo que no encaje.
+ * Sin `tier` vale 1; con un tier inválido el ítem se descarta.
+ */
 export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
   const items = (msg as { items?: unknown } | null)?.items;
   if (!Array.isArray(items)) return [];
   const out: FloorWeapon[] = [];
-  for (const it of items as { weaponId?: unknown; x?: unknown; z?: unknown }[]) {
-    if (it && isWeaponId(it.weaponId) && Number.isFinite(it.x) && Number.isFinite(it.z)) {
-      out.push({ weaponId: it.weaponId, x: it.x as number, z: it.z as number });
-    }
+  for (const it of items as { weaponId?: unknown; tier?: unknown; x?: unknown; z?: unknown }[]) {
+    if (!it || !isWeaponId(it.weaponId) || !Number.isFinite(it.x) || !Number.isFinite(it.z)) continue;
+    const tier = it.tier === undefined ? 1 : it.tier;
+    if (!isWeaponTier(tier)) continue;
+    out.push({ weaponId: it.weaponId, tier, x: it.x as number, z: it.z as number });
   }
   return out;
 }
@@ -124,7 +145,8 @@ function browserToken(): string {
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
-  room.state.players.forEach((p: Omit<PlayerSnapshot, "weaponId"> & { weaponId: string }, key: string) => {
+  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier"> & { weaponId: string; weaponTier: number };
+  room.state.players.forEach((p: RawPlayer, key: string) => {
     out.set(key, {
       name: p.name,
       x: p.x,
@@ -144,6 +166,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       comboStep: p.comboStep,
       swingTimer: p.swingTimer,
       weaponId: isWeaponId(p.weaponId) ? p.weaponId : STARTING_WEAPON,
+      weaponTier: isWeaponTier(p.weaponTier) ? p.weaponTier : 1,
     });
   });
   return out;
@@ -151,7 +174,10 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
 
 function snapshotWorld(room: Room): WorldSnapshot {
   const enemies = new Map<string, EnemySnapshot>();
-  room.state.enemies.forEach((e: EnemySnapshot, id: string) => {
+  type RawEnemy = Omit<EnemySnapshot, "weaponId" | "weaponTier"> & { weaponId: string; weaponTier: number };
+  room.state.enemies.forEach((e: RawEnemy, id: string) => {
+    // Desarmado: el servidor manda "" y 0.
+    const armed = isWeaponId(e.weaponId) && isWeaponTier(e.weaponTier);
     enemies.set(id, {
       kind: e.kind,
       x: e.x,
@@ -161,22 +187,58 @@ function snapshotWorld(room: Room): WorldSnapshot {
       maxHp: e.maxHp,
       ai: e.ai,
       aiTime: e.aiTime,
+      weaponId: armed ? (e.weaponId as WeaponId) : null,
+      weaponTier: armed ? (e.weaponTier as WeaponTier) : null,
     });
   });
   const projectiles = new Map<string, ProjectileSnapshot>();
   room.state.projectiles.forEach((p: ProjectileSnapshot, id: string) => {
     projectiles.set(id, { x: p.x, z: p.z });
   });
+  const orbs = new Map<string, OrbSnapshot>();
+  room.state.orbs.forEach((o: OrbSnapshot, id: string) => {
+    orbs.set(id, { x: o.x, z: o.z, value: o.value });
+  });
   const st = room.state;
-  return { tick: st.tick, level: st.level, xp: st.xp, xpToNext: st.xpToNext, enemies, projectiles };
+  return {
+    tick: st.tick,
+    level: st.level,
+    xp: st.xp,
+    xpToNext: st.xpToNext,
+    floorTime: st.floorTime,
+    enemies,
+    projectiles,
+    orbs,
+  };
 }
 
-/** Crea una sala (sin `code`) o entra a una existente. Rechaza con el `MatchMakeError` del SDK. */
-export async function connect(opts: { code?: string; name: string; lag: LagConfig }): Promise<GameConnection> {
+/**
+ * Solo para pruebas en desarrollo: `?floorTimeStart=300` crea la sala con el reloj del piso ya en 300 s (el
+ * servidor lo ignora en producción). undefined si falta o es inválido.
+ */
+export function parseFloorTimeStart(search: string): number | undefined {
+  const raw = new URLSearchParams(search).get("floorTimeStart");
+  if (raw === null || raw.trim() === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * Crea una sala (sin `code`) o entra a una existente. Rechaza con el `MatchMakeError` del SDK.
+ * `floorTimeStart` solo se manda al crear (es una opción de prueba).
+ */
+export async function connect(opts: {
+  code?: string;
+  name: string;
+  lag: LagConfig;
+  floorTimeStart?: number;
+}): Promise<GameConnection> {
   const client = new Client(serverUrl());
   const joinOptions: JoinOptions = { name: opts.name, token: browserToken(), version: PROTOCOL_VERSION };
   const code = opts.code?.trim().toUpperCase();
-  const room = code ? await client.joinById(code, joinOptions) : await client.create(ROOM_NAME, joinOptions);
+  const createOptions =
+    opts.floorTimeStart === undefined ? joinOptions : { ...joinOptions, floorTimeStart: opts.floorTimeStart };
+  const room = code ? await client.joinById(code, joinOptions) : await client.create(ROOM_NAME, createOptions);
   const lag = new LagSimulator(opts.lag);
   // LagSimulator no se puede cancelar: tras salir, sus entregas pendientes no hacen nada.
   let closed = false;

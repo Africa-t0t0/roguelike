@@ -25,8 +25,9 @@
       .row label { flex: 1; }
       .divider { text-align: center; color: #777; font-size: 0.8rem; }
       .error { min-height: 1.2em; margin: 0; color: #ff8a80; }
+      /* No pasa de la mitad derecha menos medio reloj del piso (arriba al centro): la ayuda se parte en líneas. */
       #hud { position: absolute; top: 0.75rem; right: 0.75rem; padding: 0.4rem 0.7rem; border-radius: 0.4rem;
-        background: rgba(0, 0, 0, 0.55); font-size: 0.9rem; }
+        background: rgba(0, 0, 0, 0.55); font-size: 0.9rem; max-width: calc(50% - 5.5rem); box-sizing: border-box; }
       #hud-code { font-weight: 700; letter-spacing: 0.15em; user-select: all; }
       .hint { color: #999; font-size: 0.8rem; }
       .combat-hud { position: absolute; inset: 0; pointer-events: none; }
@@ -45,6 +46,9 @@
         font-weight: 800; color: #ffd36b; text-shadow: 0 2px 8px #000; }
       .hud-death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         background: rgba(40, 0, 0, 0.45); font-size: 1.8rem; font-weight: 700; text-shadow: 0 2px 6px #000; }
+      .hud-clock { position: absolute; left: 50%; top: 0.75rem; transform: translateX(-50%); padding: 0.2rem 0.7rem;
+        border-radius: 0.4rem; background: rgba(0, 0, 0, 0.55); font-size: 1.25rem; font-weight: 700;
+        font-variant-numeric: tabular-nums; letter-spacing: 0.05em; color: #f3e6c8; text-shadow: 0 1px 3px #000; }
       .hud-weapon { font-size: 0.85rem; font-weight: 700; color: #ffd36b; text-shadow: 0 1px 3px #000; }
       .pickup-hint { position: absolute; left: 50%; bottom: 4.5rem; transform: translateX(-50%); pointer-events: none;
         padding: 0.35rem 0.8rem; border-radius: 0.4rem; background: rgba(0, 0, 0, 0.6); color: #ffd36b;
