@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHp, formatRespawn, formatXp } from "../src/ui/hud";
+import { formatHp, formatRespawn, formatWeapon, formatXp } from "../src/ui/hud";
 
 describe("textos del HUD", () => {
   it("formatHp", () => {
@@ -10,6 +10,11 @@ describe("textos del HUD", () => {
   it("formatHp redondea hacia arriba y no baja de 0", () => {
     expect(formatHp(95.2, 120)).toBe("Vida 96/120");
     expect(formatHp(-3, 120)).toBe("Vida 0/120");
+  });
+
+  it("formatWeapon da el nombre del arma", () => {
+    expect(formatWeapon("great-sword")).toBe("Mandoble");
+    expect(formatWeapon("kingslayer-sword")).toBe("Espada del Kingslayer");
   });
 
   it("formatXp", () => {

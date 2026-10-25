@@ -6,6 +6,7 @@ export class InputState {
   private dodgeQueued = false;
   private jumpQueued = false;
   private attackQueued = false;
+  private interactQueued = false;
   private facing = 0;
 
   keyDown(code: string): void {
@@ -14,6 +15,8 @@ export class InputState {
       if (code === "KeyC") this.dodgeQueued = true;
       if (code === "Space") this.jumpQueued = true;
       if (code === "Mouse0") this.attackQueued = true;
+      // Una vez por pulsación: el servidor cambia de arma con cada input que traiga `interact`.
+      if (code === "KeyE") this.interactQueued = true;
     }
     this.held.add(code);
   }
@@ -28,6 +31,7 @@ export class InputState {
     this.dodgeQueued = false;
     this.jumpQueued = false;
     this.attackQueued = false;
+    this.interactQueued = false;
   }
 
   /**
@@ -58,8 +62,10 @@ export class InputState {
     const jump = this.jumpQueued;
     this.dodgeQueued = false;
     this.jumpQueued = false;
+    const interact = this.interactQueued;
+    this.interactQueued = false;
     const sprint = this.held.has("ShiftLeft") || this.held.has("ShiftRight");
-    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump, attack, interact: false, viewTick };
+    return { seq, moveX, moveZ, facing: this.facing, dodge, sprint, jump, attack, interact, viewTick };
   }
 
   private axis(positive: string, negative: string): number {
@@ -67,7 +73,7 @@ export class InputState {
   }
 }
 
-/** El mismo input sin acciones (p. ej. muerto): sin moverse, saltar, esquivar, correr ni atacar. */
+/** El mismo input sin acciones (p. ej. muerto): sin moverse, saltar, esquivar, correr, atacar ni tomar armas. */
 export function withoutActions(input: PlayerInput): PlayerInput {
   return { ...input, moveX: 0, moveZ: 0, dodge: false, sprint: false, jump: false, attack: false, interact: false };
 }

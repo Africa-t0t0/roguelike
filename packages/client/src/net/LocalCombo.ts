@@ -1,4 +1,4 @@
-import { advanceCombo, newComboTimers, SIM_DT, STARTING_WEAPON, tryStartSwing, type ComboTimers } from "@roguelike/shared";
+import { advanceCombo, newComboTimers, SIM_DT, tryStartSwing, type ComboTimers, type WeaponId } from "@roguelike/shared";
 
 /**
  * Tras terminar el último golpe local, cuánto tiempo el combo que informa el servidor se toma como eco
@@ -12,20 +12,29 @@ export interface ComboView {
 }
 
 /**
- * Copia local del combo del guerrero (las mismas `advanceCombo`/`tryStartSwing`, en el mismo orden, que
+ * Copia local del combo del arma equipada (las mismas `advanceCombo`/`tryStartSwing`, en el mismo orden, que
  * el `CombatSystem` del servidor por cada input procesado) para que el clip de ataque del propio jugador
  * arranque al hacer clic. Solo es visual: el daño lo decide el servidor.
  */
 export class LocalCombo {
-  private readonly c: ComboTimers = newComboTimers();
+  private c: ComboTimers = newComboTimers();
+  /** Arma del último `tick`: si cambia, el combo empieza de cero (como un arma recién tomada). */
+  private weaponId: WeaponId | undefined;
   /** Cuándo termina (o terminó) el último golpe local, en el reloj de `tick`. */
   private lastEndMs: number | undefined;
 
-  /** Un paso de simulación con el `attack` enviado. Devuelve el golpe que arrancó (1..3) o 0. */
-  tick(attack: boolean, blocked: { dead: boolean; dodging: boolean }, nowMs: number): number {
+  /**
+   * Un paso de simulación con el `attack` enviado y el arma equipada (la que informa el servidor).
+   * Devuelve el golpe que arrancó (1..n) o 0.
+   */
+  tick(attack: boolean, blocked: { dead: boolean; dodging: boolean }, nowMs: number, weaponId: WeaponId): number {
+    if (weaponId !== this.weaponId) {
+      this.weaponId = weaponId;
+      this.c = newComboTimers();
+    }
     advanceCombo(this.c, SIM_DT);
     if (!attack || blocked.dead || blocked.dodging) return 0;
-    const started = tryStartSwing(this.c, STARTING_WEAPON);
+    const started = tryStartSwing(this.c, weaponId);
     if (started) this.lastEndMs = nowMs + this.c.swingTimer * 1000;
     return started;
   }

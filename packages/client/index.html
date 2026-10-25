@@ -45,6 +45,10 @@
         font-weight: 800; color: #ffd36b; text-shadow: 0 2px 8px #000; }
       .hud-death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         background: rgba(40, 0, 0, 0.45); font-size: 1.8rem; font-weight: 700; text-shadow: 0 2px 6px #000; }
+      .hud-weapon { font-size: 0.85rem; font-weight: 700; color: #ffd36b; text-shadow: 0 1px 3px #000; }
+      .pickup-hint { position: absolute; left: 50%; bottom: 4.5rem; transform: translateX(-50%); pointer-events: none;
+        padding: 0.35rem 0.8rem; border-radius: 0.4rem; background: rgba(0, 0, 0, 0.6); color: #ffd36b;
+        font-weight: 700; font-size: 1rem; white-space: nowrap; text-shadow: 0 1px 2px #000; }
       .fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
       .fx-number { position: absolute; left: 0; top: 0; font-weight: 800; font-size: 1.5rem;
         text-shadow: 0 1px 3px #000, 0 0 2px #000; will-change: transform, opacity; }
@@ -71,7 +75,7 @@
 
     <div id="hud" hidden>
       Sala <span id="hud-code"></span>
-      <div class="hint">Clic para mirar · WASD moverse · Shift correr · Espacio saltar · C esquivar · Clic izq. atacar</div>
+      <div class="hint">Clic para mirar · WASD moverse · Shift correr · Espacio saltar · C esquivar · Clic izq. atacar · E tomar arma</div>
     </div>
 
     <div id="lost" class="panel" hidden>

@@ -25,6 +25,7 @@ import { createScene } from "./render/createScene";
 import { damageTiming } from "./render/damageTiming";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
 import { EnemyViews } from "./render/enemyViews";
+import { FloorWeaponViews } from "./render/floorWeaponViews";
 import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
 import { allClipIds } from "./render/looks";
@@ -119,6 +120,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const views = new PlayerViews(scene, assets, anims);
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
+  const floorWeapons = new FloorWeaponViews(scene, assets);
   const hits = new RecentHits();
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
@@ -164,6 +166,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     for (const key of remotes.keys()) if (!players.has(key)) remotes.delete(key);
   });
 
+  conn.onFloorWeapons((items) => floorWeapons.set(items));
+
   conn.onWorld((world, receivedAt) => {
     tickClock.push(receivedAt, world.tick);
     hud.setWorld(world);
@@ -205,7 +209,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         prev = predictor.current;
         predictor.applyLocal(sampled);
         // El golpe propio arranca su clip ya (como el servidor: tras moverse); el daño lo decide él.
-        combo.tick(sampled.attack, { dead, dodging: predictor.current.dodgeTime > 0 }, now);
+        // Con el arma que dice el servidor: al tomar otra, el combo local vuelve a empezar.
+        const weaponId = mine?.weaponId ?? STARTING_WEAPON;
+        combo.tick(sampled.attack, { dead, dodging: predictor.current.dodgeTime > 0 }, now, weaponId);
         conn.sendInput(sampled);
       }
       smoother.decay(dt);
@@ -226,6 +232,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
       camera.follow(x, z);
+      // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
+      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp: !(mine?.dead ?? true) && swing.swingTimer <= 0 });
     }
 
     const renderAt = now - INTERP_DELAY_MS;
@@ -250,6 +258,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     views.dispose();
     enemies.dispose();
     projectiles.dispose();
+    floorWeapons.dispose();
     dungeonMeshes.dispose();
     scene.dispose();
   };

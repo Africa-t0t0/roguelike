@@ -118,6 +118,29 @@ describe("InputState", () => {
     expect(input.sample(2, 2).facing).toBe(1.1);
   });
 
+  it("E da interact=true una sola vez por pulsación, aunque se mantenga o se repita", () => {
+    const input = new InputState();
+    expect(input.sample(1, 0).interact).toBe(false);
+    input.keyDown("KeyE");
+    expect(input.sample(2, 0).interact).toBe(true);
+    input.keyDown("KeyE"); // autorepetición
+    expect(input.sample(3, 0).interact).toBe(false);
+    input.keyUp("KeyE");
+    expect(input.sample(4, 0).interact).toBe(false);
+    input.keyDown("KeyE");
+    input.keyUp("KeyE"); // pulsación corta entre dos samples
+    expect(input.sample(5, 0).interact).toBe(true);
+  });
+
+  it("blur suelta una pulsación de E pendiente", () => {
+    const input = new InputState();
+    input.keyDown("KeyE");
+    input.blur();
+    expect(input.sample(1, 0).interact).toBe(false);
+    input.keyDown("KeyE"); // tras el blur, una nueva pulsación vuelve a contar
+    expect(input.sample(2, 0).interact).toBe(true);
+  });
+
   it("sample lleva el viewTick que se le pasa (0 si no)", () => {
     const input = new InputState();
     expect(input.sample(1, 0).viewTick).toBe(0);
@@ -128,7 +151,7 @@ describe("InputState", () => {
 describe("withoutActions", () => {
   it("anula movimiento, salto, esquiva, sprint y ataque; conserva seq, facing y viewTick", () => {
     const input = new InputState();
-    for (const k of ["KeyW", "Space", "KeyC", "ShiftLeft", "Mouse0"]) input.keyDown(k);
+    for (const k of ["KeyW", "Space", "KeyC", "ShiftLeft", "Mouse0", "KeyE"]) input.keyDown(k);
     const s = withoutActions(input.sample(7, 0.5, 12));
     expect(s).toEqual({
       seq: 7, moveX: 0, moveZ: 0, facing: 0.5, dodge: false, sprint: false, jump: false, attack: false, interact: false, viewTick: 12,

@@ -1,3 +1,5 @@
+import { WEAPONS, type WeaponId } from "@roguelike/shared";
+
 /** "Vida 96/120" (la vida se muestra entera, redondeando hacia arriba, nunca negativa). */
 export function formatHp(hp: number, maxHp: number): string {
   return `Vida ${Math.max(0, Math.ceil(hp))}/${Math.ceil(maxHp)}`;
@@ -6,6 +8,11 @@ export function formatHp(hp: number, maxHp: number): string {
 /** "Nivel 2 · 14/30 XP" */
 export function formatXp(level: number, xp: number, toNext: number): string {
   return `Nivel ${level} · ${xp}/${toNext} XP`;
+}
+
+/** Nombre visible del arma: "Mandoble". */
+export function formatWeapon(weaponId: WeaponId): string {
+  return WEAPONS[weaponId].name;
 }
 
 /** "Caíste — reapareces en N…", con N en segundos enteros hacia arriba (mínimo 1). */
@@ -27,11 +34,12 @@ function clamp01(v: number): number {
 }
 
 /**
- * HUD de la partida (solo DOM, con textContent): vida y XP abajo a la izquierda, "¡Nivel N!" en el
+ * HUD de la partida (solo DOM, con textContent): arma equipada, vida y XP abajo a la izquierda, "¡Nivel N!" en el
  * centro y el aviso de muerte con la cuenta regresiva.
  */
 export class Hud {
   private readonly root = document.createElement("div");
+  private readonly weapon: HTMLDivElement;
   private readonly hpFill: HTMLDivElement;
   private readonly hpText: HTMLDivElement;
   private readonly xpFill: HTMLDivElement;
@@ -43,6 +51,7 @@ export class Hud {
   constructor(parent: HTMLElement = document.body) {
     this.root.className = "combat-hud";
     const bars = div("hud-bars", this.root);
+    this.weapon = div("hud-weapon", bars);
     const hp = div("hud-bar hud-hp", bars);
     this.hpFill = div("hud-fill", hp);
     this.hpText = div("hud-text", hp);
@@ -56,7 +65,8 @@ export class Hud {
     parent.append(this.root);
   }
 
-  setPlayer(p: { hp: number; maxHp: number; dead: boolean; respawnIn: number }): void {
+  setPlayer(p: { hp: number; maxHp: number; dead: boolean; respawnIn: number; weaponId: WeaponId }): void {
+    this.weapon.textContent = formatWeapon(p.weaponId);
     this.hpFill.style.width = `${clamp01(p.hp / p.maxHp) * 100}%`;
     this.hpText.textContent = formatHp(p.hp, p.maxHp);
     this.death.hidden = !p.dead;

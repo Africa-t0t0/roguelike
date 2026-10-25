@@ -29,8 +29,14 @@ pulsa **Crear sala**. El código de la sala aparece arriba a la derecha: compár
 con **Unirse**.
 
 Controles: haz clic en el juego para mirar con el mouse (Esc suelta el puntero), WASD para caminar,
-Shift (mantener) para correr, Espacio para saltar, C para esquivar y clic izquierdo para atacar
-(mantener para encadenar el combo).
+Shift (mantener) para correr, Espacio para saltar, C para esquivar, clic izquierdo para atacar
+(mantener para encadenar el combo) y E para tomar un arma del suelo.
+
+Armas: empiezas con la Espada del Kingslayer. En la sala inicial hay armas tiradas que solo ves tú
+(cada jugador tiene las suyas): acércate a una (a 1,5 m aparece "E: tomar <nombre>") y pulsa E para
+cambiarla por la que llevas, que queda en el suelo. El Mandoble pega más fuerte y con más alcance, pero
+es lento y su combo tiene dos golpes; la Espada de guardia es más rápida y con algo menos de alcance.
+No se puede cambiar de arma a mitad de un golpe.
 
 En desarrollo abre siempre `http://localhost:5173` (Vite). El servidor (`:2567`) solo sirve el cliente
 compilado en producción.

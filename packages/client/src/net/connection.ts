@@ -56,6 +56,26 @@ export interface WorldSnapshot {
 
 export type { CombatEvent };
 
+/** Arma tirada en el suelo, propia de este jugador. */
+export interface FloorWeapon {
+  weaponId: WeaponId;
+  x: number;
+  z: number;
+}
+
+/** Valida el mensaje `floorWeapons` (`{ items: { weaponId, x, z }[] }`); descarta lo que no encaje. */
+export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
+  const items = (msg as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) return [];
+  const out: FloorWeapon[] = [];
+  for (const it of items as { weaponId?: unknown; x?: unknown; z?: unknown }[]) {
+    if (it && isWeaponId(it.weaponId) && Number.isFinite(it.x) && Number.isFinite(it.z)) {
+      out.push({ weaponId: it.weaponId, x: it.x as number, z: it.z as number });
+    }
+  }
+  return out;
+}
+
 /** `takeover`: otra pestaña tomó el control del jugador. `lost`: cualquier otro corte no pedido. */
 export type DisconnectReason = "takeover" | "lost";
 
@@ -68,6 +88,8 @@ export interface GameConnection {
   onPlayers(cb: (players: PlayerSnapshots, receivedAtMs: number) => void): void;
   onWorld(cb: (world: WorldSnapshot, receivedAtMs: number) => void): void;
   onCombat(cb: (event: CombatEvent) => void): void;
+  /** Armas del suelo propias; se entrega enseguida la última lista recibida, si ya llegó. */
+  onFloorWeapons(cb: (items: FloorWeapon[]) => void): void;
   onDisconnect(cb: (reason: DisconnectReason) => void): void;
   leave(): void;
 }
@@ -161,13 +183,24 @@ export async function connect(opts: { code?: string; name: string; lag: LagConfi
   let playersCb: ((players: PlayerSnapshots, receivedAtMs: number) => void) | undefined;
   let worldCb: ((world: WorldSnapshot, receivedAtMs: number) => void) | undefined;
   let combatCb: ((event: CombatEvent) => void) | undefined;
+  let floorCb: ((items: FloorWeapon[]) => void) | undefined;
+  let lastFloor: FloorWeapon[] | undefined; // llega justo tras `welcome`, antes de que haya manejador
   let disconnectCb: ((reason: DisconnectReason) => void) | undefined;
 
-  // Antes de cualquier otro await: `welcome` llega justo después del estado inicial, y los eventos
-  // de combate pueden llegar en cualquier momento (sin manejador el SDK avisa en consola).
+  // Antes de cualquier otro await: `welcome` llega justo después del estado inicial (y tras él las armas
+  // del suelo), y los eventos de combate pueden llegar en cualquier momento (sin manejador el SDK avisa
+  // en consola).
   room.onMessage(MSG.combat, (event: CombatEvent) => {
     lag.inbound(() => {
       if (!closed) combatCb?.(event);
+    });
+  });
+  room.onMessage(MSG.floorWeapons, (msg: unknown) => {
+    const items = parseFloorWeapons(msg);
+    lag.inbound(() => {
+      if (closed) return;
+      lastFloor = items;
+      floorCb?.(items);
     });
   });
   const welcome = new Promise<string>((resolve, reject) => {
@@ -221,6 +254,10 @@ export async function connect(opts: { code?: string; name: string; lag: LagConfi
     },
     onCombat(cb) {
       combatCb = cb;
+    },
+    onFloorWeapons(cb) {
+      floorCb = cb;
+      if (lastFloor) cb(lastFloor);
     },
     onDisconnect(cb) {
       disconnectCb = cb;
