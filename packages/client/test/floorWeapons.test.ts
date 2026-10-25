@@ -36,8 +36,8 @@ describe("armas del suelo", () => {
   });
 
   it("pickupPrompt", () => {
-    expect(pickupPrompt("great-sword", 1)).toBe("E: tomar Mandoble oxidado");
-    expect(pickupPrompt("guard-sword", 3)).toBe("E: tomar Espada de guardia rúnica");
+    expect(pickupPrompt("great-sword", 1)).toBe("Recoger Mandoble oxidado");
+    expect(pickupPrompt("guard-sword", 3)).toBe("Recoger Espada de guardia rúnica");
   });
 });
 

@@ -38,7 +38,7 @@ interface PlayerView {
 function createLabel(scene: Scene, key: string, text: string, parent: TransformNode): Mesh {
   const tex = new DynamicTexture(`label-${key}`, { width: 512, height: 128 }, scene, false);
   tex.hasAlpha = true;
-  tex.drawText(text, null, 88, "bold 72px system-ui, sans-serif", "white", "transparent", true);
+  tex.drawText(text, null, 86, "700 52px Cinzel, Georgia, serif", "#f3e6c8", "transparent", true);
   const mat = new StandardMaterial(`labelMat-${key}`, scene);
   mat.diffuseTexture = tex;
   mat.emissiveColor = Color3.White();

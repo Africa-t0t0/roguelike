@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { formatFloorTime, formatHp, formatRespawn, formatWeapon, formatXp } from "../src/ui/hud";
+import { formatFloorTime, formatHp, formatRespawn, formatWeapon, formatXp, tierColor } from "../src/ui/hud";
 
 describe("textos del HUD", () => {
   it("formatHp", () => {
-    expect(formatHp(96, 120)).toBe("Vida 96/120");
-    expect(formatHp(0, 120)).toBe("Vida 0/120");
+    expect(formatHp(96, 120)).toBe("96/120");
+    expect(formatHp(0, 120)).toBe("0/120");
   });
 
   it("formatHp redondea hacia arriba y no baja de 0", () => {
-    expect(formatHp(95.2, 120)).toBe("Vida 96/120");
-    expect(formatHp(-3, 120)).toBe("Vida 0/120");
+    expect(formatHp(95.2, 120)).toBe("96/120");
+    expect(formatHp(-3, 120)).toBe("0/120");
   });
 
   it("formatWeapon da el nombre del arma con su tier", () => {
@@ -27,7 +27,7 @@ describe("textos del HUD", () => {
   });
 
   it("formatXp", () => {
-    expect(formatXp(2, 14, 30)).toBe("Nivel 2 · 14/30 XP");
+    expect(formatXp(14, 30)).toBe("14/30 XP");
   });
 
   it("formatRespawn cuenta segundos enteros hacia arriba, mínimo 1", () => {
@@ -36,5 +36,11 @@ describe("textos del HUD", () => {
     expect(formatRespawn(4)).toBe("Caíste — reapareces en 4…");
     expect(formatRespawn(0.2)).toBe("Caíste — reapareces en 1…");
     expect(formatRespawn(0)).toBe("Caíste — reapareces en 1…");
+  });
+
+  it("tierColor: dorado para tier 1 y el color del brillo, aclarado, para 2 y 3", () => {
+    expect(tierColor(1)).toBe("#d9b46a");
+    expect(tierColor(2)).toBe("rgb(147, 180, 255)");
+    expect(tierColor(3)).toBe("rgb(197, 139, 255)");
   });
 });

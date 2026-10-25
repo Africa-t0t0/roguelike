@@ -35,7 +35,9 @@ import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
 import { joinErrorMessage } from "./ui/errors";
+import { Compass } from "./ui/compass";
 import { Hud } from "./ui/hud";
+import { Minimap } from "./ui/minimap";
 import { Lobby } from "./ui/lobby";
 
 const MAX_FRAME_S = 0.25; // tras un tirón no se simulan más de ~7 pasos de golpe
@@ -133,6 +135,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const input = new InputState();
   const detachInput = attachBrowserInput(input, canvas);
   const hud = new Hud();
+  const compass = new Compass();
+  const minimap = new Minimap(dungeon);
+  const allies: { x: number; z: number }[] = [];
   const damageNumbers = new DamageNumbers(scene, canvas);
   const hurtFlash = new HurtFlash();
   const tickClock = createTickClock(); // tick del servidor que se está viendo → viewTick
@@ -177,6 +182,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   conn.onWorld((world, receivedAt) => {
     tickClock.push(receivedAt, world.tick);
     hud.setWorld(world);
+    compass.setFloorTime(world.floorTime);
     enemies.push(world, receivedAt);
     projectiles.push(world, receivedAt);
     orbs.sync(world.orbs);
@@ -247,10 +253,15 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     }
 
     const renderAt = now - INTERP_DELAY_MS;
+    allies.length = 0;
     for (const [key, buffer] of remotes) {
       const s = buffer.sample(renderAt);
-      if (s) views.render(key, s, s, hits.recently(`player:${key}`, renderAt), renderAt, dt);
+      if (!s) continue;
+      views.render(key, s, s, hits.recently(`player:${key}`, renderAt), renderAt, dt);
+      allies.push(s);
     }
+    compass.render(camera.yaw);
+    if (predictor) minimap.render(predictor.current, camera.yaw, allies);
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
     orbs.render(dt, now);
@@ -263,6 +274,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     engine.stopRenderLoop(frame);
     detachInput();
     hud.dispose();
+    compass.dispose();
+    minimap.dispose();
     damageNumbers.dispose();
     hurtFlash.dispose();
     camera.dispose();
