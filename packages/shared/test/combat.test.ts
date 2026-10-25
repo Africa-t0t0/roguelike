@@ -34,8 +34,8 @@ describe("stats y conteos", () => {
     expect(ENEMY_DEFS.mage.radius).toBe(0.5);
   });
   it("xpToNext", () => {
-    expect(xpToNext(1)).toBe(20);
-    expect(xpToNext(4)).toBe(50);
+    expect(xpToNext(1)).toBe(100);
+    expect(xpToNext(4)).toBe(220);
   });
   it("enemiesForRoom", () => {
     expect(enemiesForRoom(1, 1)).toBe(4);

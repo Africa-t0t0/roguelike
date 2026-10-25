@@ -9,6 +9,7 @@ import {
   type Dungeon,
   type KinematicState,
   type PlayerInput,
+  xpToNext,
 } from "@roguelike/shared";
 import { EnemySystem, type SimPlayer } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
@@ -525,21 +526,21 @@ describe("muerte y reaparición", () => {
 });
 
 describe("niveles", () => {
-  it("grantXp(20) sube a nivel 2: maxHp 132, hp +12", () => {
+  it("grantXp(xpToNext(1)) sube a nivel 2: maxHp 132, hp +12", () => {
     const c = newCombatState("warrior", 1);
     c.hp = 100;
     const cs = new CombatSystem();
-    expect(cs.grantXp(new Map([["a", c]]), 20)).toEqual([2]);
+    expect(cs.grantXp(new Map([["a", c]]), xpToNext(1))).toEqual([2]);
     expect(cs.level).toBe(2);
     expect(cs.xp).toBe(0);
     expect(c.maxHp).toBe(132);
     expect(c.hp).toBe(112);
   });
 
-  it("grantXp(100) sube varios niveles", () => {
+  it("grantXp con XP de tres niveles sube varios niveles", () => {
     const cs = new CombatSystem();
-    const levels = cs.grantXp(new Map([["a", newCombatState("warrior", 1)]]), 100);
-    // 20 -> L2, 30 -> L3, 40 -> L4 (suma 90), sobran 10 de 50
+    const levels = cs.grantXp(new Map([["a", newCombatState("warrior", 1)]]), xpToNext(1) + xpToNext(2) + xpToNext(3) + 10);
+    // sube a L2, L3 y L4 y sobran 10
     expect(levels).toEqual([2, 3, 4]);
     expect(cs.xp).toBe(10);
   });
@@ -549,7 +550,7 @@ describe("niveles", () => {
     c.hp = 0;
     c.dead = true;
     const cs = new CombatSystem();
-    cs.grantXp(new Map([["a", c]]), 20);
+    cs.grantXp(new Map([["a", c]]), xpToNext(1));
     expect(c.hp).toBe(0);
     expect(c.dead).toBe(true);
     expect(c.maxHp).toBe(132);

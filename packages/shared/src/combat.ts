@@ -17,6 +17,8 @@ export interface EnemyDef {
   telegraphS: number;
   cooldownS: number;
   xp: number;
+  /** inmune al aturdimiento (patada) */
+  stunImmune?: boolean;
   ranged?: {
     projectileSpeed: number;
     projectileRadius: number;
@@ -51,7 +53,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
 };
 
 export function xpToNext(level: number): number {
-  return 10 + 10 * level;
+  return 60 + 40 * level;
 }
 
 export function playerStats(cls: ClassId, level: number): { maxHp: number } {

@@ -98,12 +98,12 @@ export function isWeaponId(v: unknown): v is WeaponId {
 }
 
 /** Golpe `step` (1..n) del arma, ya escalado por alcance, arco y velocidad del arma. */
-export function strikeOf(weaponId: WeaponId, step: number): Strike {
+export function strikeOf(weaponId: WeaponId, step: number, attackSpeedMult = 1): Strike {
   const w = WEAPONS[weaponId];
   const s = MOVESETS[w.movesetId].combo[step - 1]!;
   return {
     clip: s.clip,
-    duration: s.duration / w.speedMult,
+    duration: s.duration / (w.speedMult * attackSpeedMult),
     damageMult: s.damageMult,
     range: s.range * w.rangeMult,
     arcDeg: s.arcDeg * w.arcMult,
@@ -196,11 +196,11 @@ export function advanceCombo(c: ComboTimers, dt: number): boolean {
 }
 
 /** Arranca el siguiente golpe del combo si no hay uno en curso. Devuelve el paso (1..n) o 0. */
-export function tryStartSwing(c: ComboTimers, weaponId: WeaponId): number {
+export function tryStartSwing(c: ComboTimers, weaponId: WeaponId, attackSpeedMult = 1): number {
   if (c.swingTimer > 0) return 0;
   const moveset = MOVESETS[WEAPONS[weaponId].movesetId];
   const step = c.comboTimer > 0 ? (c.comboStep % moveset.combo.length) + 1 : 1;
-  const strike = strikeOf(weaponId, step);
+  const strike = strikeOf(weaponId, step, attackSpeedMult);
   c.comboStep = step;
   c.swingTimer = strike.duration;
   c.comboTimer = strike.duration + moveset.comboResetS;

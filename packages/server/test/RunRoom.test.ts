@@ -22,6 +22,7 @@ import {
   tileCenter,
   waveGroupSize,
   ENEMY_DEFS,
+  xpToNext,
   TIERS,
   type CombatEvent,
 } from "@roguelike/shared";
@@ -332,7 +333,7 @@ describe("RunRoom: combate", () => {
     expect(p.dead).toBe(false);
     expect(room.state.level).toBe(1);
     expect(room.state.xp).toBe(0);
-    expect(room.state.xpToNext).toBe(20);
+    expect(room.state.xpToNext).toBe(xpToNext(1));
     await ticksUntil(() => ana.client.state.players.get("ana")?.hp === 120 && ana.client.state.level === 1);
   });
 
