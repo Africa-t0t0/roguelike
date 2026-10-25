@@ -1,15 +1,23 @@
 import {
+  ARMED_CHANCE,
   ENEMY_DEFS,
   ENEMY_SPAWN_MIN_PLAYER_DIST_TILES,
+  FlowField,
   PLAYER_RADIUS,
+  TIERS,
   TILE_SIZE,
   circlesOverlap,
   enemiesForRoom,
+  enemyAttack,
+  flowSourcesKey,
+  hasLineOfSight,
   isWalkableTile,
   moveCircle,
+  rollTier,
   tileCenter,
   type Dungeon,
   type EnemyKind,
+  type EnemyLoadout,
   type Rng,
 } from "@roguelike/shared";
 
@@ -29,6 +37,8 @@ export interface Enemy {
   aiTime: number;
   targetKey: string | null;
   cooldown: number;
+  /** arma que lleva; null si va desarmado */
+  loadout: EnemyLoadout | null;
 }
 
 export interface Projectile {
@@ -52,6 +62,16 @@ export interface SimPlayer {
   alive: boolean;
 }
 
+export interface EnemyDamageResult {
+  killed: boolean;
+  xp: number;
+  /** posición del enemigo al recibir el golpe (0, 0 si no existe) */
+  x: number;
+  z: number;
+  /** arma soltada al morir; solo los armados, con `TIERS[tier].dropChance` */
+  drop: EnemyLoadout | null;
+}
+
 export interface EnemyHit {
   targetKey: string;
   damage: number;
@@ -72,11 +92,64 @@ export class EnemySystem {
   private activated = new Set<number>();
   private nextEnemy = 1;
   private nextShot = 1;
+  private readonly field: FlowField;
+  private floorTime = 0;
+  private floor: number;
 
   constructor(
     private readonly dungeon: Dungeon,
     private readonly rng: Rng,
-  ) {}
+  ) {
+    this.field = new FlowField(dungeon);
+    this.floor = dungeon.floor;
+  }
+
+  /** Mapa de flujo hacia los jugadores vivos que usa `step`; el director también lo lee. */
+  get flow(): FlowField {
+    return this.field;
+  }
+
+  /** Reloj del piso con el que se sortean los tiers de los enemigos que se creen después. */
+  setFloorClock(floorTime: number, floor: number): void {
+    this.floorTime = floorTime;
+    this.floor = floor;
+  }
+
+  /** Enemigos que no están en su animación de muerte. */
+  liveCount(): number {
+    let n = 0;
+    for (const e of this.list) if (e.ai !== "dead") n++;
+    return n;
+  }
+
+  /** Un enemigo por spot, de tipo `kinds[i % kinds.length]`, persiguiendo y sin sala (roomId -1). */
+  spawnWave(spots: readonly { x: number; z: number }[], kinds: readonly EnemyKind[]): Enemy[] {
+    const created: Enemy[] = [];
+    if (kinds.length === 0) return created;
+    for (let i = 0; i < spots.length; i++) {
+      const e = this.createEnemy(kinds[i % kinds.length]!, -1, spots[i]!.x, spots[i]!.z);
+      created.push(e);
+    }
+    return created;
+  }
+
+  private createEnemy(kind: EnemyKind, roomId: number, x: number, z: number): Enemy {
+    const def = ENEMY_DEFS[kind];
+    const e: Enemy = {
+      id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
+      hp: def.hp, maxHp: def.hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
+      loadout: this.rollLoadout(kind),
+    };
+    this.list.push(e);
+    return e;
+  }
+
+  /** Sortea si va armado (`ARMED_CHANCE`) y, si lo va, el tier según el reloj del piso. */
+  private rollLoadout(kind: EnemyKind): EnemyLoadout | null {
+    const armed = ARMED_CHANCE[kind];
+    if (!armed || this.rng.next() >= armed.chance) return null;
+    return { weaponId: armed.weaponId, tier: rollTier(this.rng, this.floorTime, this.floor) };
+  }
 
   get enemies(): readonly Enemy[] {
     return this.list;
@@ -109,14 +182,7 @@ export class EnemySystem {
       const tiles = this.spawnTiles(room, players, n);
       for (let i = 0; i < Math.min(n, tiles.length); i++) {
         const c = tileCenter(tiles[i]!.tx, tiles[i]!.tz);
-        const kind = kinds[i]!;
-        const def = ENEMY_DEFS[kind];
-        const e: Enemy = {
-          id: `e${this.nextEnemy++}`, kind, roomId: room.id, x: c.x, z: c.z, facing: 0,
-          hp: def.hp, maxHp: def.hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-        };
-        this.list.push(e);
-        created.push(e);
+        created.push(this.createEnemy(kinds[i]!, room.id, c.x, c.z));
       }
     }
     return created;
@@ -151,6 +217,7 @@ export class EnemySystem {
   step(players: readonly SimPlayer[], dt: number): EnemyHit[] {
     const hits: EnemyHit[] = [];
     const alive = players.filter((p) => p.alive);
+    this.refreshFlow(alive);
 
     for (const e of this.list) {
       e.aiTime += dt;
@@ -162,6 +229,12 @@ export class EnemySystem {
     this.separate();
     this.stepProjectiles(alive, dt, hits);
     return hits;
+  }
+
+  /** Recalcula el flujo solo si cambió el conjunto de casillas de los jugadores vivos. */
+  private refreshFlow(alive: readonly SimPlayer[]): void {
+    const sources = alive.map((p) => ({ tx: tileOf(p.x), tz: tileOf(p.z) }));
+    if (flowSourcesKey(sources) !== this.field.sourcesKey) this.field.rebuild(sources);
   }
 
   private setAi(e: Enemy, ai: EnemyAi): void {
@@ -182,6 +255,7 @@ export class EnemySystem {
     if (e.ai === "idle") this.setAi(e, "chase");
 
     const def = ENEMY_DEFS[e.kind];
+    const atk = enemyAttack(e.kind, e.loadout);
     const dx = target.x - e.x;
     const dz = target.z - e.z;
     const d = Math.hypot(dx, dz);
@@ -201,8 +275,8 @@ export class EnemySystem {
           id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX, dirZ, speed: def.ranged.projectileSpeed,
           radius: def.ranged.projectileRadius, damage: def.damage, life: def.ranged.lifetimeS, sourceId: e.id,
         });
-      } else if (d - PLAYER_RADIUS <= def.attackRange + MELEE_TOLERANCE) {
-        hits.push({ targetKey: target.key, damage: def.damage, sourceId: e.id });
+      } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
+        hits.push({ targetKey: target.key, damage: atk.damage, sourceId: e.id });
       }
       e.cooldown = def.cooldownS;
       this.setAi(e, "recover");
@@ -215,15 +289,37 @@ export class EnemySystem {
         if (e.cooldown <= 0) this.setAi(e, "telegraph");
         return;
       }
-      const sign = d < def.ranged.preferredMin ? -1 : 1;
-      if (d > 0) this.moveEnemy(e, (sign * dx) / d, (sign * dz) / d, def.speed * dt, def.radius);
+      // retrocede en línea recta, como siempre; para acercarse usa la navegación
+      if (d < def.ranged.preferredMin) {
+        if (d > 0) this.moveEnemy(e, -dx / d, -dz / d, def.speed * dt, def.radius);
+      } else {
+        this.chaseMove(e, target, d, def.speed * dt, def.radius);
+      }
       return;
     }
-    if (d - PLAYER_RADIUS <= def.attackRange && e.cooldown <= 0) {
+    if (d - PLAYER_RADIUS <= atk.attackRange && e.cooldown <= 0) {
       this.setAi(e, "telegraph");
       return;
     }
-    if (d > 0) this.moveEnemy(e, dx / d, dz / d, Math.min(def.speed * dt, d), def.radius);
+    this.chaseMove(e, target, d, Math.min(def.speed * dt, d), def.radius);
+  }
+
+  /** Con línea de vista va directo al objetivo; sin ella, hacia el centro de la siguiente casilla del flujo. */
+  private chaseMove(e: Enemy, target: SimPlayer, d: number, len: number, radius: number): void {
+    if (!hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, radius)) {
+      const next = this.field.next(tileOf(e.x), tileOf(e.z));
+      if (next) {
+        const c = tileCenter(next.tx, next.tz);
+        const nx = c.x - e.x;
+        const nz = c.z - e.z;
+        const nd = Math.hypot(nx, nz);
+        if (nd > 0) {
+          this.moveEnemy(e, nx / nd, nz / nd, len, radius);
+          return;
+        }
+      }
+    }
+    if (d > 0) this.moveEnemy(e, (target.x - e.x) / d, (target.z - e.z) / d, len, radius);
   }
 
   private moveEnemy(e: Enemy, dirX: number, dirZ: number, len: number, radius: number): void {
@@ -283,12 +379,14 @@ export class EnemySystem {
     this.shots = keep;
   }
 
-  damage(enemyId: string, amount: number): { killed: boolean; xp: number } {
+  damage(enemyId: string, amount: number): EnemyDamageResult {
     const e = this.list.find((x) => x.id === enemyId);
-    if (!e || e.ai === "dead") return { killed: false, xp: 0 };
+    if (!e || e.ai === "dead") return { killed: false, xp: 0, x: e?.x ?? 0, z: e?.z ?? 0, drop: null };
     e.hp = Math.max(0, e.hp - amount);
-    if (e.hp > 0) return { killed: false, xp: 0 };
+    if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null };
     this.setAi(e, "dead");
-    return { killed: true, xp: ENEMY_DEFS[e.kind].xp };
+    // solo los armados sortean soltar su arma
+    const drop = e.loadout && this.rng.next() < TIERS[e.loadout.tier].dropChance ? { ...e.loadout } : null;
+    return { killed: true, xp: ENEMY_DEFS[e.kind].xp, x: e.x, z: e.z, drop };
   }
 }

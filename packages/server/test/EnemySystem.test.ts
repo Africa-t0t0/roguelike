@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ENEMY_DEFS,
+  PLAYER_RADIUS,
+  enemyAttack,
   ENEMY_SPAWN_MIN_PLAYER_DIST_TILES,
   SIM_DT,
   TILE_SIZE,
@@ -10,6 +12,7 @@ import {
   isWalkableTile,
   type Dungeon,
   type EnemyKind,
+  type EnemyLoadout,
 } from "@roguelike/shared";
 import { EnemySystem, type Enemy, type EnemyHit, type SimPlayer } from "../src/sim/EnemySystem";
 
@@ -41,6 +44,7 @@ function setup(kind: EnemyKind, x: number, z: number, d = arena()) {
     other.aiTime = -1e9;
   }
   e.kind = kind;
+  e.loadout = null;
   e.hp = e.maxHp = ENEMY_DEFS[kind].hp;
   e.x = x;
   e.z = z;
@@ -218,15 +222,178 @@ describe("separación y objetivos", () => {
 describe("daño", () => {
   it("mata una sola vez, no golpea muerto y desaparece tras 2 s", () => {
     const { sys, e } = setup("minion", 30, 30);
-    expect(sys.damage("nope", 5)).toEqual({ killed: false, xp: 0 });
-    expect(sys.damage(e.id, 5)).toEqual({ killed: false, xp: 0 });
-    expect(sys.damage(e.id, 999)).toEqual({ killed: true, xp: ENEMY_DEFS.minion.xp });
+    expect(sys.damage("nope", 5)).toMatchObject({ killed: false, xp: 0, drop: null });
+    expect(sys.damage(e.id, 5)).toMatchObject({ killed: false, xp: 0, drop: null });
+    expect(sys.damage(e.id, 999)).toEqual({ killed: true, xp: ENEMY_DEFS.minion.xp, x: 30, z: 30, drop: null });
     expect(e.ai).toBe("dead");
-    expect(sys.damage(e.id, 999)).toEqual({ killed: false, xp: 0 });
+    expect(sys.damage(e.id, 999)).toMatchObject({ killed: false, xp: 0, drop: null });
     const pl = [P("a", 30.5, 30)];
     expect(run(sys, pl, 30)).toEqual([]);
     expect(sys.enemies).toContain(e);
     run(sys, pl, 45);
     expect(sys.enemies).not.toContain(e);
+  });
+});
+
+/** Mapa en "L" de 20x20 (igual que en shared/test/nav.test.ts): sala A (1..5,1..5), pasillo horizontal
+ *  z=3 (x 6..14), pasillo vertical x=14 (z 4..12) y sala B (12..16,13..17). */
+function lDungeon(): Dungeon {
+  const width = 20;
+  const height = 20;
+  const tiles = new Uint8Array(width * height);
+  const fill = (x0: number, z0: number, x1: number, z1: number) => {
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) tiles[z * width + x] = 1;
+  };
+  fill(1, 1, 5, 5);
+  fill(6, 3, 14, 3);
+  fill(14, 4, 14, 12);
+  fill(12, 13, 16, 17);
+  return { seed: 0, floor: 1, width, height, tiles, rooms: [], startRoomId: 0, bossRoomId: 0 };
+}
+
+const center = (tx: number, tz: number) => ({ x: (tx + 0.5) * TILE_SIZE, z: (tz + 0.5) * TILE_SIZE });
+
+describe("armas de los enemigos", () => {
+  it("el 60 % de los esbirros va armado con espada de guardia; los magos nunca", () => {
+    const sys = new EnemySystem(arena(), createRng(11));
+    const spots = Array.from({ length: 500 }, () => IN_ROOM);
+    const minions = sys.spawnWave(spots, ["minion"]);
+    expect(minions).toHaveLength(500);
+    const armed = minions.filter((e) => e.loadout !== null);
+    expect(armed.every((e) => e.loadout!.weaponId === "guard-sword")).toBe(true);
+    expect(Math.abs(armed.length / 500 - 0.6)).toBeLessThanOrEqual(0.06);
+    const mages = sys.spawnWave(spots.slice(0, 200), ["mage"]);
+    expect(mages.every((e) => e.loadout === null)).toBe(true);
+  });
+
+  it("con setFloorClock(0, 1) todos los armados son tier 1; más tarde aparecen tiers altos", () => {
+    const sys = new EnemySystem(arena(), createRng(4));
+    sys.setFloorClock(0, 1);
+    const early = sys.spawnWave(Array.from({ length: 300 }, () => IN_ROOM), ["minion", "brute"]);
+    const earlyArmed = early.filter((e) => e.loadout);
+    expect(earlyArmed.length).toBeGreaterThan(0);
+    expect(earlyArmed.every((e) => e.loadout!.tier === 1)).toBe(true);
+    sys.setFloorClock(300, 1);
+    const late = sys.spawnWave(Array.from({ length: 300 }, () => IN_ROOM), ["brute"]);
+    expect(late.filter((e) => e.loadout).every((e) => e.loadout!.weaponId === "great-sword")).toBe(true);
+    expect(late.some((e) => e.loadout?.tier === 3)).toBe(true);
+  });
+
+  it("un bruto con mandoble templado golpea por 23 desde 2,2 m", () => {
+    const { sys, e } = setup("brute", 30, 30);
+    e.loadout = { weaponId: "great-sword", tier: 2 };
+    const pl = [P("a", 32.2, 30)];
+    sys.step(pl, SIM_DT);
+    expect(e.ai).toBe("telegraph");
+    const hits = run(sys, pl, Math.ceil(ENEMY_DEFS.brute.telegraphS / SIM_DT) + 1);
+    expect(hits).toEqual([{ targetKey: "a", damage: 23, sourceId: e.id }]);
+    expect(e.x).toBe(30);
+  });
+
+  it("los enemigos de sala también sortean su loadout", () => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 20; seed++) {
+      const made = new EnemySystem(arena(), createRng(seed)).activateRooms([P("a", IN_ROOM.x, IN_ROOM.z)], 4);
+      for (const e of made) {
+        if (e.kind === "mage") expect(e.loadout).toBeNull();
+        else if (e.loadout) expect(e.loadout.weaponId).toBe(e.kind === "brute" ? "great-sword" : "guard-sword");
+        seen.add(e.loadout ? "armed" : "bare");
+      }
+    }
+    expect(seen).toEqual(new Set(["armed", "bare"]));
+  });
+});
+
+describe("oleadas", () => {
+  it("spawnWave crea uno por spot, cicla los tipos, en chase y con roomId -1", () => {
+    const sys = new EnemySystem(arena(), createRng(2));
+    const spots = [{ x: 18, z: 18 }, { x: 20, z: 18 }, { x: 22, z: 18 }];
+    const made = sys.spawnWave(spots, ["minion", "brute"]);
+    expect(made.map((e) => e.kind)).toEqual(["minion", "brute", "minion"]);
+    for (const [i, e] of made.entries()) {
+      expect(e.ai).toBe("chase");
+      expect(e.roomId).toBe(-1);
+      expect({ x: e.x, z: e.z }).toEqual(spots[i]);
+      expect(e.hp).toBe(ENEMY_DEFS[e.kind].hp);
+    }
+    expect(sys.enemies).toHaveLength(3);
+  });
+
+  it("liveCount no cuenta a los que están muriendo", () => {
+    const sys = new EnemySystem(arena(), createRng(2));
+    const made = sys.spawnWave([IN_ROOM, IN_ROOM, IN_ROOM], ["minion"]);
+    expect(sys.liveCount()).toBe(3);
+    sys.damage(made[0]!.id, 9999);
+    expect(sys.enemies).toHaveLength(3);
+    expect(sys.liveCount()).toBe(2);
+  });
+});
+
+describe("botín", () => {
+  it("al morir un armado devuelve su posición, la XP y a veces suelta su arma", () => {
+    const loadout: EnemyLoadout = { weaponId: "guard-sword", tier: 1 };
+    let drops = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      const sys = new EnemySystem(arena(), createRng(seed));
+      const [e] = sys.spawnWave([{ x: 19, z: 21 }], ["minion"]);
+      e!.loadout = { ...loadout };
+      expect(sys.damage(e!.id, 5).drop).toBeNull();
+      const r = sys.damage(e!.id, 999);
+      expect(r).toMatchObject({ killed: true, xp: ENEMY_DEFS.minion.xp, x: 19, z: 21 });
+      if (r.drop) {
+        expect(r.drop).toEqual(loadout);
+        drops++;
+      }
+    }
+    // dropChance 0.10 sobre 200 muertes
+    expect(drops).toBeGreaterThanOrEqual(8);
+    expect(drops).toBeLessThanOrEqual(35);
+  });
+
+  it("un desarmado nunca suelta nada", () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const sys = new EnemySystem(arena(), createRng(seed));
+      const [e] = sys.spawnWave([IN_ROOM], ["brute"]);
+      e!.loadout = null;
+      expect(sys.damage(e!.id, 9999)).toMatchObject({ killed: true, drop: null });
+    }
+  });
+});
+
+describe("navegación", () => {
+  for (const kind of ["minion", "brute"] as const) {
+    it(`un ${kind} de oleada rodea las paredes de la L hasta alcanzar al jugador sin meterse en muros`, () => {
+      const d = lDungeon();
+      const sys = new EnemySystem(d, createRng(1));
+      const [e] = sys.spawnWave([center(14, 16)], [kind]);
+      e!.loadout = null;
+      const pl = [P("a", center(2, 3).x, center(2, 3).z)];
+      const range = enemyAttack(kind, null).attackRange;
+      let reached = false;
+      for (let i = 0; i < 30 / SIM_DT && !reached; i++) {
+        sys.step(pl, SIM_DT);
+        expect(isWalkableTile(d, Math.floor(e!.x / TILE_SIZE), Math.floor(e!.z / TILE_SIZE))).toBe(true);
+        if (e!.ai === "telegraph") {
+          expect(dist(e!, pl[0]!) - PLAYER_RADIUS).toBeLessThanOrEqual(range);
+          reached = true;
+        }
+      }
+      expect(reached).toBe(true);
+    });
+  }
+
+  it("el flujo parte de los jugadores vivos y solo se recalcula si cambian sus casillas", () => {
+    const sys = new EnemySystem(arena(), createRng(1));
+    sys.spawnWave([{ x: 30, z: 30 }], ["minion"]);
+    const spy = vi.spyOn(sys.flow, "rebuild");
+    sys.step([P("a", 21, 21), P("b", 3, 3, false)], SIM_DT);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(sys.flow.distance(10, 10)).toBe(0);
+    expect(sys.flow.distance(1, 1)).toBe(Infinity);
+    sys.step([P("a", 21.5, 20.5), P("b", 3, 3, false)], SIM_DT); // misma casilla
+    expect(spy).toHaveBeenCalledTimes(1);
+    sys.step([P("a", 23, 21)], SIM_DT);
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(sys.flow.distance(11, 10)).toBe(0);
   });
 });

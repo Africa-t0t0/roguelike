@@ -13,6 +13,14 @@ const DIRS: readonly (readonly [number, number])[] = [
   [-1, -1],
 ];
 
+/** Clave de un conjunto de fuentes (sin importar el orden); igual a `FlowField.sourcesKey` tras `rebuild`. */
+export function flowSourcesKey(sources: readonly { tx: number; tz: number }[]): string {
+  return sources
+    .map((s) => `${s.tx},${s.tz}`)
+    .sort()
+    .join(";");
+}
+
 /**
  * Mapa de flujo por BFS multi-fuente sobre la grilla.
  * Distancias en pasos: un paso diagonal cuenta 1 (BFS tipo Chebyshev).
@@ -35,10 +43,7 @@ export class FlowField {
     const dist = this.dist;
     const queue = this.queue;
     dist.fill(-1);
-    this.sourcesKey = sources
-      .map((s) => `${s.tx},${s.tz}`)
-      .sort()
-      .join(";");
+    this.sourcesKey = flowSourcesKey(sources);
     let head = 0;
     let tail = 0;
     for (const s of sources) {
