@@ -1,3 +1,5 @@
+import type { Material } from "@babylonjs/core/Materials/material";
+import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Light } from "@babylonjs/core/Lights/light";
 import { PointLight } from "@babylonjs/core/Lights/pointLight";
@@ -7,6 +9,7 @@ import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder"
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
+import "@babylonjs/core/Meshes/instancedMesh"; // registra Mesh.createInstance
 import type { Scene } from "@babylonjs/core/scene";
 import type { Dungeon } from "@roguelike/shared";
 import { flicker, nearestTorches, torchSpots } from "./torches";
@@ -45,20 +48,34 @@ export function noFog<T extends { fogEnabled: boolean }>(m: T): T {
 }
 
 /**
- * Sube `maxSimultaneousLights` en todos los materiales de las mallas de la escena. Se revisa solo
- * cuando cambia la cantidad de mallas (los personajes se instancian al llegar).
+ * Sube `maxSimultaneousLights` a `max` en un material y, si es un MultiMaterial (el cargador glTF los
+ * crea para mallas con varias primitivas), en cada submaterial. PBRMaterial, StandardMaterial y
+ * OpenPBRMaterial tienen la propiedad; los que no la tienen se ignoran.
+ */
+export function raiseLightBudget(material: Material | null | undefined, max: number): void {
+  if (!material) return;
+  if (material instanceof MultiMaterial) {
+    for (const sub of material.subMaterials) raiseLightBudget(sub, max);
+    return;
+  }
+  const m = material as Material & { maxSimultaneousLights?: number };
+  if (typeof m.maxSimultaneousLights === "number" && m.maxSimultaneousLights < max) m.maxSimultaneousLights = max;
+}
+
+/**
+ * Mantiene el presupuesto de luces en todo material que se dibuje: cada cuadro recorre las mallas y
+ * ajusta los materiales que aún no vio (incluye los de contenedores, que no pasan por
+ * `scene.materials`, y los que se cambien en mallas existentes).
  */
 function keepLightBudget(scene: Scene, max: number): () => void {
-  let seen = -1;
+  const done = new WeakSet<Material>();
   const obs = scene.onBeforeRenderObservable.add(() => {
-    if (scene.meshes.length === seen) return;
-    seen = scene.meshes.length;
     for (const mesh of scene.meshes) {
-      // PBRMaterial, StandardMaterial y OpenPBRMaterial (según el cargador) tienen esta propiedad.
-      const m = mesh.material as { maxSimultaneousLights?: number } | null;
-      if (m && typeof m.maxSimultaneousLights === "number" && m.maxSimultaneousLights < max) {
-        m.maxSimultaneousLights = max;
-      }
+      const m = mesh.material;
+      if (!m || done.has(m)) continue;
+      raiseLightBudget(m, max);
+      // Un MultiMaterial puede cambiar de submateriales: se revisa siempre (es barato).
+      if (!(m instanceof MultiMaterial)) done.add(m);
     }
   });
   return () => scene.onBeforeRenderObservable.remove(obs);
