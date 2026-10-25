@@ -382,6 +382,28 @@ describe("navegación", () => {
     });
   }
 
+  it("con dos jugadores ataca al más cercano por recorrido aunque el otro esté más cerca en línea recta", () => {
+    const d = lDungeon();
+    const sys = new EnemySystem(d, createRng(1));
+    const [e] = sys.spawnWave([center(14, 6)], ["minion"]);
+    e!.loadout = null;
+    // A: más cerca en línea recta (~9 casillas) pero tras muros (recorrido 12); B: recorrido 10
+    const a = P("a", center(5, 5).x, center(5, 5).z);
+    const b = P("b", center(14, 16).x, center(14, 16).z);
+    const range = enemyAttack("minion", null).attackRange;
+    let telegraphed = false;
+    for (let i = 0; i < 10 / SIM_DT && !telegraphed; i++) {
+      sys.step([a, b], SIM_DT);
+      expect(isWalkableTile(d, Math.floor(e!.x / TILE_SIZE), Math.floor(e!.z / TILE_SIZE))).toBe(true);
+      if (e!.ai === "telegraph") {
+        expect(e!.targetKey).toBe("b");
+        expect(dist(e!, b) - PLAYER_RADIUS).toBeLessThanOrEqual(range);
+        telegraphed = true;
+      }
+    }
+    expect(telegraphed).toBe(true);
+  });
+
   it("el flujo parte de los jugadores vivos y solo se recalcula si cambian sus casillas", () => {
     const sys = new EnemySystem(arena(), createRng(1));
     sys.spawnWave([{ x: 30, z: 30 }], ["minion"]);

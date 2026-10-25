@@ -31,10 +31,13 @@ export class FlowField {
   sourcesKey = "";
   private readonly dist: Int32Array;
   private readonly queue: Int32Array;
+  /** índice de la casilla fuente desde la que llegó el BFS a cada casilla; -1 si no llegó */
+  private readonly origin: Int32Array;
 
   constructor(private readonly dungeon: Dungeon) {
     this.dist = new Int32Array(dungeon.width * dungeon.height).fill(-1);
     this.queue = new Int32Array(dungeon.width * dungeon.height);
+    this.origin = new Int32Array(dungeon.width * dungeon.height).fill(-1);
   }
 
   rebuild(sources: readonly { tx: number; tz: number }[]): void {
@@ -43,6 +46,7 @@ export class FlowField {
     const dist = this.dist;
     const queue = this.queue;
     dist.fill(-1);
+    this.origin.fill(-1);
     this.sourcesKey = flowSourcesKey(sources);
     let head = 0;
     let tail = 0;
@@ -51,6 +55,7 @@ export class FlowField {
       const i = s.tz * width + s.tx;
       if (dist[i] !== -1) continue;
       dist[i] = 0;
+      this.origin[i] = i;
       queue[tail++] = i;
     }
     while (head < tail) {
@@ -66,6 +71,7 @@ export class FlowField {
         const ni = nz * width + nx;
         if (dist[ni] !== -1) continue;
         dist[ni] = nd;
+        this.origin[ni] = this.origin[i]!;
         queue[tail++] = ni;
       }
     }
@@ -77,6 +83,14 @@ export class FlowField {
     if (tx < 0 || tz < 0 || tx >= this.dungeon.width || tz >= this.dungeon.height) return Infinity;
     const v = this.dist[tz * this.dungeon.width + tx]!;
     return v < 0 ? Infinity : v;
+  }
+
+  /** Casilla fuente más cercana por recorrido (la que alcanzó primero esta casilla); null si es inalcanzable. */
+  source(tx: number, tz: number): { tx: number; tz: number } | null {
+    if (this.distance(tx, tz) === Infinity) return null;
+    const o = this.origin[tz * this.dungeon.width + tx]!;
+    const sx = o % this.dungeon.width;
+    return { tx: sx, tz: (o - sx) / this.dungeon.width };
   }
 
   /** Vecina con menor distancia; null si está en una fuente o es inalcanzable. */

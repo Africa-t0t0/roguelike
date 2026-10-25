@@ -243,11 +243,11 @@ export class EnemySystem {
   }
 
   private stepEnemy(e: Enemy, alive: readonly SimPlayer[], dt: number, hits: EnemyHit[]): void {
-    let target = alive.find((p) => p.key === e.targetKey);
-    if (!target) {
-      target = this.nearest(e, alive);
-      e.targetKey = target?.key ?? null;
-    }
+    // Persiguiendo, el objetivo es el jugador más cercano por recorrido (el mismo hacia el que lleva el flujo);
+    // durante la telegrafía o la recuperación se mantiene el que tenía.
+    let target = e.ai === "chase" || e.ai === "idle" ? this.nearestByPath(e, alive) : undefined;
+    target ??= alive.find((p) => p.key === e.targetKey) ?? this.nearest(e, alive);
+    e.targetKey = target?.key ?? null;
     if (!target) {
       if (e.ai !== "idle") this.setAi(e, "idle");
       return;
@@ -328,6 +328,13 @@ export class EnemySystem {
     e.z = m.z;
   }
 
+  /** Jugador vivo en la casilla fuente del flujo que alcanza al enemigo; si hay varios, el más cercano. */
+  private nearestByPath(e: Enemy, alive: readonly SimPlayer[]): SimPlayer | undefined {
+    const src = this.field.source(tileOf(e.x), tileOf(e.z));
+    if (!src) return undefined;
+    return this.nearest(e, alive.filter((p) => tileOf(p.x) === src.tx && tileOf(p.z) === src.tz));
+  }
+
   private nearest(e: Enemy, alive: readonly SimPlayer[]): SimPlayer | undefined {
     let best: SimPlayer | undefined;
     let bestD = Infinity;
@@ -379,6 +386,7 @@ export class EnemySystem {
     this.shots = keep;
   }
 
+  /** Si el id no existe devuelve x: 0, z: 0: el llamador solo debe usar la posición cuando `killed`. */
   damage(enemyId: string, amount: number): EnemyDamageResult {
     const e = this.list.find((x) => x.id === enemyId);
     if (!e || e.ai === "dead") return { killed: false, xp: 0, x: e?.x ?? 0, z: e?.z ?? 0, drop: null };

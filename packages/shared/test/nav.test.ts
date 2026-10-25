@@ -67,6 +67,19 @@ describe("FlowField", () => {
     expect(flow.next(14, 16)).toBeNull();
   });
 
+  it("source dice desde qué fuente llegó el flujo a cada casilla", () => {
+    const flow = new FlowField(lDungeon());
+    flow.rebuild([
+      { tx: 3, tz: 3 },
+      { tx: 14, tz: 16 },
+    ]);
+    expect(flow.source(14, 8)).toEqual({ tx: 14, tz: 16 });
+    expect(flow.source(8, 3)).toEqual({ tx: 3, tz: 3 });
+    expect(flow.source(3, 3)).toEqual({ tx: 3, tz: 3 });
+    expect(flow.source(0, 0)).toBeNull();
+    expect(flow.source(-1, 50)).toBeNull();
+  });
+
   it("sourcesKey no depende del orden de las fuentes", () => {
     const flow = new FlowField(lDungeon());
     flow.rebuild([{ tx: 3, tz: 3 }, { tx: 14, tz: 16 }]);
