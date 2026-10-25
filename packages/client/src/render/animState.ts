@@ -1,5 +1,5 @@
 import { ENEMY_DEFS, MOVESETS, WEAPONS, strikeOf, type EnemyKind, type WeaponId } from "@roguelike/shared";
-import { ENEMY_LOOKS } from "./looks";
+import { ENEMY_LOOKS, HERO_STRIDE_MPS } from "./looks";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
 export interface AnimChoice {
@@ -18,6 +18,8 @@ export interface HeroAnimInput {
   weaponId: WeaponId;
   /** m/s en el plano */
   speed: number;
+  /** dirección del movimiento respecto de hacia dónde mira, en rad: 0 adelante, π/2 derecha, −π/2 izquierda */
+  moveAngle: number;
   airborne: boolean;
   dodging: boolean;
   comboStep: number;
@@ -37,6 +39,31 @@ const MOVING_SPEED = 0.2; // m/s
 const SPRINT_SPEED = 6; // m/s
 /** La esquiva no tiene clip propio: corre con el clip del estilo a esta velocidad. */
 const DODGE_RUN_SPEED = 2;
+
+/** Límites de la velocidad de reproducción al ajustar el paso: fuera de ellos el clip se ve mal. */
+const MIN_STRIDE_RATE = 0.6;
+const MAX_STRIDE_RATE = 2.2;
+
+type RunDir = "run" | "runBack" | "runLeft" | "runRight";
+
+/**
+ * Cuatro sectores: adelante y atrás de ±67,5°, los lados de ±22,5° (las diagonales del teclado, a 45°,
+ * caen en adelante o atrás). `yaw` es cuánto girar el cuerpo para que el clip apunte a donde va.
+ */
+export function moveSector(angle: number): { dir: RunDir; yaw: number } {
+  const a = Math.atan2(Math.sin(angle), Math.cos(angle)); // a (−π, π]
+  const abs = Math.abs(a);
+  if (abs <= (3 * Math.PI) / 8) return { dir: "run", yaw: a };
+  if (abs >= (5 * Math.PI) / 8) return { dir: "runBack", yaw: a - Math.sign(a) * Math.PI };
+  return a > 0 ? { dir: "runRight", yaw: a - Math.PI / 2 } : { dir: "runLeft", yaw: a + Math.PI / 2 };
+}
+
+/** Velocidad de reproducción para que los pies acompañen a `speedMps`. */
+function strideRate(clip: string, speedMps: number): number {
+  const stride = HERO_STRIDE_MPS[clip];
+  if (!stride) return 1;
+  return Math.min(MAX_STRIDE_RATE, Math.max(MIN_STRIDE_RATE, speedMps / stride));
+}
 
 /** Velocidad para que `clip` dure `durationS`; sin la duración del clip, 1. */
 function fitTo(clip: string, durationS: number, clipLengths?: ClipLengths): number {
@@ -61,9 +88,16 @@ export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): Ani
   }
   if (a.airborne) return once(locomotion.jump);
   if (a.hurtRecently) return once(locomotion.hit);
-  if (a.speed > SPRINT_SPEED) return looped(locomotion.sprint);
-  if (a.speed > MOVING_SPEED) return looped(locomotion.run);
-  return looped(locomotion.idle);
+  if (a.speed <= MOVING_SPEED) return looped(locomotion.idle);
+  const { dir } = moveSector(a.moveAngle);
+  const clip = dir === "run" && a.speed > SPRINT_SPEED ? locomotion.sprint : locomotion[dir];
+  return looped(clip, strideRate(clip, a.speed));
+}
+
+/** Giro del cuerpo (rad) respecto de la mirada: solo al correr, para que el clip apunte a donde va. */
+export function heroBodyYaw(a: HeroAnimInput): number {
+  const running = !a.dead && !a.dodging && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1);
+  return running && a.speed > MOVING_SPEED ? moveSector(a.moveAngle).yaw : 0;
 }
 
 /** Clips de `ENEMY_LOOKS`. Reglas por prioridad: muerte, telegrafía, golpe recibido, correr, quieto. */
@@ -106,14 +140,29 @@ const MAX_PLAUSIBLE_SPEED = 30; // m/s: más que esto es un salto (reaparición,
 export class SpeedMeter {
   private last: { x: number; z: number } | undefined;
   private value = 0;
+  /** velocidad suavizada en el plano, m/s */
+  vx = 0;
+  vz = 0;
 
   sample(x: number, z: number, dtS: number): number {
     const last = this.last;
     this.last = { x, z };
     if (!last || dtS <= 0) return this.value;
-    const raw = Math.hypot(x - last.x, z - last.z) / dtS;
+    const rx = (x - last.x) / dtS;
+    const rz = (z - last.z) / dtS;
+    const raw = Math.hypot(rx, rz);
     if (raw > MAX_PLAUSIBLE_SPEED) return this.value;
-    this.value += (raw - this.value) * (1 - Math.exp(-dtS / SPEED_TAU_S));
+    const k = 1 - Math.exp(-dtS / SPEED_TAU_S);
+    this.value += (raw - this.value) * k;
+    this.vx += (rx - this.vx) * k;
+    this.vz += (rz - this.vz) * k;
     return this.value;
+  }
+
+  /** Dirección de la velocidad respecto de `facing` (0 = +Z, π/2 = +X): 0 adelante, π/2 derecha. */
+  angleFrom(facing: number): number {
+    const forward = this.vx * Math.sin(facing) + this.vz * Math.cos(facing);
+    const right = this.vx * Math.cos(facing) - this.vz * Math.sin(facing);
+    return Math.atan2(right, forward);
   }
 }

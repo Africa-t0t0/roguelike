@@ -56,6 +56,22 @@ export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
   },
 };
 
+/**
+ * Velocidad a la que avanza cada clip de correr del héroe con velocidad de reproducción 1, en m/s
+ * para el Kingslayer de 1,8 m: lo que se desplaza la cadera en el clip original (en alturas de cadera
+ * por segundo, cadera ≈ 1 m). Sirve para que los pies no patinen.
+ */
+export const HERO_STRIDE_MPS: Record<string, number> = {
+  ss_run: 4.9,
+  ss_run_2: 5.2,
+  ss_strafe_3: 3.8,
+  ss_strafe_4: 3.8,
+  gs_run_2: 4.8,
+  gs_run: 2.8,
+  gs_strafe_3: 2.8,
+  gs_strafe_4: 3.6,
+};
+
 export const PLAYER_LOOK: { asset: AssetId; height: number } = { asset: "kingslayer", height: 1.8 };
 
 /** Todos los clips que usa el juego (estilos de combate y enemigos), sin repetir. */

@@ -17,6 +17,8 @@ import { WEAPON_LOOKS } from "./looks";
  */
 const MODEL_YAW_OFFSET = 0;
 const CROSSFADE_S = 0.15;
+/** constante de tiempo del giro del cuerpo hacia `setBodyYaw` */
+const BODY_YAW_TAU_S = 0.08;
 
 let nextInstance = 0;
 
@@ -52,6 +54,9 @@ export class CharacterView {
   private weapon: { id: WeaponId; grip: TransformNode } | undefined;
   private readonly observer: Observer<Scene>;
   private readonly skeletons: Skeleton[];
+  private readonly body: TransformNode;
+  private bodyYaw = 0;
+  private bodyYawTarget = 0;
 
   constructor(
     private readonly scene: Scene,
@@ -66,6 +71,7 @@ export class CharacterView {
     const body = new TransformNode(`body${suffix}`, scene);
     body.parent = this.root;
     body.rotation.y = MODEL_YAW_OFFSET;
+    this.body = body;
 
     const entries = assets.container(look.asset).instantiateModelsToScene((n) => n + suffix, false, {
       doNotInstantiate: true,
@@ -92,12 +98,21 @@ export class CharacterView {
     body.scaling.setAll(scale);
     body.position.y = -min.y * scale;
 
-    this.observer = scene.onBeforeRenderObservable.add(() => this.fade(scene.getEngine().getDeltaTime() / 1000));
+    this.observer = scene.onBeforeRenderObservable.add(() => {
+      const dtS = scene.getEngine().getDeltaTime() / 1000;
+      this.fade(dtS);
+      this.turnBody(dtS);
+    });
   }
 
   setPose(x: number, y: number, z: number, facing: number): void {
     this.root.position.set(x, y, z);
     this.root.rotation.y = facing;
+  }
+
+  /** Gira el cuerpo (no `root`) `yaw` rad respecto de la mirada, de forma suave. */
+  setBodyYaw(yaw: number): void {
+    this.bodyYawTarget = yaw;
   }
 
   /** Cuelga el arma de la mano derecha con su agarre de `WEAPON_LOOKS`; con `null` la quita. */
@@ -170,6 +185,13 @@ export class CharacterView {
       this.groups.set(clip, g);
     }
     return g;
+  }
+
+  private turnBody(dtS: number): void {
+    if (this.bodyYaw === this.bodyYawTarget) return;
+    const diff = this.bodyYawTarget - this.bodyYaw;
+    this.bodyYaw = Math.abs(diff) < 1e-3 ? this.bodyYawTarget : this.bodyYaw + diff * (1 - Math.exp(-dtS / BODY_YAW_TAU_S));
+    this.body.rotation.y = MODEL_YAW_OFFSET + this.bodyYaw;
   }
 
   private fade(dtS: number): void {

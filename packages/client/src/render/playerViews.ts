@@ -7,7 +7,7 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import { MOVESETS, WEAPONS, strikeOf, type WeaponId } from "@roguelike/shared";
 import type { AnimLibrary } from "./animLibrary";
-import { chooseHeroAnim, SpeedMeter, type ClipLengths } from "./animState";
+import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
 import { CharacterView } from "./characterView";
 import { PLAYER_LOOK } from "./looks";
@@ -118,19 +118,19 @@ export class PlayerViews {
         s.restart = false;
       }
     }
-    const choice = chooseHeroAnim(
-      {
-        weaponId: state.weaponId,
-        speed: view.speed.sample(pose.x, pose.z, dtS),
-        airborne: pose.y > AIRBORNE_Y,
-        dodging: state.dodgeTime > 0,
-        comboStep,
-        swingTimer,
-        dead: state.dead,
-        hurtRecently,
-      },
-      this.clipLengths,
-    );
+    const input: HeroAnimInput = {
+      weaponId: state.weaponId,
+      speed: view.speed.sample(pose.x, pose.z, dtS),
+      moveAngle: view.speed.angleFrom(pose.facing),
+      airborne: pose.y > AIRBORNE_Y,
+      dodging: state.dodgeTime > 0,
+      comboStep,
+      swingTimer,
+      dead: state.dead,
+      hurtRecently,
+    };
+    const choice = chooseHeroAnim(input, this.clipLengths);
+    view.character.setBodyYaw(heroBodyYaw(input));
     view.character.play(choice, attackClip !== undefined && choice.clip === attackClip);
   }
 

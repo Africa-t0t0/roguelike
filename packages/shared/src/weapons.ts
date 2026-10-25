@@ -15,7 +15,18 @@ export interface Strike {
 
 export interface Moveset {
   id: MovesetId;
-  locomotion: { idle: string; run: string; sprint: string; jump: string; hit: string; death: string };
+  /** `run*`: correr en cada dirección respecto de hacia dónde mira; `sprint` es hacia adelante. */
+  locomotion: {
+    idle: string;
+    run: string;
+    runBack: string;
+    runLeft: string;
+    runRight: string;
+    sprint: string;
+    jump: string;
+    hit: string;
+    death: string;
+  };
   combo: readonly Strike[];
   comboResetS: number;
 }
@@ -33,7 +44,17 @@ export interface Weapon {
 export const MOVESETS: Record<MovesetId, Moveset> = {
   "one-hand-sword": {
     id: "one-hand-sword",
-    locomotion: { idle: "ss_idle", run: "ss_run", sprint: "ss_run_2", jump: "ss_jump", hit: "ss_impact", death: "ss_death" },
+    locomotion: {
+      idle: "ss_idle",
+      run: "ss_run",
+      runBack: "ss_run_2",
+      runLeft: "ss_strafe_3",
+      runRight: "ss_strafe_4",
+      sprint: "ss_run",
+      jump: "ss_jump",
+      hit: "ss_impact",
+      death: "ss_death",
+    },
     combo: [
       { clip: "ss_slash", duration: 0.35, damageMult: 1, range: 2.2, arcDeg: 120, impactAt: 0.45 },
       { clip: "ss_slash_3", duration: 0.35, damageMult: 1, range: 2.2, arcDeg: 120, impactAt: 0.45 },
@@ -43,7 +64,17 @@ export const MOVESETS: Record<MovesetId, Moveset> = {
   },
   "great-sword": {
     id: "great-sword",
-    locomotion: { idle: "gs_idle", run: "gs_run", sprint: "gs_run_2", jump: "gs_jump", hit: "gs_impact", death: "gs_death" },
+    locomotion: {
+      idle: "gs_idle",
+      run: "gs_run_2",
+      runBack: "gs_run",
+      runLeft: "gs_strafe_3",
+      runRight: "gs_strafe_4",
+      sprint: "gs_run_2",
+      jump: "gs_jump",
+      hit: "gs_impact",
+      death: "gs_death",
+    },
     combo: [
       { clip: "gs_slash", duration: 0.7, damageMult: 1, range: 3.0, arcDeg: 160, impactAt: 0.55 },
       { clip: "gs_high_spin_attack", duration: 0.9, damageMult: 1.6, range: 3.2, arcDeg: 220, impactAt: 0.6 },

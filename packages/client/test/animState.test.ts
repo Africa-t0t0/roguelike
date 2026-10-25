@@ -3,6 +3,8 @@ import { MOVESETS, ENEMY_DEFS } from "@roguelike/shared";
 import {
   chooseEnemyAnim,
   chooseHeroAnim,
+  heroBodyYaw,
+  moveSector,
   RecentHits,
   SpeedMeter,
   type EnemyAnimInput,
@@ -13,6 +15,7 @@ import { ENEMY_LOOKS } from "../src/render/looks";
 const hero = (over: Partial<HeroAnimInput> = {}): HeroAnimInput => ({
   weaponId: "kingslayer-sword",
   speed: 0,
+  moveAngle: 0,
   airborne: false,
   dodging: false,
   comboStep: 0,
@@ -48,7 +51,7 @@ describe("chooseHeroAnim", () => {
       loop: true,
       speed: 2,
     });
-    expect(chooseHeroAnim(hero({ weaponId: "great-sword", dodging: true })).clip).toBe("gs_run");
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", dodging: true })).clip).toBe("gs_run_2");
   });
 
   it("cada paso del combo de la espada tiene su clip, sin bucle", () => {
@@ -111,19 +114,56 @@ describe("chooseHeroAnim", () => {
     expect(c.loop).toBe(false);
   });
 
-  it("speed > 6 → sprint del estilo", () => {
-    expect(chooseHeroAnim(hero({ speed: 6.5 }))).toEqual({ clip: "ss_run_2", loop: true, speed: 1 });
-    expect(chooseHeroAnim(hero({ weaponId: "great-sword", speed: 6.5 })).clip).toBe("gs_run_2");
+  it("speed > 6 hacia adelante → sprint del estilo, con el paso ajustado", () => {
+    expect(chooseHeroAnim(hero({ speed: 8 }))).toEqual({ clip: "ss_run", loop: true, speed: 8 / 4.9 });
+    expect(chooseHeroAnim(hero({ weaponId: "great-sword", speed: 8 })).clip).toBe("gs_run_2");
   });
 
-  it("speed > 0,2 → run del estilo", () => {
-    expect(chooseHeroAnim(hero({ speed: 3 }))).toEqual({ clip: "ss_run", loop: true, speed: 1 });
-    expect(chooseHeroAnim(hero({ speed: 6 })).clip).toBe("ss_run");
-    expect(chooseHeroAnim(hero({ weaponId: "great-sword", speed: 3 })).clip).toBe("gs_run");
+  it("corre en la dirección del movimiento respecto de la mirada (clips que avanzan hacia ese lado)", () => {
+    const at = (moveAngle: number, weaponId: HeroAnimInput["weaponId"] = "kingslayer-sword") =>
+      chooseHeroAnim(hero({ speed: 5, moveAngle, weaponId })).clip;
+    expect([at(0), at(Math.PI), at(Math.PI / 2), at(-Math.PI / 2)]).toEqual(["ss_run", "ss_run_2", "ss_strafe_4", "ss_strafe_3"]);
+    expect([at(0, "great-sword"), at(Math.PI, "great-sword"), at(Math.PI / 2, "great-sword"), at(-Math.PI / 2, "great-sword")]).toEqual([
+      "gs_run_2",
+      "gs_run",
+      "gs_strafe_4",
+      "gs_strafe_3",
+    ]);
+    // las diagonales del teclado van con adelante o atrás
+    expect([at(Math.PI / 4), at(-Math.PI / 4), at((3 * Math.PI) / 4)]).toEqual(["ss_run", "ss_run", "ss_run_2"]);
+  });
+
+  it("la velocidad del clip acompaña a la del movimiento, dentro de límites", () => {
+    expect(chooseHeroAnim(hero({ speed: 4.9 })).speed).toBeCloseTo(1);
+    expect(chooseHeroAnim(hero({ speed: 2.45 })).speed).toBeCloseTo(0.6);
+    expect(chooseHeroAnim(hero({ speed: 0.5 })).speed).toBeCloseTo(0.6);
+    expect(chooseHeroAnim(hero({ speed: 10, moveAngle: Math.PI / 2 })).speed).toBeCloseTo(2.2);
   });
 
   it("speed ≤ 0,2 → idle", () => {
     expect(chooseHeroAnim(hero({ speed: 0.2 })).clip).toBe("ss_idle");
+  });
+});
+
+describe("moveSector / heroBodyYaw", () => {
+  it("gira el cuerpo lo que falta para que el clip apunte a donde va", () => {
+    expect(moveSector(Math.PI / 4)).toEqual({ dir: "run", yaw: Math.PI / 4 });
+    expect(moveSector((3 * Math.PI) / 4).dir).toBe("runBack");
+    expect(moveSector((3 * Math.PI) / 4).yaw).toBeCloseTo(-Math.PI / 4);
+    expect(moveSector((-3 * Math.PI) / 4).yaw).toBeCloseTo(Math.PI / 4);
+    expect(moveSector(Math.PI / 2)).toEqual({ dir: "runRight", yaw: 0 });
+    expect(moveSector(-Math.PI / 2)).toEqual({ dir: "runLeft", yaw: 0 });
+    expect(moveSector(3 * Math.PI).dir).toBe("runBack"); // se normaliza
+  });
+
+  it("sin giro quieto, atacando, en el aire, esquivando o muerto", () => {
+    const diag = { speed: 5, moveAngle: Math.PI / 4 };
+    expect(heroBodyYaw(hero(diag))).toBeCloseTo(Math.PI / 4);
+    expect(heroBodyYaw(hero({ moveAngle: Math.PI / 4 }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, comboStep: 1, swingTimer: 0.1 }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, airborne: true }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, dodging: true }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, dead: true }))).toBe(0);
   });
 });
 
@@ -219,5 +259,13 @@ describe("SpeedMeter", () => {
     const m = new SpeedMeter();
     expect(m.sample(0, 0, 1 / 60)).toBe(0);
     expect(m.sample(50, 0, 1 / 60)).toBe(0);
+  });
+
+  it("da la dirección del movimiento respecto de la mirada (0 = +Z, π/2 = +X)", () => {
+    const m = new SpeedMeter();
+    for (let i = 0; i <= 60; i++) m.sample(i * 0.05, 0, 1 / 60); // hacia +X
+    expect(m.angleFrom(0)).toBeCloseTo(Math.PI / 2, 2); // mirando a +Z: va a la derecha
+    expect(m.angleFrom(Math.PI / 2)).toBeCloseTo(0, 2); // mirando a +X: va adelante
+    expect(Math.abs(m.angleFrom(-Math.PI / 2))).toBeCloseTo(Math.PI, 2); // mirando a −X: va atrás
   });
 });
