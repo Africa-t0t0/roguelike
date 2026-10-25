@@ -1,6 +1,6 @@
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
-import { CHARACTER_HEIGHT } from "./characterView";
+import { CHARACTER_HEIGHT } from "./legacyCharacterView";
 
 const NUMBER_LIFE_MS = 800;
 const NUMBER_RISE_M = 0.8;

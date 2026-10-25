@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agarre de armas (dev)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0d14; color: #eee; font: 13px system-ui, sans-serif; }
+      #view { position: absolute; inset: 0 18rem 0 0; width: calc(100% - 18rem); height: 100%; display: block; outline: none; }
+      #panel { position: absolute; top: 0; right: 0; bottom: 0; width: 18rem; box-sizing: border-box; padding: 0.75rem;
+        background: #16161f; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+      label { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+      input, select, textarea, button { font: inherit; background: #0d0d14; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 2px 4px; }
+      input[type="number"] { width: 6rem; }
+      textarea { width: 100%; height: 7rem; box-sizing: border-box; }
+      h2 { font-size: 0.9rem; margin: 0.5rem 0 0; color: #aaa; }
+      .hint { color: #888; font-size: 0.75rem; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="panel">
+      <label>Personaje <select id="character"></select></label>
+      <label>Arma <select id="weapon"></select></label>
+      <label>Clip <select id="clip"></select></label>
+      <label>Pausa en <input id="frac" type="range" min="0" max="1" step="0.01" value="0" /></label>
+      <label>Reproducir <input id="playing" type="checkbox" checked /></label>
+      <label>Cámara <select id="cam"><option value="front">frente</option><option value="side">costado</option><option value="hand">mano</option><option value="back">espalda</option></select></label>
+      <h2>Agarre (m, grados, escala)</h2>
+      <label>pos x <input id="px" type="number" step="0.005" /></label>
+      <label>pos y <input id="py" type="number" step="0.005" /></label>
+      <label>pos z <input id="pz" type="number" step="0.005" /></label>
+      <label>rot x° <input id="rx" type="number" step="5" /></label>
+      <label>rot y° <input id="ry" type="number" step="5" /></label>
+      <label>rot z° <input id="rz" type="number" step="5" /></label>
+      <label>escala <input id="sc" type="number" step="0.01" /></label>
+      <div class="hint">La hoja va por +Y del arma; el origen es la guarda. Teclas: Q/A, W/S, E/D mueven x/y/z; Shift = girar.</div>
+      <h2>Copiar valores</h2>
+      <textarea id="out" readonly></textarea>
+    </div>
+    <script type="module" src="./grip.ts"></script>
+  </body>
+</html>

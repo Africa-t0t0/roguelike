@@ -8,7 +8,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { STARTING_WEAPON, MOVESETS, WEAPONS, strikeOf } from "@roguelike/shared";
 import { chooseHeroAnim, SpeedMeter } from "./animState";
 import type { Assets } from "./assets";
-import { CHARACTER_HEIGHT, CharacterView } from "./characterView";
+import { CHARACTER_HEIGHT, LegacyCharacterView as CharacterView } from "./legacyCharacterView";
 
 const LABEL_W = 2;
 const LABEL_H = 0.5;

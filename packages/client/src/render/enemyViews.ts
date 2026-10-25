@@ -11,7 +11,7 @@ import type { EnemySnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import { chooseEnemyAnim, SpeedMeter } from "./animState";
 import type { AssetId, Assets } from "./assets";
-import { CHARACTER_HEIGHT, CharacterView } from "./characterView";
+import { CHARACTER_HEIGHT, LegacyCharacterView as CharacterView } from "./legacyCharacterView";
 import { lerpAngle } from "./interpolation";
 
 const MODELS: Record<EnemyKind, { model: AssetId; weapon: AssetId }> = {
