@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARMED_CHANCE,
   MOVESETS,
   SIM_DT,
   STARTING_WEAPON,
   WEAPONS,
   advanceCombo,
+  enemyAttack,
+  isWeaponTier,
+  weaponDisplayName,
   cancelImpact,
   isWeaponId,
   newComboTimers,
@@ -93,5 +97,44 @@ describe("combo con impacto", () => {
     tryStartSwing(c, "kingslayer-sword");
     expect(c.impactPending).toBe(true);
     expect(c.impactTimer).toBeCloseTo(0.45 * 0.35, 9);
+  });
+});
+
+describe("tiers de arma", () => {
+  it("nombre visible con sufijo concordante", () => {
+    expect(weaponDisplayName("great-sword", 2)).toBe("Mandoble templado");
+    expect(weaponDisplayName("guard-sword", 3)).toBe("Espada de guardia rúnica");
+    expect(weaponDisplayName("kingslayer-sword", 1)).toBe("Espada del Kingslayer oxidada");
+  });
+  it("strikeDamage escala por tier y sin tier queda igual", () => {
+    expect(strikeDamage("great-sword", "warrior", 1, 1, 3)).toBe(Math.round(18 * 1 * 1.7));
+    expect(strikeDamage("great-sword", "warrior", 1, 1)).toBe(18);
+  });
+  it("isWeaponTier", () => {
+    expect(isWeaponTier(1)).toBe(true);
+    expect(isWeaponTier(0)).toBe(false);
+    expect(isWeaponTier(4)).toBe(false);
+    expect(isWeaponTier("2")).toBe(false);
+  });
+});
+
+describe("enemyAttack / ARMED_CHANCE", () => {
+  it("desarmado usa la definición base", () => {
+    expect(enemyAttack("minion", null)).toEqual({ damage: 6, attackRange: 1.2 });
+  });
+  it("brute con mandoble templado", () => {
+    const a = enemyAttack("brute", { weaponId: "great-sword", tier: 2 });
+    expect(a.damage).toBe(Math.round((12 * 18) / 12 * 1.3));
+    expect(a.attackRange).toBeCloseTo(2.25, 9);
+  });
+  it("minion con espada de guardia", () => {
+    const a = enemyAttack("minion", { weaponId: "guard-sword", tier: 1 });
+    expect(a.damage).toBe(5);
+    expect(a.attackRange).toBeCloseTo(1.485, 9);
+  });
+  it("quién va armado", () => {
+    expect(ARMED_CHANCE.mage).toBeNull();
+    expect(ARMED_CHANCE.minion).toEqual({ chance: 0.6, weaponId: "guard-sword" });
+    expect(ARMED_CHANCE.brute).toEqual({ chance: 0.6, weaponId: "great-sword" });
   });
 });

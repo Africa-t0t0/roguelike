@@ -1,4 +1,4 @@
-import { CLASS_DEFS, type ClassId } from "./combat";
+import { CLASS_DEFS, ENEMY_DEFS, type ClassId, type EnemyKind } from "./combat";
 
 export type MovesetId = "one-hand-sword" | "great-sword";
 export type WeaponId = "kingslayer-sword" | "guard-sword" | "great-sword";
@@ -34,6 +34,8 @@ export interface Moveset {
 export interface Weapon {
   id: WeaponId;
   name: string;
+  /** género gramatical del nombre, para concordar el sufijo del tier */
+  gender: "f" | "m";
   movesetId: MovesetId;
   damage: number;
   rangeMult: number;
@@ -84,9 +86,9 @@ export const MOVESETS: Record<MovesetId, Moveset> = {
 };
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
-  "kingslayer-sword": { id: "kingslayer-sword", name: "Espada del Kingslayer", movesetId: "one-hand-sword", damage: 12, rangeMult: 1, arcMult: 1, speedMult: 1 },
-  "guard-sword": { id: "guard-sword", name: "Espada de guardia", movesetId: "one-hand-sword", damage: 10, rangeMult: 0.9, arcMult: 1, speedMult: 1.15 },
-  "great-sword": { id: "great-sword", name: "Mandoble", movesetId: "great-sword", damage: 18, rangeMult: 1, arcMult: 1, speedMult: 1 },
+  "kingslayer-sword": { id: "kingslayer-sword", name: "Espada del Kingslayer", gender: "f", movesetId: "one-hand-sword", damage: 12, rangeMult: 1, arcMult: 1, speedMult: 1 },
+  "guard-sword": { id: "guard-sword", name: "Espada de guardia", gender: "f", movesetId: "one-hand-sword", damage: 10, rangeMult: 0.9, arcMult: 1, speedMult: 1.15 },
+  "great-sword": { id: "great-sword", name: "Mandoble", gender: "m", movesetId: "great-sword", damage: 18, rangeMult: 1, arcMult: 1, speedMult: 1 },
 };
 
 export const STARTING_WEAPON: WeaponId = "kingslayer-sword";
@@ -109,10 +111,51 @@ export function strikeOf(weaponId: WeaponId, step: number): Strike {
   };
 }
 
-export function strikeDamage(weaponId: WeaponId, cls: ClassId, level: number, step: number): number {
+export type WeaponTier = 1 | 2 | 3;
+
+export const TIERS: Record<
+  WeaponTier,
+  { suffix: { f: string; m: string }; damageMult: number; dropChance: number; glow: [number, number, number] | null }
+> = {
+  1: { suffix: { f: "oxidada", m: "oxidado" }, damageMult: 1, dropChance: 0.1, glow: null },
+  2: { suffix: { f: "templada", m: "templado" }, damageMult: 1.3, dropChance: 0.14, glow: [0.35, 0.55, 1.0] },
+  3: { suffix: { f: "rúnica", m: "rúnico" }, damageMult: 1.7, dropChance: 0.18, glow: [0.65, 0.3, 1.0] },
+};
+
+export function isWeaponTier(v: unknown): v is WeaponTier {
+  return v === 1 || v === 2 || v === 3;
+}
+
+/** Nombre visible: "Mandoble templado". */
+export function weaponDisplayName(id: WeaponId, tier: WeaponTier): string {
+  const w = WEAPONS[id];
+  return `${w.name} ${TIERS[tier].suffix[w.gender]}`;
+}
+
+export function strikeDamage(weaponId: WeaponId, cls: ClassId, level: number, step: number, tier: WeaponTier = 1): number {
   const w = WEAPONS[weaponId];
   const base = w.damage + CLASS_DEFS[cls].damagePerLevel * (level - 1);
-  return Math.round(base * MOVESETS[w.movesetId].combo[step - 1]!.damageMult);
+  return Math.round(base * MOVESETS[w.movesetId].combo[step - 1]!.damageMult * TIERS[tier].damageMult);
+}
+
+export type EnemyLoadout = { weaponId: WeaponId; tier: WeaponTier };
+
+/** Probabilidad de que un enemigo nazca armado y con qué arma; el mago nunca. */
+export const ARMED_CHANCE: Record<EnemyKind, { chance: number; weaponId: WeaponId } | null> = {
+  minion: { chance: 0.6, weaponId: "guard-sword" },
+  brute: { chance: 0.6, weaponId: "great-sword" },
+  mage: null,
+};
+
+/** Daño y alcance del ataque de un enemigo, con o sin arma. */
+export function enemyAttack(kind: EnemyKind, loadout: EnemyLoadout | null): { damage: number; attackRange: number } {
+  const def = ENEMY_DEFS[kind];
+  if (!loadout) return { damage: def.damage, attackRange: def.attackRange };
+  const w = WEAPONS[loadout.weaponId];
+  return {
+    damage: Math.round(def.damage * (w.damage / 12) * TIERS[loadout.tier].damageMult),
+    attackRange: Math.max(def.attackRange, 0.75 * strikeOf(loadout.weaponId, 1).range),
+  };
 }
 
 /** Temporizadores del combo; los usan igual el servidor y el `LocalCombo` del cliente. */
