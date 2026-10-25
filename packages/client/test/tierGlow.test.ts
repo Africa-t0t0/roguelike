@@ -6,7 +6,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
 import { TIERS } from "@roguelike/shared";
-import { applyTierGlow } from "../src/render/tierGlow";
+import { applyTierGlow, GLOW_STRENGTH } from "../src/render/tierGlow";
 
 function weapon(scene: Scene, blade: PBRMaterial, hilt: StandardMaterial) {
   const root = new TransformNode("root", scene);
@@ -38,8 +38,8 @@ describe("brillo por tier", () => {
     const w2 = weapon(scene, blade, hilt);
     applyTierGlow(w1.root, 2);
     applyTierGlow(w2.root, 2);
-    // El brillo es el color del tier a media intensidad: la hoja conserva su sombreado.
-    const [r, g, b] = TIERS[2].glow!.map((c) => c * 0.5);
+    // El brillo es el color del tier atenuado: la hoja conserva su sombreado.
+    const [r, g, b] = TIERS[2].glow!.map((c) => c * GLOW_STRENGTH);
     const tinted = w1.a.material as PBRMaterial;
     expect(tinted).not.toBe(blade);
     expect(tinted.emissiveColor.r).toBeCloseTo(r!);
@@ -53,7 +53,7 @@ describe("brillo por tier", () => {
     // Volver a teñir parte del original: tier 3 y de vuelta a 1.
     applyTierGlow(w1.root, 3);
     expect((w1.a.material as PBRMaterial).emissiveColor.asArray().map((c) => Math.round(c * 1000) / 1000)).toEqual(
-      TIERS[3].glow!.map((c) => Math.round(c * 500) / 1000),
+      TIERS[3].glow!.map((c) => Math.round(c * GLOW_STRENGTH * 1000) / 1000),
     );
     applyTierGlow(w1.root, 2);
     expect(w1.a.material).toBe(tinted);
