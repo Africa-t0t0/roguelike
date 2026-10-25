@@ -21,6 +21,8 @@ import {
   TILE_SIZE,
   tileCenter,
   waveGroupSize,
+  ENEMY_DEFS,
+  TIERS,
   type CombatEvent,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
@@ -54,7 +56,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-type FloorMsg = { items: { weaponId: string; x: number; z: number }[] };
+type FloorMsg = { items: { weaponId: string; tier: number; x: number; z: number }[] };
 
 async function join(
   name: string,
@@ -511,8 +513,8 @@ describe("RunRoom: armas", () => {
   const guardAt = starts[MAX_PLAYERS]!;
   const greatAt = starts[MAX_PLAYERS + 1]!;
   const initialFloor = [
-    { weaponId: "guard-sword", x: guardAt.x, z: guardAt.z },
-    { weaponId: "great-sword", x: greatAt.x, z: greatAt.z },
+    { weaponId: "guard-sword", tier: 1, x: guardAt.x, z: guardAt.z },
+    { weaponId: "great-sword", tier: 1, x: greatAt.x, z: greatAt.z },
   ];
   const idle = (seq: number, extra: Partial<ReturnType<typeof attackInput>> = {}) => ({
     ...attackInput(seq, 0, room.state.tick),
@@ -536,6 +538,7 @@ describe("RunRoom: armas", () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
     expect(player("ana").weaponId).toBe("kingslayer-sword");
+    expect(player("ana").weaponTier).toBe(1);
     await floorsUntil(ana.floors, 1);
     expect(ana.floors).toEqual([{ items: initialFloor }]);
     const start = d.rooms[d.startRoomId]!;
@@ -559,7 +562,7 @@ describe("RunRoom: armas", () => {
     expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", comboStep: 0, comboTimer: 0, swingTimer: 0, impactPending: false });
     expect(ana.floors).toHaveLength(2);
     expect(ana.floors[1]).toEqual({
-      items: [initialFloor[0], { weaponId: "kingslayer-sword", x: greatAt.x, z: greatAt.z }],
+      items: [initialFloor[0], { weaponId: "kingslayer-sword", tier: 1, x: greatAt.x, z: greatAt.z }],
     });
     await ticksUntil(() => ana.client.state.players.get("ana")?.weaponId === "great-sword", 5);
   });
@@ -672,6 +675,156 @@ describe("RunRoom: armas", () => {
     expect(dmgIdx).toBeGreaterThan(swingIdx);
     const minTicks = Math.ceil((strike.impactAt * strike.duration) / SIM_DT) - 1;
     expect(seen[dmgIdx]!.tick - seen[swingIdx]!.tick).toBeGreaterThanOrEqual(minTicks);
+  });
+});
+
+describe("RunRoom: orbes y botín", () => {
+  const idle = (seq: number, extra: Partial<ReturnType<typeof attackInput>> = {}) => ({
+    ...attackInput(seq, 0, room.state.tick),
+    attack: false,
+    ...extra,
+  });
+  const sides = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
+
+  /**
+   * Lleva a `key` a una sala de combate, deja a un enemigo con 1 de vida (los demás con mucha) y lo
+   * mata a espadazos. `prepare` puede ajustar al blanco antes. Devuelve el enemigo muerto y el próximo seq.
+   */
+  async function killOne(
+    key: string,
+    client: ClientRoom,
+    prepare: (e: { loadout: unknown }) => void = () => {},
+    seq0 = 1,
+  ) {
+    const { d, cr } = combatRoom();
+    teleport(key, roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room["enemySystem"].enemies.length >= 4, 5);
+    const sys = room["enemySystem"];
+    const target = sys.enemies.find((e) => sides.some(([dx, dz]) => isWalkableTile(d, tileOf(e.x) + dx, tileOf(e.z) + dz)))!;
+    for (const e of sys.enemies) e.hp = e.maxHp = 9999;
+    target.hp = 1;
+    prepare(target);
+    let seq = seq0;
+    for (let attempt = 0; attempt < 5 && target.ai !== "dead"; attempt++) {
+      const [dx, dz] = sides.find(([dx, dz]) => isWalkableTile(d, tileOf(target.x) + dx, tileOf(target.z) + dz))!;
+      teleport(key, tileCenter(tileOf(target.x) + dx, tileOf(target.z) + dz));
+      await room.waitForNextTimestep();
+      const me = record(key).kinematic;
+      const facing = Math.atan2(target.x - me.x, target.z - me.z);
+      client.send(MSG.input, attackInput(seq++, facing, room.state.tick));
+      for (let j = 0; j < 11; j++) client.send(MSG.input, { ...attackInput(seq++, facing, room.state.tick), attack: false });
+      const last = seq - 1;
+      await ticksUntil(() => player(key).lastSeq === last, 10);
+    }
+    expect(target.ai).toBe("dead");
+    return { target, seq };
+  }
+
+  it("matar no sube la xp en el impacto: deja orbes y la xp llega al pararse encima", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    collect(ana.client);
+    // Orbes congelados mientras se mata: cualquier xp ganada vendría del impacto.
+    const orbs = room["orbs"];
+    const stepSpy = vi.spyOn(orbs, "step").mockReturnValue(0);
+    const { target } = await killOne("ana", ana.client);
+    await room.waitForNextTimestep();
+    expect(room.state.xp).toBe(0);
+    expect(room.state.level).toBe(1);
+    const xp = ENEMY_DEFS[target.kind].xp;
+    expect(room.state.orbs.size).toBeGreaterThan(0);
+    expect([...room.state.orbs.values()].reduce((s, o) => s + o.value, 0)).toBe(xp);
+    await ticksUntil(() => ana.client.state.orbs?.size === room.state.orbs.size, 10);
+
+    stepSpy.mockRestore();
+    teleport("ana", { x: target.x, z: target.z });
+    await ticksUntil(() => room.state.orbs.size === 0, 30);
+    expect(room.state.xp).toBe(xp);
+  });
+
+  it("un arma soltada llega a cada conectado con su tier, y cada uno la toma sin tocar la lista del otro", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await Promise.all([ana.welcome, beto.welcome]);
+    collect(ana.client);
+    collect(beto.client);
+    await ticksUntil(() => ana.floors.length >= 1 && beto.floors.length >= 1, 10);
+    // Drop forzado: el tier 2 suelta siempre durante esta prueba (el sorteo real sigue en EnemySystem.damage).
+    const tier2 = TIERS[2] as { dropChance: number };
+    const chance = tier2.dropChance;
+    tier2.dropChance = 1;
+    let target;
+    let seq;
+    try {
+      ({ target, seq } = await killOne("ana", ana.client, (e) => {
+        e.loadout = { weaponId: "great-sword", tier: 2 };
+      }));
+    } finally {
+      tier2.dropChance = chance;
+    }
+    const dropped = { weaponId: "great-sword", tier: 2, x: target.x, z: target.z };
+    await ticksUntil(() => ana.floors.length >= 2 && beto.floors.length >= 2, 10);
+    expect(ana.floors.at(-1)!.items).toEqual([...ana.floors[0]!.items, dropped]);
+    expect(beto.floors.at(-1)!.items).toEqual([...beto.floors[0]!.items, dropped]);
+
+    // Ana la toma: deja su Kingslayer tier 1 en su lugar; la lista de Beto no cambia.
+    teleport("ana", dropped);
+    ana.client.send(MSG.input, idle(seq, { interact: true }));
+    await ticksUntil(() => player("ana").lastSeq === seq, 5);
+    expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", weaponTier: 2 });
+    expect(player("ana").weaponTier).toBe(2);
+    expect(record("ana").floorWeapons.at(-1)).toEqual({ ...dropped, weaponId: "kingslayer-sword", tier: 1 });
+    expect(record("beto").floorWeapons.at(-1)).toEqual(dropped);
+
+    // Beto también puede tomar su copia.
+    teleport("beto", dropped);
+    beto.client.send(MSG.input, idle(1, { interact: true }));
+    await ticksUntil(() => player("beto").lastSeq === 1, 5);
+    expect(player("beto").weaponId).toBe("great-sword");
+    expect(player("beto").weaponTier).toBe(2);
+    expect(record("ana").floorWeapons.at(-1)).toEqual({ ...dropped, weaponId: "kingslayer-sword", tier: 1 });
+    await ticksUntil(() => beto.client.state.players.get("beto")?.weaponTier === 2, 5);
+  });
+
+  it("los enemigos llevan su arma y su tier en el estado (\"\" y 0 si van desarmados)", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room.state.enemies.size >= 4, 5);
+    for (const e of room["enemySystem"].enemies) {
+      const es = room.state.enemies.get(e.id)!;
+      expect(es.weaponId).toBe(e.loadout?.weaponId ?? "");
+      expect(es.weaponTier).toBe(e.loadout?.tier ?? 0);
+    }
+  });
+
+  it("Foco 4: al volver por nombre conserva el tier del arma, el de sus armas del suelo, el reloj y los orbes", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    const r = record("ana");
+    r.combat.weaponId = "great-sword";
+    r.combat.weaponTier = 3;
+    r.floorWeapons[0] = { ...r.floorWeapons[0]!, tier: 2 };
+    const floor = r.floorWeapons.map((f) => ({ ...f }));
+    room["orbs"].spawn(1000, 1000, 7, room.state.tick);
+    await ticksUntil(() => player("ana").weaponTier === 3 && room.state.orbs.size > 0, 5);
+    const orbCount = room.state.orbs.size;
+
+    await ana.client.leave();
+    await ticksUntil(() => !room.state.players.has("ana"));
+    const back = await join("Ana", "t-otro");
+    await back.welcome;
+    expect(player("ana").weaponId).toBe("great-sword");
+    expect(player("ana").weaponTier).toBe(3);
+    await ticksUntil(() => back.floors.length >= 1, 10);
+    expect(back.floors[0]!.items).toEqual(floor);
+    await ticksUntil(
+      () => back.client.state.players.get("ana")?.weaponTier === 3 && back.client.state.orbs?.size === orbCount,
+      10,
+    );
+    expect(back.client.state.floorTime).toBeGreaterThan(0);
   });
 });
 

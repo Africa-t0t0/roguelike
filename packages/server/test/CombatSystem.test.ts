@@ -220,7 +220,7 @@ describe("impacto", () => {
     expect(r.impact).toEqual({
       step: 1,
       hits: [{ enemyId: e.id, amount: 12, killed: false, x: 0, z: 1 }],
-      xpGained: 0,
+      kills: [],
     });
     expect(r.r.damage).toBe(0);
     expect(e.hp).toBe(88);
@@ -249,14 +249,30 @@ describe("impacto", () => {
     expect(back.hp).toBe(100);
   });
 
-  it("las muertes suman xp a xpGained sin llamar a grantXp", () => {
+  it("las muertes salen en kills (posición, xp y drop) sin llamar a grantXp", () => {
     const { sys, e } = world(0, 1, 5);
+    e.loadout = null;
     const cs = new CombatSystem();
     const c = newCombatState("warrior", 1);
     const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
     expect(impact!.hits[0]!.killed).toBe(true);
-    expect(impact!.xpGained).toBe(ENEMY_DEFS[e.kind].xp);
+    expect(impact!.kills).toEqual([{ x: 0, z: 1, xp: ENEMY_DEFS[e.kind].xp, drop: null }]);
     expect(cs.xp).toBe(0);
+  });
+
+  it("newCombatState lleva tier 1 por defecto y acepta otro", () => {
+    expect(newCombatState("warrior", 1).weaponTier).toBe(1);
+    expect(newCombatState("warrior", 1, "great-sword", 3).weaponTier).toBe(3);
+  });
+
+  it("un impacto de la Kingslayer tier 3 hace round(12 × 1.7) = 20", () => {
+    const { sys, e } = world(0, 1, 100);
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1, "kingslayer-sword", 3);
+    const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
+    expect(Math.round(12 * 1.7)).toBe(20);
+    expect(impact!.hits[0]!.amount).toBe(20);
+    expect(e.hp).toBe(80);
   });
 
   it("el daño usa el nivel del grupo en el momento del impacto", () => {

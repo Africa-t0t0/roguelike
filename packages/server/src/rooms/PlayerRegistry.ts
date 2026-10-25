@@ -6,12 +6,14 @@ import {
   type KinematicState,
   type PlayerInput,
   type WeaponId,
+  type WeaponTier,
 } from "@roguelike/shared";
 import { newCombatState, type CombatState } from "../sim/CombatSystem";
 
 /** Arma del suelo propia de un jugador (cada uno ve y toma solo las suyas). */
 export interface FloorWeapon {
   weaponId: WeaponId;
+  tier: WeaponTier;
   x: number;
   z: number;
 }
@@ -25,8 +27,8 @@ export interface PlayerRecord {
   lastSeq: number;
   inputQueue: PlayerInput[];
   /**
-   * Se crea una sola vez; attach() (reconnect/takeover) ni cura ni revive ni cambia el arma: solo vacía los
-   * golpes pendientes y reinicia el combo (ningún impacto sobrevive a una desconexión).
+   * Se crea una sola vez; attach() (reconnect/takeover) ni cura ni revive ni cambia el arma ni su tier: solo
+   * vacía los golpes pendientes y reinicia el combo (ningún impacto sobrevive a una desconexión).
    */
   combat: CombatState;
   /** Se crean con el registro; reconnect y takeover las conservan. */

@@ -17,9 +17,11 @@ import {
   xpToNext,
   type ClassId,
   type ComboTimers,
+  type EnemyLoadout,
   type KinematicState,
   type PlayerInput,
   type WeaponId,
+  type WeaponTier,
 } from "@roguelike/shared";
 import type { EnemyHit, EnemySystem } from "./EnemySystem";
 import type { PositionHistory } from "./PositionHistory";
@@ -34,6 +36,7 @@ export interface PendingHit {
 export interface CombatState extends ComboTimers {
   cls: ClassId;
   weaponId: WeaponId;
+  weaponTier: WeaponTier;
   /** dirección del clic que empezó el swing en curso; el impacto la usa aunque el jugador gire */
   swingFacing: number;
   hp: number;
@@ -44,11 +47,17 @@ export interface CombatState extends ComboTimers {
   pendingHits: PendingHit[];
 }
 
-export function newCombatState(cls: ClassId, level: number, weaponId: WeaponId = STARTING_WEAPON): CombatState {
+export function newCombatState(
+  cls: ClassId,
+  level: number,
+  weaponId: WeaponId = STARTING_WEAPON,
+  tier: WeaponTier = 1,
+): CombatState {
   const maxHp = playerStats(cls, level).maxHp;
   return {
     cls,
     weaponId,
+    weaponTier: tier,
     swingFacing: 0,
     hp: maxHp,
     maxHp,
@@ -68,14 +77,15 @@ export interface AttackResult {
 export interface ImpactResult {
   step: number;
   hits: { enemyId: string; amount: number; killed: boolean; x: number; z: number }[];
-  xpGained: number;
+  /** enemigos muertos por este impacto: dónde cayeron, su xp (para los orbes) y el arma que sueltan */
+  kills: { x: number; z: number; xp: number; drop: EnemyLoadout | null }[];
 }
 
 export interface InputResult {
   /** daño de golpes enemigos aplicado en este input */
   damage: number;
   died: boolean;
-  /** impacto del swing propio que venció en este input (no llama a grantXp: el llamador aplica `xpGained`) */
+  /** impacto del swing propio que venció en este input (no da xp: el llamador crea los orbes de `kills`) */
   impact: ImpactResult | null;
 }
 
@@ -135,9 +145,9 @@ export class CombatSystem {
   ): ImpactResult {
     const strike = strikeOf(c.weaponId, step);
     const t = Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(input.viewTick)));
-    const amount = strikeDamage(c.weaponId, c.cls, this.level, step);
+    const amount = strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier);
     const origin = { x: k.x, z: k.z, facing: c.swingFacing };
-    const result: ImpactResult = { step, hits: [], xpGained: 0 };
+    const result: ImpactResult = { step, hits: [], kills: [] };
 
     // Se copia la lista: damage() puede cambiar el estado interno.
     for (const e of [...enemies.enemies]) {
@@ -146,7 +156,7 @@ export class CombatSystem {
       if (!inArc(origin, { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius }, strike.range, strike.arcDeg)) continue;
       const r = enemies.damage(e.id, amount);
       result.hits.push({ enemyId: e.id, amount, killed: r.killed, x: e.x, z: e.z });
-      result.xpGained += r.xp;
+      if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
     }
     return result;
   }

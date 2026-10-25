@@ -129,13 +129,13 @@ describe("PlayerRegistry", () => {
     const seen: string[] = [];
     const floor = (equipped: WeaponId) => {
       seen.push(equipped);
-      return [{ weaponId: "great-sword" as const, x: 3, z: 5 }];
+      return [{ weaponId: "great-sword" as const, tier: 2 as const, x: 3, z: 5 }];
     };
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn, undefined, floor);
     if (!first.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", x: 3, z: 5 }]);
-    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", x: 3, z: 5 };
+    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", tier: 2, x: 3, z: 5 }]);
+    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5 };
 
     const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn, undefined, floor);
     if (!taken.ok) throw new Error();
@@ -143,7 +143,7 @@ describe("PlayerRegistry", () => {
     const back = r.join({ name: "Jorge", token: "x", sessionId: "s3" }, spawn, undefined, floor);
     if (!back.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", x: 3, z: 5 }]);
+    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5 }]);
   });
 
   it("sin fábrica, un registro nuevo no tiene armas del suelo", () => {

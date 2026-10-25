@@ -32,6 +32,7 @@ import {
 } from "@roguelike/shared";
 import { CombatSystem, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
+import { OrbSystem } from "../sim/OrbSystem";
 import { PositionHistory } from "../sim/PositionHistory";
 import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
@@ -45,6 +46,7 @@ const ALLY_SPAWN_RADIUS = 2;
 
 const ENEMY_RNG_SALT = 0x5eed;
 const WAVE_RNG_SALT = 0x7a3e;
+const ORB_RNG_SALT = 0x0b5e;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -68,6 +70,7 @@ export class RunRoom extends Room<{ state: RunState }> {
   private emptyTimer: { clear(): void } | undefined;
   private enemySystem!: EnemySystem;
   private director!: WaveDirector;
+  private orbs!: OrbSystem;
   private floorTime = 0;
   private readonly history = new PositionHistory();
   private readonly combat = new CombatSystem();
@@ -84,9 +87,10 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.dungeon = generateDungeon(seed, 1);
     this.enemySystem = new EnemySystem(this.dungeon, createRng(seed ^ ENEMY_RNG_SALT));
     this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
+    this.orbs = new OrbSystem(createRng(seed ^ ORB_RNG_SALT));
     this.floorTime = floorTimeStart;
     this.state = new RunState({ seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart });
-    syncWorld(this.state, [], [], this.combat);
+    syncWorld(this.state, [], [], this.combat, []);
 
     this.autoDispose = false;
     this.setPatchRate(PATCH_RATE_MS);
@@ -181,7 +185,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         const res = this.combat.onInputProcessed(
           record.combat, record.kinematic, input, this.state.tick, this.enemySystem, this.history,
         );
-        if (res.impact) this.impact(record, res.impact, allStates);
+        if (res.impact) this.impact(record, res.impact);
         if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
         // Antes del ataque de este input: con un swing en curso no se cambia de arma.
         if (input.interact && !record.combat.dead && record.combat.swingTimer === 0) this.tryPickup(record);
@@ -206,6 +210,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (connected.length > 0) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
+    // Orbes: los atraen y recogen los vivos; la xp es del grupo y sube la vida máxima de todos los registros.
+    for (const level of this.combat.grantXp(allStates, this.orbs.step(alive, SIM_DT))) this.emit({ type: "levelUp", level });
 
     // 5. Golpes vencidos, muertes y reapariciones (los desconectados quedan congelados).
     const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
@@ -225,11 +231,14 @@ export class RunRoom extends Room<{ state: RunState }> {
       if (ps) syncPlayer(ps, record);
     }
     this.state.floorTime = this.floorTime;
-    syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat);
+    syncWorld(this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat, this.orbs.orbs);
   }
 
-  /** Daño contra enemigos, xp y subidas de nivel: llegan en el impacto del swing, no en el clic. */
-  private impact(record: PlayerRecord, res: ImpactResult, allStates: Map<string, CombatState>): void {
+  /**
+   * Daño contra enemigos, orbes y armas soltadas: llegan en el impacto del swing, no en el clic.
+   * Matar no da xp: deja orbes que hay que recoger.
+   */
+  private impact(record: PlayerRecord, res: ImpactResult): void {
     for (const h of res.hits) {
       this.emit({
         type: "damage",
@@ -241,8 +250,19 @@ export class RunRoom extends Room<{ state: RunState }> {
         sourceKey: record.key,
       });
     }
-    // Todos los registros (también los desconectados) suben su vida máxima con el nivel del grupo.
-    for (const level of this.combat.grantXp(allStates, res.xpGained)) this.emit({ type: "levelUp", level });
+    for (const k of res.kills) {
+      this.orbs.spawn(k.x, k.z, k.xp, this.state.tick);
+      if (k.drop) this.dropWeapon({ ...k.drop, x: k.x, z: k.z });
+    }
+  }
+
+  /** Cada jugador conectado recibe su propia copia del arma soltada y se le reenvía su lista. */
+  private dropWeapon(item: FloorWeapon): void {
+    for (const r of this.registry.connected()) {
+      r.floorWeapons.push({ ...item });
+      const client = this.clients.find((c) => c.sessionId === r.sessionId);
+      if (client) this.sendFloorWeapons(client, r);
+    }
   }
 
   /**
@@ -253,14 +273,16 @@ export class RunRoom extends Room<{ state: RunState }> {
     const ids = (Object.keys(WEAPONS) as WeaponId[]).filter((id) => id !== equipped);
     const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + ids.length).slice(MAX_PLAYERS);
     if (points.length < ids.length) throw new Error("la sala inicial no tiene sitio para las armas del suelo");
-    return ids.map((weaponId, i) => ({ weaponId, x: points[i]!.x, z: points[i]!.z }));
+    return ids.map((weaponId, i) => ({ weaponId, tier: 1, x: points[i]!.x, z: points[i]!.z }));
   }
 
   private sendFloorWeapons(client: Client, record: PlayerRecord): void {
-    client.send(MSG.floorWeapons, { items: record.floorWeapons.map(({ weaponId, x, z }) => ({ weaponId, x, z })) });
+    client.send(MSG.floorWeapons, {
+      items: record.floorWeapons.map(({ weaponId, tier, x, z }) => ({ weaponId, tier, x, z })),
+    });
   }
 
-  /** Intercambia el arma equipada por la propia del suelo más cercana a ≤ PICKUP_RANGE, si la hay. */
+  /** Intercambia el arma equipada (con su tier) por la propia del suelo más cercana a ≤ PICKUP_RANGE, si la hay. */
   private tryPickup(record: PlayerRecord): void {
     const { x, z } = record.kinematic;
     let best = -1;
@@ -271,8 +293,9 @@ export class RunRoom extends Room<{ state: RunState }> {
     });
     if (best === -1) return;
     const taken = record.floorWeapons[best]!;
-    record.floorWeapons[best] = { weaponId: record.combat.weaponId, x: taken.x, z: taken.z };
+    record.floorWeapons[best] = { weaponId: record.combat.weaponId, tier: record.combat.weaponTier, x: taken.x, z: taken.z };
     record.combat.weaponId = taken.weaponId;
+    record.combat.weaponTier = taken.tier;
     Object.assign(record.combat, newComboTimers());
     const client = this.clients.find((c) => c.sessionId === record.sessionId);
     if (client) this.sendFloorWeapons(client, record);
