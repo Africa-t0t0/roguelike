@@ -3,6 +3,7 @@ import {
   createRng,
   FlowField,
   generateDungeon,
+  hasLineOfSight,
   maxLiveEnemies,
   roomSpawnPoints,
   SIM_DT,
@@ -140,6 +141,50 @@ describe("WaveDirector.pickSpots", () => {
       const d = flow.distance(tileOf(s.x), tileOf(s.z));
       expect(d).toBeGreaterThanOrEqual(WAVE_SPAWN_FALLBACK_MIN);
       expect(d).toBeLessThan(WAVE_SPAWN_BAND.min);
+    }
+  });
+
+  it("nunca elige una casilla a la vista de un jugador vivo, aunque esté en un pasillo largo y recto", () => {
+    // Pasillo recto de 3 casillas de ancho (z 1..3, x 0..39) con dos cuartos laterales fuera de la vista,
+    // unidos por una puerta de una casilla.
+    const width = 40;
+    const height = 12;
+    const tiles = new Uint8Array(width * height);
+    const fill = (x0: number, z0: number, x1: number, z1: number) => {
+      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) tiles[z * width + x] = 1;
+    };
+    fill(0, 1, 39, 3);
+    fill(16, 4, 16, 4);
+    fill(12, 5, 20, 10);
+    fill(30, 4, 30, 4);
+    fill(26, 5, 34, 10);
+    const dungeon: Dungeon = { seed: 1, floor: 1, width, height, tiles, rooms: [], startRoomId: 0, bossRoomId: 0 };
+    const player: SimPlayer = { key: "a", x: 1.5 * TILE_SIZE, z: 2.5 * TILE_SIZE, alive: true };
+    const flow = flowFor(dungeon, [player]);
+    for (let seed = 1; seed <= 5; seed++) {
+      const spots = new WaveDirector(dungeon, createRng(seed)).pickSpots(6, [player], flow);
+      expect(spots).toHaveLength(6);
+      for (const s of spots) expect(hasLineOfSight(dungeon, player.x, player.z, s.x, s.z, 0)).toBe(false);
+    }
+  });
+
+  it("el respaldo también descarta las casillas a la vista", () => {
+    // Pasillo recto corto (todo bajo la banda) con un nicho lateral escondido al fondo:
+    // respaldo = (6,1) a la vista y (5,2), (6,2) escondidas.
+    const width = 7;
+    const height = 3;
+    const tiles = new Uint8Array(width * height);
+    for (let x = 0; x < width; x++) tiles[1 * width + x] = 1;
+    tiles[2 * width + 5] = 1;
+    tiles[2 * width + 6] = 1;
+    const dungeon: Dungeon = { seed: 1, floor: 1, width, height, tiles, rooms: [], startRoomId: 0, bossRoomId: 0 };
+    const player: SimPlayer = { key: "a", x: 0.5 * TILE_SIZE, z: 1.5 * TILE_SIZE, alive: true };
+    const flow = flowFor(dungeon, [player]);
+    const spots = new WaveDirector(dungeon, createRng(3)).pickSpots(3, [player], flow);
+    expect(spots).toHaveLength(2);
+    for (const s of spots) {
+      expect(flow.distance(tileOf(s.x), tileOf(s.z))).toBeLessThan(WAVE_SPAWN_BAND.min);
+      expect(hasLineOfSight(dungeon, player.x, player.z, s.x, s.z, 0)).toBe(false);
     }
   });
 

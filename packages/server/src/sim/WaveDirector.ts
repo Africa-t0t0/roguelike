@@ -1,5 +1,6 @@
 import {
   FlowField,
+  hasLineOfSight,
   isWalkableTile,
   maxLiveEnemies,
   tileCenter,
@@ -50,8 +51,9 @@ export class WaveDirector {
   }
 
   /**
-   * Casillas a 8-30 pasos del jugador vivo más cercano y fuera de toda sala con un jugador vivo.
-   * Si no hay, las más lejanas con distancia ≥ 6; si tampoco, `[]` con un aviso.
+   * Casillas a 8-30 pasos del jugador vivo más cercano, fuera de toda sala con un jugador vivo y fuera de
+   * la vista de todos ellos. Si no hay, las más lejanas con distancia ≥ 6 (también ocultas); si tampoco,
+   * `[]` con un aviso.
    */
   pickSpots(n: number, alive: readonly SimPlayer[], flow: FlowField): { x: number; z: number }[] {
     const occupied = this.dungeon.rooms.filter((r) =>
@@ -71,19 +73,30 @@ export class WaveDirector {
       }
     }
 
-    let picked: Candidate[];
-    if (band.length > 0) {
-      this.shuffle(band);
-      picked = band.slice(0, n);
-    } else if (far.length > 0) {
+    this.shuffle(band);
+    let picked = this.hidden(band, n, alive);
+    if (picked.length === 0) {
       // Respaldo: las más lejanas (desempate por posición, para ser determinista).
       far.sort((a, b) => b.d - a.d || a.tz - b.tz || a.tx - b.tx);
-      picked = far.slice(0, n);
-    } else {
+      picked = this.hidden(far, n, alive);
+    }
+    if (picked.length === 0) {
       console.warn("WaveDirector: no hay casillas donde aparecer; se salta el grupo");
       return [];
     }
-    return picked.map((c) => tileCenter(c.tx, c.tz));
+    return picked;
+  }
+
+  /** Centros de las primeras `n` casillas (en orden) que ningún jugador vivo ve; para al llegar a `n`. */
+  private hidden(cands: readonly Candidate[], n: number, alive: readonly SimPlayer[]): { x: number; z: number }[] {
+    const out: { x: number; z: number }[] = [];
+    for (const c of cands) {
+      if (out.length >= n) break;
+      const p = tileCenter(c.tx, c.tz);
+      if (alive.some((pl) => hasLineOfSight(this.dungeon, pl.x, pl.z, p.x, p.z, 0))) continue;
+      out.push(p);
+    }
+    return out;
   }
 
   private shuffle<T>(arr: T[]): void {

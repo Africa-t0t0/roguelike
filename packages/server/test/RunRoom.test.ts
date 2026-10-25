@@ -742,6 +742,52 @@ describe("RunRoom: orbes y botín", () => {
     expect(room.state.xp).toBe(xp);
   });
 
+  it("un solo impacto que mata a varios deja los orbes de todos y suman su xp", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    collect(ana.client);
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room["enemySystem"].enemies.length >= 4, 5);
+    const sys = room["enemySystem"];
+    // Enemigos quietos y orbes congelados: solo cuenta lo que deja el impacto.
+    vi.spyOn(sys, "step").mockReturnValue([]);
+    vi.spyOn(room["orbs"], "step").mockReturnValue(0);
+    const kills: number[] = [];
+    const impact = room["impact"].bind(room);
+    vi.spyOn(room as unknown as { impact: typeof impact }, "impact").mockImplementation((r, res) => {
+      if (res.kills.length > 0) kills.push(res.kills.length);
+      impact(r, res);
+    });
+
+    // Ana en el centro de la sala mirando a +x; tres enemigos con 1 de vida en abanico frente a ella.
+    const c = tileCenter(cr.x + Math.floor(cr.w / 2), cr.z + Math.floor(cr.h / 2));
+    teleport("ana", c);
+    const [far, ...victims] = sys.enemies.slice(0, 4);
+    far!.hp = far!.maxHp = 9999;
+    far!.x = c.x - 6;
+    far!.z = c.z;
+    victims.forEach((e, i) => {
+      const a = Math.PI / 2 + ((i - 1) * Math.PI) / 4;
+      e.hp = 1;
+      e.x = c.x + 1.6 * Math.sin(a);
+      e.z = c.z + 1.6 * Math.cos(a);
+    });
+    await room.waitForNextTimestep();
+    let seq = 1;
+    ana.client.send(MSG.input, attackInput(seq++, Math.PI / 2, room.state.tick));
+    for (let j = 0; j < 11; j++) ana.client.send(MSG.input, { ...attackInput(seq++, Math.PI / 2, room.state.tick), attack: false });
+    await ticksUntil(() => player("ana").lastSeq === seq - 1, 10);
+    await room.waitForNextTimestep();
+
+    for (const e of victims) expect(e.ai).toBe("dead");
+    expect(kills).toEqual([victims.length]);
+    const xp = victims.reduce((s, e) => s + ENEMY_DEFS[e.kind].xp, 0);
+    expect(room.state.orbs.size).toBeGreaterThanOrEqual(victims.length);
+    expect([...room.state.orbs.values()].reduce((s, o) => s + o.value, 0)).toBe(xp);
+    expect(room.state.xp).toBe(0);
+  });
+
   it("un arma soltada llega a cada conectado con su tier, y cada uno la toma sin tocar la lista del otro", async () => {
     const ana = await join("Ana", "t-ana");
     const beto = await join("Beto", "t-beto");
