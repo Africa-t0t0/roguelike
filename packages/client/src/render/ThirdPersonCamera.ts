@@ -19,8 +19,13 @@ export class ThirdPersonCamera {
   yaw = 0;
   pitch = DEFAULT_PITCH;
   readonly camera: TargetCamera;
+  /** false mientras un panel (p. ej. el de cartas) necesita el puntero libre: el clic no lo captura. */
+  pointerLockAllowed = true;
   // requestPointerLock puede rechazar (p. ej. clic justo después de soltar con Esc): se reintenta al próximo clic.
-  private readonly onClick = () => void Promise.resolve(this.canvas.requestPointerLock()).catch(() => undefined);
+  private readonly onClick = () => {
+    if (!this.pointerLockAllowed) return;
+    void Promise.resolve(this.canvas.requestPointerLock()).catch(() => undefined);
+  };
   private readonly onMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas) return;
     this.yaw += e.movementX * SENSITIVITY;

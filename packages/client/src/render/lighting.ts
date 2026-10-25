@@ -139,7 +139,7 @@ export function createTorches(scene: Scene, dungeon: Dungeon) {
   });
 
   return {
-    /** (x, z): posición dibujada del jugador propio; `nowMs` en el reloj de `performance.now()`. */
+    /** (x, z): posición dibujada del jugador propio; `nowMs` en el reloj de juego (quieto en la pausa). */
     update(x: number, z: number, nowMs: number): void {
       const t = nowMs / 1000;
       player.position.set(x, L.playerTorch.height, z);

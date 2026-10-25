@@ -1,12 +1,14 @@
 import { Client, type Room } from "@colyseus/sdk";
 import {
   MSG,
+  STAT_CARDS,
   PROTOCOL_VERSION,
   STARTING_WEAPON,
   TAKEOVER_CLOSE_CODE,
   isWeaponId,
   isWeaponTier,
   type AbilityId,
+  type CardOffer,
   type CombatEvent,
   type EnemyKind,
   type JoinOptions,
@@ -15,6 +17,7 @@ import {
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
+import type { LevelChoice } from "../ui/cardPanel";
 import { isAbilityId, type AbilitySlotView } from "./LocalAbility";
 import { generateToken } from "./token";
 import { LagSimulator, type LagConfig } from "./LagSimulator";
@@ -127,6 +130,33 @@ export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
   return out;
 }
 
+function parseCard(raw: unknown): CardOffer | undefined {
+  const c = raw as { kind?: unknown; id?: unknown; rank?: unknown } | null;
+  if (c?.kind === "stat" && typeof c.id === "string" && Object.hasOwn(STAT_CARDS, c.id)) {
+    return { kind: "stat", id: c.id as keyof typeof STAT_CARDS };
+  }
+  if (c?.kind === "ability" && isAbilityId(c.id) && (c.rank === 1 || c.rank === 2 || c.rank === 3)) {
+    return { kind: "ability", id: c.id, rank: c.rank };
+  }
+  return undefined;
+}
+
+/** Valida el mensaje `levelChoice` (`{ offerId, cards, index, total, deadlineS }`); undefined si no encaja. */
+export function parseLevelChoice(msg: unknown): (LevelChoice & { offerId: number }) | undefined {
+  const m = msg as { offerId?: unknown; cards?: unknown; index?: unknown; total?: unknown; deadlineS?: unknown } | null;
+  if (!m || !Number.isFinite(m.offerId) || !Array.isArray(m.cards) || m.cards.length === 0) return undefined;
+  if (!Number.isFinite(m.index) || !Number.isFinite(m.total) || !Number.isFinite(m.deadlineS)) return undefined;
+  const cards = m.cards.map(parseCard);
+  if (cards.some((c) => !c)) return undefined;
+  return {
+    offerId: m.offerId as number,
+    cards: cards as CardOffer[],
+    index: m.index as number,
+    total: m.total as number,
+    deadlineS: m.deadlineS as number,
+  };
+}
+
 /** `takeover`: otra pestaña tomó el control del jugador. `lost`: cualquier otro corte no pedido. */
 export type DisconnectReason = "takeover" | "lost";
 
@@ -141,6 +171,14 @@ export interface GameConnection {
   onCombat(cb: (event: CombatEvent) => void): void;
   /** Armas del suelo propias; se entrega enseguida la última lista recibida, si ya llegó. */
   onFloorWeapons(cb: (items: FloorWeapon[]) => void): void;
+  /**
+   * Elección de carta abierta para este jugador (pausa del grupo, sin pausa, o reenviada tras un takeover). Si
+   * llegó antes de registrar el manejador se entrega enseguida (si no venció), con `deadlineS` descontando lo
+   * ya pasado.
+   */
+  onLevelChoice(cb: (choice: LevelChoice) => void): void;
+  /** Elige la carta `index` de la última oferta recibida (el servidor ignora una oferta vieja). */
+  chooseCard(index: number): void;
   onDisconnect(cb: (reason: DisconnectReason) => void): void;
   leave(): void;
 }
@@ -298,6 +336,9 @@ export async function connect(opts: {
   let floorCb: ((items: FloorWeapon[]) => void) | undefined;
   let lastFloor: FloorWeapon[] | undefined; // llega justo tras `welcome`, antes de que haya manejador
   let disconnectCb: ((reason: DisconnectReason) => void) | undefined;
+  let choiceCb: ((choice: LevelChoice) => void) | undefined;
+  // La elección sin pausa de quien vuelve llega justo tras `welcome`, mientras se cargan los modelos.
+  let lastChoice: { choice: LevelChoice & { offerId: number }; receivedAt: number } | undefined;
 
   // Antes de cualquier otro await: `welcome` llega justo después del estado inicial (y tras él las armas
   // del suelo), y los eventos de combate pueden llegar en cualquier momento (sin manejador el SDK avisa
@@ -313,6 +354,15 @@ export async function connect(opts: {
       if (closed) return;
       lastFloor = items;
       floorCb?.(items);
+    });
+  });
+  room.onMessage(MSG.levelChoice, (msg: unknown) => {
+    const choice = parseLevelChoice(msg);
+    if (!choice) return;
+    lag.inbound(() => {
+      if (closed) return;
+      lastChoice = { choice, receivedAt: performance.now() };
+      choiceCb?.(choice);
     });
   });
   const welcome = new Promise<string>((resolve, reject) => {
@@ -370,6 +420,21 @@ export async function connect(opts: {
     onFloorWeapons(cb) {
       floorCb = cb;
       if (lastFloor) cb(lastFloor);
+    },
+    onLevelChoice(cb) {
+      choiceCb = cb;
+      if (!lastChoice) return;
+      const { choice, receivedAt } = lastChoice;
+      // Vencida ya se resolvió en el servidor (carta al azar): no se muestra.
+      const deadlineS = choice.deadlineS - (performance.now() - receivedAt) / 1000;
+      if (deadlineS > 0) cb({ ...choice, deadlineS });
+    },
+    chooseCard(index) {
+      const offerId = lastChoice?.choice.offerId;
+      if (offerId === undefined) return;
+      lag.outbound(() => {
+        if (!closed) room.send(MSG.chooseCard, { offerId, index });
+      });
     },
     onDisconnect(cb) {
       disconnectCb = cb;

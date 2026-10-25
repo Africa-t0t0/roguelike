@@ -100,7 +100,8 @@ export class CharacterView {
     body.position.y = -min.y * scale;
 
     this.observer = scene.onBeforeRenderObservable.add(() => {
-      const dtS = scene.getEngine().getDeltaTime() / 1000;
+      // En la pausa (animaciones congeladas) tampoco avanzan los fundidos ni el giro del cuerpo.
+      const dtS = scene.animationsEnabled ? scene.getEngine().getDeltaTime() / 1000 : 0;
       this.fade(dtS);
       this.turnBody(dtS);
     });

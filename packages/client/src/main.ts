@@ -7,16 +7,17 @@ import {
   JOIN_ERROR_STATUS,
   normalizeName,
   sanitizeInput,
-  SIM_DT,
   STARTING_WEAPON,
   type KinematicState,
 } from "@roguelike/shared";
 import { InputState, withoutActions } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
 import { connect, parseFloorTimeStart, type GameConnection, type PlayerSnapshot } from "./net/connection";
+import { FixedStep } from "./net/fixedStep";
 import { parseLagParams } from "./net/LagSimulator";
 import { LocalAbility } from "./net/LocalAbility";
 import { LocalCombo } from "./net/LocalCombo";
+import { PauseClock } from "./net/pauseClock";
 import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
 import { createTickClock } from "./net/tickClock";
@@ -36,6 +37,7 @@ import { OrbViews } from "./render/orbViews";
 import { PlayerViews } from "./render/playerViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
+import { CardPanel } from "./ui/cardPanel";
 import { joinErrorMessage } from "./ui/errors";
 import { Compass } from "./ui/compass";
 import { Hud } from "./ui/hud";
@@ -135,7 +137,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
   const input = new InputState();
-  const detachInput = attachBrowserInput(input, canvas);
+  const browserInput = attachBrowserInput(input, canvas);
   const hud = new Hud();
   const compass = new Compass();
   const minimap = new Minimap(dungeon);
@@ -145,6 +147,13 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const tickClock = createTickClock(); // tick del servidor que se está viendo → viewTick
   const combo = new LocalCombo();
   const ability = new LocalAbility();
+  // Pausa del grupo: el reloj de juego se detiene y con él la predicción, la interpolación y los efectos.
+  const clock = new PauseClock();
+  const steps = new FixedStep();
+  const cardPanel = new CardPanel((index) => conn.chooseCard(index));
+  let pause = { paused: false, pauseLeft: 0 };
+  let group: { name: string; choosing: boolean }[] = [];
+  let panelShown = false;
 
   const remotes = new Map<string, SnapshotBuffer<PlayerSnapshot>>();
   const smoother = new CorrectionSmoother();
@@ -152,21 +161,23 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   let predictor: Predictor | undefined;
   let prev: KinematicState | undefined; // estado antes del último paso, para dibujar entre pasos
   let seq = 0;
-  let acc = 0;
   let lastFrame = performance.now();
 
   conn.onPlayers((players, receivedAt) => {
     views.sync(players);
+    group = [...players.values()].map((p) => ({ name: p.name, choosing: p.choosing }));
+    // En la pausa los parches repiten las mismas posiciones: no se apilan en los buffers.
+    const at = clock.now(receivedAt);
     for (const [key, p] of players) {
       if (key !== conn.myKey) {
         let buffer = remotes.get(key);
         if (!buffer) remotes.set(key, (buffer = new SnapshotBuffer(lerpSnapshot)));
-        buffer.push(receivedAt, p);
+        if (!clock.paused) buffer.push(at, p);
         continue;
       }
       mine = p;
       hud.setPlayer(p);
-      ability.setServer(p.abilities, performance.now());
+      ability.setServer(p.abilities, clock.now(performance.now()));
       if (!predictor || !prev) {
         predictor = new Predictor(p, dungeon);
         prev = { ...p };
@@ -184,18 +195,29 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   conn.onFloorWeapons((items) => floorWeapons.set(items));
 
   conn.onWorld((world, receivedAt) => {
-    tickClock.push(receivedAt, world.tick);
+    // El parche que abre la pausa trae el último tick simulado: ese sí se interpola. Los siguientes, no.
+    const wasPaused = clock.paused;
+    clock.setPaused(world.paused, receivedAt);
+    // Congela los clips (foto fija); las vistas interpoladas se quedan quietas con el reloj de juego.
+    scene.animationsEnabled = !world.paused;
+    pause = { paused: world.paused, pauseLeft: world.pauseLeft };
     hud.setWorld(world);
     compass.setFloorTime(world.floorTime);
-    enemies.push(world, receivedAt);
-    projectiles.push(world, receivedAt);
     orbs.sync(world.orbs);
+    if (wasPaused && world.paused) return;
+    const at = clock.now(receivedAt);
+    tickClock.push(at, world.tick);
+    enemies.push(world, at);
+    projectiles.push(world, at);
   });
+
+  // La cuenta sin pausa es local, en tiempo real (el juego sigue).
+  conn.onLevelChoice((choice) => cardPanel.open(choice, performance.now()));
 
   // Los eventos se marcan en el reloj de recepción; lo remoto se dibuja INTERP_DELAY_MS después.
   // Lo propio (daño recibido, golpes dados) se ve sin ese retardo.
   conn.onCombat((event) => {
-    const now = performance.now();
+    const now = clock.now(performance.now());
     if (event.type === "swing") {
       if (event.key !== conn.myKey) views.swing(event.key, event.step, now);
     } else if (event.type === "ability") {
@@ -214,14 +236,24 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   });
 
   const frame = () => {
-    const now = performance.now();
-    const dt = Math.min(MAX_FRAME_S, (now - lastFrame) / 1000);
-    lastFrame = now;
+    const realNow = performance.now();
+    const paused = clock.paused;
+    // En la pausa el tiempo de juego no corre: dt 0 y `now` fijo (todo lo dibujado queda quieto).
+    const now = clock.now(realNow);
+    const dt = paused ? 0 : Math.min(MAX_FRAME_S, (realNow - lastFrame) / 1000);
+    lastFrame = realNow;
+
+    // El panel de cartas necesita el puntero libre; se vuelve a capturar con un clic en el canvas al cerrarse.
+    const shown = cardPanel.render(pause, group, mine?.choosing ?? false, realNow);
+    if (shown && !panelShown) browserInput.releasePointer();
+    camera.pointerLockAllowed = !shown;
+    panelShown = shown;
 
     if (predictor && prev) {
-      acc += dt;
-      while (acc >= SIM_DT) {
-        acc -= SIM_DT;
+      // En la pausa no se predice ni se envía nada (seq queda igual; el servidor descarta lo que llegue y
+      // confirma su seq). Lo que se apriete en ella se descarta; las teclas mantenidas siguen valiendo.
+      if (paused) input.sample(seq, camera.yaw);
+      for (let n = steps.advance(dt, paused); n > 0; n--) {
         // Se predice y se envía lo mismo que el servidor va a simular (ya saneado). Muerto, nada
         // de acciones (el servidor igual las ignora).
         const dead = mine?.dead ?? false;
@@ -243,7 +275,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         conn.sendInput(sampled);
       }
       smoother.decay(dt);
-      const a = acc / SIM_DT;
+      const a = steps.alpha;
       const cur = predictor.current;
       const x = prev.x + (cur.x - prev.x) * a + smoother.x;
       const z = prev.z + (cur.z - prev.z) * a + smoother.z;
@@ -290,7 +322,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
 
   return () => {
     engine.stopRenderLoop(frame);
-    detachInput();
+    browserInput.detach();
+    cardPanel.dispose();
     hud.dispose();
     compass.dispose();
     minimap.dispose();
