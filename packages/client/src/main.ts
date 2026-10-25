@@ -252,6 +252,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     const shown = cardPanel.render(pause, group, mine?.choosing ?? false, realNow);
     if (shown && !panelShown) browserInput.releasePointer();
     camera.pointerLockAllowed = !shown;
+    // Elección sin pausa: se sigue jugando (mover y atacar) con el puntero libre, solo no se gira la cámara.
+    browserInput.attackWithoutLock = shown && !pause.paused;
     panelShown = shown;
     hud.setChoiceOpen(shown);
 

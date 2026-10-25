@@ -11,6 +11,12 @@ export interface BrowserInput {
    * Se vuelve a capturar con el siguiente clic en el canvas (lo hace la cámara).
    */
   releasePointer(): void;
+  /**
+   * Con el panel de cartas abierto y sin pausa el jugador sigue jugando pero sin puntero capturado:
+   * con esto en true, un clic izquierdo sobre el canvas ataca aunque no haya bloqueo de puntero.
+   * Se fija cada frame; los clics en los botones del panel no cuentan (el objetivo no es el canvas).
+   */
+  attackWithoutLock: boolean;
 }
 
 /**
@@ -30,8 +36,10 @@ export function attachBrowserInput(input: InputState, canvas: HTMLCanvasElement)
   const onVisibility = () => {
     if (document.hidden) input.blur();
   };
+  let attackWithoutLock = false;
   const onMouseDown = (e: MouseEvent) => {
-    if (e.button === 0 && document.pointerLockElement === canvas) input.keyDown("Mouse0");
+    if (e.button !== 0) return;
+    if (document.pointerLockElement === canvas || (attackWithoutLock && e.target === canvas)) input.keyDown("Mouse0");
   };
   const onMouseUp = (e: MouseEvent) => {
     if (e.button === 0) input.keyUp("Mouse0");
@@ -66,5 +74,14 @@ export function attachBrowserInput(input: InputState, canvas: HTMLCanvasElement)
     selfRelease = true;
     document.exitPointerLock();
   };
-  return { detach, releasePointer };
+  return {
+    detach,
+    releasePointer,
+    get attackWithoutLock() {
+      return attackWithoutLock;
+    },
+    set attackWithoutLock(v: boolean) {
+      attackWithoutLock = v;
+    },
+  };
 }

@@ -130,6 +130,13 @@ export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
   return out;
 }
 
+/** Un evento `ability` con id desconocido se ignora (las vistas indexan ABILITIES[id] y lanzarían). */
+export function isValidCombatEvent(event: unknown): event is CombatEvent {
+  const e = event as { type?: unknown; id?: unknown } | null;
+  if (!e || typeof e !== "object") return false;
+  return e.type !== "ability" || isAbilityId(e.id);
+}
+
 function parseCard(raw: unknown): CardOffer | undefined {
   const c = raw as { kind?: unknown; id?: unknown; rank?: unknown } | null;
   if (c?.kind === "stat" && typeof c.id === "string" && Object.hasOwn(STAT_CARDS, c.id)) {
@@ -344,6 +351,7 @@ export async function connect(opts: {
   // del suelo), y los eventos de combate pueden llegar en cualquier momento (sin manejador el SDK avisa
   // en consola).
   room.onMessage(MSG.combat, (event: CombatEvent) => {
+    if (!isValidCombatEvent(event)) return;
     lag.inbound(() => {
       if (!closed) combatCb?.(event);
     });
