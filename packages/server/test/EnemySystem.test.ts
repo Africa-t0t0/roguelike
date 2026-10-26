@@ -548,3 +548,129 @@ describe("hechiceros: tier y orbes del arcano", () => {
     expect(shots[0]!.speed).toBe(9);
   });
 });
+
+describe("peligros de los hechiceros", () => {
+  const mk = (kind: EnemyKind, tier: 1 | 2 | 3, ex = 20, ez = 30) => {
+    const r = setup(kind, ex, ez);
+    r.e.spellTier = tier;
+    return r;
+  };
+
+  it("pirómano tier 1: zona fija en el objetivo, daña 14 una sola vez a quien se queda", () => {
+    const { sys, e } = mk("pyromancer", 1);
+    const a = P("a", 29, 30);
+    const hits = run(sys, [a], 2);
+    expect(e.ai).toBe("telegraph");
+    expect(sys.hazards).toHaveLength(1);
+    expect(sys.hazards[0]).toMatchObject({ kind: "zone", phase: "warn", size: 2.5, x: 29, z: 30 });
+    expect(hits).toEqual([]);
+    run(sys, [a], 60);
+    expect(sys.hazards).toEqual([]);
+  });
+
+  it("pirómano: el que se movió 4 m no recibe daño, el que se queda sí (una vez)", () => {
+    const stay = mk("pyromancer", 1);
+    const a = P("a", 29, 30);
+    const h1 = run(stay.sys, [a], 40);
+    expect(h1.filter((h) => h.sourceId === stay.e.id)).toMatchObject([{ targetKey: "a", damage: 14, sourceX: 29, sourceZ: 30 }]);
+
+    const move = mk("pyromancer", 1);
+    const b = P("a", 29, 30);
+    run(move.sys, [b], 2);
+    b.z += 4;
+    expect(move.sys.hazards[0]).toMatchObject({ x: 29, z: 30 });
+    expect(run(move.sys, [b], 40)).toEqual([]);
+  });
+
+  it("pirómano tier 3: tres zonas, en el objetivo y a ±3 m en la perpendicular", () => {
+    const { sys } = mk("pyromancer", 3);
+    run(sys, [P("a", 29, 30)], 2);
+    const zs = sys.hazards.map((h) => [Math.round(h.x), Math.round(h.z)]).sort((p, q) => p[1]! - q[1]!);
+    expect(zs).toEqual([[29, 27], [29, 30], [29, 33]]);
+  });
+
+  it("dos jugadores en la misma zona reciben un golpe cada uno", () => {
+    const { sys } = mk("pyromancer", 1);
+    const hits = run(sys, [P("a", 29, 30), P("b", 29.5, 30)], 40);
+    expect(hits.map((h) => h.targetKey).sort()).toEqual(["a", "b"]);
+  });
+
+  it("si el pirómano muere tras marcar, la zona igual explota", () => {
+    const { sys, e } = mk("pyromancer", 1);
+    run(sys, [P("a", 29, 30)], 2);
+    sys.damage(e.id, 9999);
+    const hits = run(sys, [P("a", 29, 30)], 40);
+    expect(hits).toMatchObject([{ targetKey: "a", damage: 14 }]);
+  });
+
+  it("invocador tier 2: sigue al jugador el 60 % de la preparación, luego queda fijo, y dispara 0,15 s", () => {
+    const { sys, e } = mk("stormcaller", 2, 18, 30);
+    const a = P("a", 28, 30);
+    run(sys, [a], 2);
+    expect(e.ai).toBe("telegraph");
+    const h = sys.hazards[0]!;
+    expect(h).toMatchObject({ kind: "beam", phase: "warn", size: 0.8, total: 0.9 });
+    // 60 % de 0,9 s = 0,54 s ≈ 16 ticks: dentro del seguimiento
+    a.z = 32;
+    run(sys, [a], 3);
+    expect(h.dirZ).toBeGreaterThan(0.1);
+    // pasado el seguimiento, queda fijo
+    run(sys, [a], 14);
+    const fixed = h.dirZ;
+    a.z = 26;
+    run(sys, [a], 3);
+    expect(h.dirZ).toBe(fixed);
+  });
+
+  it("invocador: daña 12 a quien está en la línea al disparar y el rayo dura 0,15 s en fire", () => {
+    const { sys, e } = mk("stormcaller", 2, 18, 30);
+    const a = P("a", 28, 30);
+    const off = P("b", 28, 33);
+    const hits: EnemyHit[] = [];
+    let fireTicks = 0;
+    for (let i = 0; i < 40; i++) {
+      hits.push(...sys.step([a, off], SIM_DT));
+      if (sys.hazards.some((h) => h.phase === "fire")) fireTicks++;
+    }
+    expect(hits).toMatchObject([{ targetKey: "a", damage: 12, sourceId: e.id, sourceX: 18, sourceZ: 30 }]);
+    expect(hits).toHaveLength(1);
+    expect(fireTicks).toBeGreaterThanOrEqual(4);
+    expect(fireTicks).toBeLessThanOrEqual(5);
+    expect(sys.hazards).toEqual([]);
+    expect(sys.projectiles).toEqual([]);
+  });
+
+  it("invocador aturdido en la telegrafía: su rayo desaparece y no daña", () => {
+    const { sys, e } = mk("stormcaller", 2, 18, 30);
+    const a = P("a", 28, 30);
+    run(sys, [a], 5);
+    expect(sys.hazards).toHaveLength(1);
+    sys.stun(e.id, 5);
+    expect(run(sys, [a], 60)).toEqual([]);
+    expect(sys.hazards).toEqual([]);
+  });
+
+  it("invocador muerto o killAll en la telegrafía: el rayo se quita", () => {
+    const { sys, e } = mk("stormcaller", 1, 18, 30);
+    run(sys, [P("a", 28, 30)], 5);
+    sys.killAll();
+    expect(e.ai).toBe("dead");
+    run(sys, [P("a", 28, 30)], 1);
+    expect(sys.hazards).toEqual([]);
+  });
+
+  it("un muro entre el mago y el jugador corta el rayo y no hay daño", () => {
+    const d = arena();
+    const { sys, e } = setup("stormcaller", 22, 30, d);
+    e.spellTier = 1;
+    const a = P("a", 33, 30);
+    run(sys, [a], 2);
+    expect(e.ai).toBe("telegraph");
+    // el muro aparece con la preparación en curso (el largo se recalcula al apuntar)
+    for (let z = 8; z < 20; z++) d.tiles[z * d.width + 14] = 0;
+    run(sys, [a], 1);
+    const h = sys.hazards[0]!;
+    expect(h.length).toBeLessThan(dist(e, a));
+    expect(run(sys, [a], 60)).toEqual([]);
+  });
+});

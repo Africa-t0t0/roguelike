@@ -27,6 +27,7 @@ import {
   type Rng,
   type WeaponTier,
 } from "@roguelike/shared";
+import { beamLength, inBeam, inZone, type Hazard } from "./hazards";
 
 export type EnemyAi = "idle" | "chase" | "telegraph" | "recover" | "dead";
 
@@ -110,6 +111,8 @@ function tileOf(v: number): number {
 export class EnemySystem {
   private list: Enemy[] = [];
   private shots: Projectile[] = [];
+  private zones: Hazard[] = [];
+  private nextHazard = 1;
   private activated = new Set<number>();
   private nextEnemy = 1;
   private nextShot = 1;
@@ -225,6 +228,10 @@ export class EnemySystem {
     return this.shots;
   }
 
+  get hazards(): readonly Hazard[] {
+    return this.zones;
+  }
+
   activateRooms(players: readonly SimPlayer[], playerCount: number): Enemy[] {
     const created: Enemy[] = [];
     for (const room of this.dungeon.rooms) {
@@ -299,6 +306,7 @@ export class EnemySystem {
     this.list = this.list.filter((e) => !(e.ai === "dead" && e.aiTime >= DEAD_LINGER_S));
     this.separate();
     this.stepProjectiles(alive, dt, hits);
+    this.stepHazards(alive, dt, hits);
     return hits;
   }
 
@@ -311,6 +319,82 @@ export class EnemySystem {
   private setAi(e: Enemy, ai: EnemyAi): void {
     e.ai = ai;
     e.aiTime = 0;
+  }
+
+  /** Entra en telegrafía; los hechiceros de zona y rayo crean aquí su peligro en aviso. */
+  private startTelegraph(e: Enemy, target: SimPlayer): void {
+    this.setAi(e, "telegraph");
+    const damage = Math.round(ENEMY_DEFS[e.kind].damage * e.damageMult);
+    const tier = Math.max(1, e.spellTier) as WeaponTier;
+    const dx = target.x - e.x;
+    const dz = target.z - e.z;
+    const d = Math.hypot(dx, dz);
+    const dirX = d > 0 ? dx / d : Math.sin(e.facing);
+    const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
+    if (e.kind === "pyromancer") {
+      const spell = SPELLS.pyromancer.tiers[tier];
+      // Una zona en el objetivo; con tres, otras dos a los lados (perpendicular a mago→objetivo).
+      const offsets = spell.count === 3 ? [0, -SPELLS.pyromancer.sideOffsetM, SPELLS.pyromancer.sideOffsetM] : [0];
+      for (const off of offsets) {
+        this.zones.push({
+          id: `h${this.nextHazard++}`, kind: "zone", sourceId: e.id,
+          x: target.x + dirZ * off, z: target.z - dirX * off, dirX: 0, dirZ: 0, length: 0, size: spell.radius,
+          damage, left: SPELLS.pyromancer.fuseS, total: SPELLS.pyromancer.fuseS, phase: "warn",
+        });
+      }
+    } else if (e.kind === "stormcaller") {
+      const total = casterTelegraphS(e.kind, e.spellTier);
+      this.zones.push({
+        id: `h${this.nextHazard++}`, kind: "beam", sourceId: e.id, x: e.x, z: e.z, dirX, dirZ,
+        length: beamLength(this.dungeon, e.x, e.z, dirX, dirZ, SPELLS.stormcaller.length),
+        size: SPELLS.stormcaller.tiers[tier].width, damage, left: total, total, phase: "warn",
+      });
+    }
+  }
+
+  /** El rayo en aviso del tormentoso pasa a disparo (queda fijo) y golpea una vez a cada jugador en la línea. */
+  private fireBeam(e: Enemy, alive: readonly SimPlayer[], hits: EnemyHit[]): void {
+    const h = this.zones.find((z) => z.kind === "beam" && z.sourceId === e.id && z.phase === "warn");
+    if (!h) return;
+    h.phase = "fire";
+    h.left = h.total = SPELLS.stormcaller.fireS;
+    for (const p of alive) {
+      if (inBeam(h, p.x, p.z, PLAYER_RADIUS)) hits.push({ targetKey: p.key, damage: h.damage, sourceId: e.id, sourceX: h.x, sourceZ: h.z });
+    }
+  }
+
+  private stepHazards(alive: readonly SimPlayer[], dt: number, hits: EnemyHit[]): void {
+    const keep: Hazard[] = [];
+    for (const h of this.zones) {
+      const owner = this.list.find((e) => e.id === h.sourceId);
+      if (h.kind === "beam" && h.phase === "warn") {
+        // Aviso huérfano (aturdido, muerto o fuera de telegrafía sin disparar): se quita.
+        if (!owner || owner.ai !== "telegraph") continue;
+        h.x = owner.x;
+        h.z = owner.z;
+        // Sigue al objetivo durante el primer trackFrac de la preparación; después queda fijo.
+        const target = alive.find((p) => p.key === owner.targetKey);
+        if (target && h.left > h.total * (1 - SPELLS.stormcaller.trackFrac)) {
+          const d = Math.hypot(target.x - h.x, target.z - h.z);
+          if (d > 0) {
+            h.dirX = (target.x - h.x) / d;
+            h.dirZ = (target.z - h.z) / d;
+          }
+        }
+        h.length = beamLength(this.dungeon, h.x, h.z, h.dirX, h.dirZ, SPELLS.stormcaller.length);
+      }
+      h.left -= dt;
+      if (h.left > 0 || (h.kind === "beam" && h.phase === "warn")) {
+        keep.push(h);
+        continue;
+      }
+      if (h.kind === "zone") {
+        for (const p of alive) {
+          if (inZone(h, p.x, p.z, PLAYER_RADIUS)) hits.push({ targetKey: p.key, damage: h.damage, sourceId: h.sourceId, sourceX: h.x, sourceZ: h.z });
+        }
+      }
+    }
+    this.zones = keep;
   }
 
   private stepEnemy(e: Enemy, alive: readonly SimPlayer[], dt: number, hits: EnemyHit[]): void {
@@ -353,8 +437,11 @@ export class EnemySystem {
             life: ORB.lifetimeS, sourceId: e.id,
           });
         }
+      } else if (e.kind === "stormcaller") {
+        // Sin proyectil: el rayo en preparación pasa a disparo y daña ya a quien está en la línea.
+        this.fireBeam(e, alive, hits);
       } else if (def.ranged) {
-        // Pirómano y tormentoso: sin proyectil; los peligros de la tarea 3 reemplazan este vacío.
+        // Pirómano: sus zonas se crearon al entrar en la telegrafía y explotan solas.
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
         hits.push({ targetKey: target.key, damage: Math.round(atk.damage * e.damageMult), sourceId: e.id, sourceX: e.x, sourceZ: e.z });
       }
@@ -369,7 +456,7 @@ export class EnemySystem {
       const r = def.ranged.losRadius;
       const los = hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r);
       if (los && d >= def.ranged.preferredMin && d <= def.ranged.preferredMax) {
-        if (e.cooldown <= 0) this.setAi(e, "telegraph");
+        if (e.cooldown <= 0) this.startTelegraph(e, target);
         return;
       }
       if (!los) {
@@ -385,7 +472,7 @@ export class EnemySystem {
         if (!moved || !hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r)) {
           e.x = px;
           e.z = pz;
-          if (e.cooldown <= 0) this.setAi(e, "telegraph");
+          if (e.cooldown <= 0) this.startTelegraph(e, target);
         }
         return;
       }
@@ -393,7 +480,7 @@ export class EnemySystem {
       return;
     }
     if (d - PLAYER_RADIUS <= atk.attackRange && e.cooldown <= 0) {
-      this.setAi(e, "telegraph");
+      this.startTelegraph(e, target);
       return;
     }
     this.chaseMove(e, target, d, Math.min(def.speed * dt, d), def.radius);
