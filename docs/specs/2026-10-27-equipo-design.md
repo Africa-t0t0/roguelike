@@ -62,7 +62,7 @@ El arma sigue como hoy: rareza en la hoja y naturaleza.
 | 3 | 2 | ×2 |
 | 4 | 2 | ×2,5 |
 
-- Además, el tier 4 trae su naturaleza (ver abajo).
+- Además, el tier 4 trae resistencia general y un efecto legendario (ver abajo).
 
 ### Valores base (tier 1; se multiplican por el tier)
 
@@ -88,6 +88,8 @@ hoy (−60 % de daño recibido y −50 % de enfriamiento).
 
 - **Qué cubre:** reduce el daño de ese elemento y la duración de su estado (quemadura, ralentización,
   aturdimiento).
+- **Elemento y estado son cosas distintas:** el elemento se usa solo para la resistencia. Los estados
+  (quemadura, ralentización, aturdimiento) siguen saliendo solo de los élites, como en el 4b-2.
 - **Qué cuenta como elemento:** el ataque de un élite de esa naturaleza, más dos ataques de hechiceros normales,
   para que la resistencia sirva desde el principio: la zona del piromante cuenta como fuego y el rayo del
   invocador como rayo.
@@ -108,7 +110,7 @@ jugador. Hoy solo existe el caballero. Bolsa propuesta para el caballero:
   - "Grito de guerra también cura un 15 % de la vida a los aliados".
 - **Pechera:**
   - "Bloqueo devuelve el 30 % del daño bloqueado".
-  - "Al bajar del 30 % de vida, te escudas 3 s (una vez cada 30 s)".
+  - "Al bajar del 30 % de vida, te escudas 3 s: −80 % de daño recibido (una vez cada 30 s)".
 - **Guantes:**
   - "Torbellino tiene 2 cargas".
   - "Patada aturde el doble de tiempo".
@@ -180,7 +182,7 @@ Más reglas:
 
 ### HUD
 
-Cuatro iconos pequeños de ranura junto al retrato (casco, pechera, guantes, botas), con el borde del color de la
+Cinco iconos pequeños de ranura junto al retrato (casco, pechera, guantes, botas y reliquia), con el borde del color de la
 rareza. Al pasar el mouse por encima, o al mantener Tab, se ven las stats de cada pieza.
 
 ### Brillo por parte del cuerpo (lo visual)
@@ -191,7 +193,8 @@ rareza. Al pasar el mouse por encima, o al mantener Tab, se ven las stats de cad
   - **Tier 1:** nada.
   - **Tier 2:** motas azules suaves que se desprenden de esa parte.
   - **Tier 3:** motas violetas, más densas, con un halo tenue.
-  - **Tier 4:** dorado, más vistoso, y si la pieza tiene naturaleza las partículas toman el color del elemento.
+  - **Tier 4:** dorado y más vistoso. Si la pieza tiene una resistencia elemental, las partículas toman el color
+    de su resistencia más alta.
 - Las partículas siguen la animación: al correr, las de los pies van con los pies.
 - **Se ve en todos los jugadores.**
 - **Costo:** como mucho 6 emisores por jugador (cabeza, torso, 2 manos y 2 pies). Son baratos, con pocas
@@ -199,14 +202,17 @@ rareza. Al pasar el mouse por encima, o al mantener Tab, se ven las stats de cad
 
 ### Red y estado
 
-- Cada jugador lleva su equipo en `PlayerState.gear` (por ranura: `tier`, `nature` y las stats) para que los
-  demás vean el brillo.
+- Cada jugador lleva su equipo y su reliquia en `PlayerState` (por ranura: tier, resistencia principal, efecto
+  legendario y el detalle de stats) para que los demás vean el brillo y él vea sus stats.
 - El servidor guarda el equipo en el registro del jugador, así que se conserva al reconectar.
-- `PROTOCOL_VERSION` pasa a 12.
+- `PROTOCOL_VERSION` pasa a 13 (la caja de inicio ya usó el 12).
 
 ### Panel de pruebas (F2)
 
-Sección nueva "Equipo": elegir ranura, tier y naturaleza, con los botones "Equipar" y "Soltar delante".
+Sección nueva "Equipo":
+
+- elegir ranura y tier, con los botones "Equipar" y "Soltar delante";
+- elegir una reliquia, con "Equipar reliquia".
 
 ## No-metas
 
