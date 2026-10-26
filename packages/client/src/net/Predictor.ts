@@ -2,6 +2,7 @@ import {
   MAX_PENDING_INPUTS,
   SIM_DT,
   NO_MOVE_MODS,
+  deadInput,
   stepPlayer,
   type Dungeon,
   type KinematicState,
@@ -40,10 +41,11 @@ export class Predictor {
     return this.state;
   }
 
-  reconcile(server: KinematicState, ackSeq: number): KinematicState {
+  /** `dead`: el servidor ya lo tiene muerto, así que procesa los pendientes como `deadInput` (quieto y sin girar). */
+  reconcile(server: KinematicState, ackSeq: number, dead = false): KinematicState {
     this.pending = this.pending.filter((p) => p.input.seq > ackSeq);
     let s = { ...server };
-    for (const p of this.pending) s = stepPlayer(s, p.input, this.dungeon, SIM_DT, p.mods);
+    for (const p of this.pending) s = stepPlayer(s, dead ? deadInput(p.input, s) : p.input, this.dungeon, SIM_DT, p.mods);
     this.state = s;
     return this.state;
   }

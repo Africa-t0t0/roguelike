@@ -7,6 +7,7 @@ import {
   TILE_SIZE,
   NO_MOVE_MODS,
   sanitizeInput,
+  deadInput,
   stepPlayer,
   type Dungeon,
   type KinematicState,
@@ -189,5 +190,15 @@ describe("sanitizeInput", () => {
     expect(sanitizeInput({ seq: -1 })).toBeNull();
     expect(sanitizeInput({ seq: 1.5 })).toBeNull();
     expect(sanitizeInput(null)).toBeNull();
+  });
+});
+
+describe("deadInput", () => {
+  it("anula movimiento, salto, sprint y acciones y conserva la orientación del cuerpo", () => {
+    const raw = { seq: 9, moveX: 1, moveZ: 0, facing: 2, sprint: true, jump: true, attack: true, interact: true, abilities: 3, viewTick: 5 };
+    const k = { x: 1, z: 1, facing: 0.7, y: 1, vy: 2 };
+    expect(deadInput(raw, k)).toEqual({
+      seq: 9, moveX: 0, moveZ: 0, facing: 0.7, sprint: false, jump: false, attack: false, interact: false, abilities: 0, viewTick: 5,
+    });
   });
 });

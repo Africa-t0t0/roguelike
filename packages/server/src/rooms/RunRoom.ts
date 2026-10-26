@@ -45,6 +45,7 @@ import {
   type CombatEvent,
   type DevCommand,
   type Dungeon,
+  deadInput,
   type KinematicState,
   type PlayerInput,
   type RelicId,
@@ -99,19 +100,6 @@ export function rollChestLoot(rng: Rng): ChestLoot {
 const RELIC_IDS = Object.keys(RELICS) as RelicId[];
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
-
-/** Un muerto no se mueve, no salta, no ataca ni usa habilidades; se conserva su orientación. */
-const deadInput = (input: PlayerInput, k: KinematicState): PlayerInput => ({
-  ...input,
-  moveX: 0,
-  moveZ: 0,
-  facing: k.facing,
-  sprint: false,
-  jump: false,
-  attack: false,
-  interact: false,
-  abilities: 0,
-});
 
 /** `Omit` que reparte sobre cada miembro de la unión. */
 type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;

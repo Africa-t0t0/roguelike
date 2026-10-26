@@ -84,8 +84,3 @@ export class InputState {
     return (this.held.has(positive) ? 1 : 0) - (this.held.has(negative) ? 1 : 0);
   }
 }
-
-/** El mismo input sin acciones (p. ej. muerto): sin moverse, saltar, correr, atacar, tomar armas ni usar habilidades. */
-export function withoutActions(input: PlayerInput): PlayerInput {
-  return { ...input, moveX: 0, moveZ: 0, sprint: false, jump: false, attack: false, interact: false, abilities: 0 };
-}

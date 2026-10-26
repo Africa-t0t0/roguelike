@@ -3,6 +3,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import {
   ABILITIES,
   BLOCK_MOVE_MULT,
+  deadInput,
   generateDungeon,
   INTERP_DELAY_MS,
   JOIN_ERROR_STATUS,
@@ -15,7 +16,7 @@ import {
   type GearSlot,
   type KinematicState,
 } from "@roguelike/shared";
-import { InputState, withoutActions } from "./input/InputState";
+import { InputState } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
 import { connect, parseFloorTimeStart, parseSandbox, type GameConnection, type PlayerSnapshot } from "./net/connection";
 import { FixedStep } from "./net/fixedStep";
@@ -237,7 +238,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         seq = p.lastSeq; // el servidor descarta seq ≤ lastSeq
       } else {
         const before = predictor.current;
-        const after = predictor.reconcile(p, p.lastSeq);
+        const after = predictor.reconcile(p, p.lastSeq, p.dead);
         // Tajo frontal con `thrustDash`: el servidor mueve ~3 m y el cliente no lo predice; si fue una habilidad propia
         // reciente, esa corrección se desliza (~0,15 s) en vez de teletransportar.
         const dashing = clock.now(performance.now()) - lastThrustMs < ABILITIES.thrust.animS * 1000 + DASH_WINDOW_MS;
@@ -328,7 +329,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS));
         // Aturdido tampoco ataca ni lanza habilidades (el servidor las ignora; no se predicen).
         const stunned = (mine?.stunLeft ?? 0) > 0;
-        const sampled = sanitizeInput(dead ? withoutActions(raw) : raw);
+        const sampled = sanitizeInput(dead ? deadInput(raw, predictor.current) : raw);
         if (!sampled) continue;
         prev = predictor.current;
         // Como el servidor: se mueve con el Bloqueo del input anterior y luego se actualiza.

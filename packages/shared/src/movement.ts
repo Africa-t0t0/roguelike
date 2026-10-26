@@ -130,6 +130,22 @@ export function moveCircle(
   return { x: nx, z: nz };
 }
 
+/**
+ * Un muerto no se mueve, no salta, no ataca ni usa habilidades; se conserva la orientación de su cuerpo
+ * (la cámara no lo gira). Servidor y predicción del cliente usan lo mismo, o el cadáver se corrige sin parar.
+ */
+export const deadInput = (input: PlayerInput, k: KinematicState): PlayerInput => ({
+  ...input,
+  moveX: 0,
+  moveZ: 0,
+  facing: k.facing,
+  sprint: false,
+  jump: false,
+  attack: false,
+  interact: false,
+  abilities: 0,
+});
+
 export function stepPlayer(
   s: KinematicState,
   input: PlayerInput,

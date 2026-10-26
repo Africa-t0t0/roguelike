@@ -3,6 +3,7 @@ import {
   MAX_PENDING_INPUTS,
   SIM_DT,
   stepPlayer,
+  deadInput,
   type Dungeon,
   type KinematicState,
   type PlayerInput,
@@ -102,5 +103,20 @@ describe("Predictor", () => {
     for (let seq = 1; seq <= 4; seq++) server = stepPlayer(server, input(seq), dungeon, SIM_DT);
     p.reconcile(server, 4);
     expect(p.current.x).toBeCloseTo(expected.x, 9);
+  });
+
+  it("muerto: reconcile re-simula los pendientes como el servidor (quieto, sin saltar, sin girar)", () => {
+    // El servidor ya lo dio por muerto: los inputs pendientes los procesa con deadInput. El cliente aún
+    // los tenía con movimiento, salto y la cámara girando.
+    const p = new Predictor(initial, dungeon);
+    for (let seq = 1; seq <= 6; seq++) p.applyLocal({ ...input(seq), jump: true, facing: seq });
+    const server: KinematicState = { x: 10, z: 40, facing: 0.5, y: 0.4, vy: -2 };
+    let expected = server;
+    for (let seq = 3; seq <= 6; seq++) expected = stepPlayer(expected, deadInput(input(seq), expected), dungeon, SIM_DT);
+    const after = p.reconcile(server, 2, true);
+    expect(after.x).toBeCloseTo(expected.x, 9);
+    expect(after.facing).toBeCloseTo(0.5, 9);
+    expect(after.y).toBeCloseTo(expected.y, 9);
+    expect(after.vy).toBeCloseTo(expected.vy, 9);
   });
 });

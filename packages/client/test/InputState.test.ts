@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InputState, withoutActions } from "../src/input/InputState";
+import { InputState } from "../src/input/InputState";
 
 describe("InputState", () => {
   it("W con yaw 0 avanza hacia +Z", () => {
@@ -155,16 +155,5 @@ describe("InputState", () => {
     const input = new InputState();
     expect(input.sample(1, 0).viewTick).toBe(0);
     expect(input.sample(2, 0, 41.5).viewTick).toBe(41.5);
-  });
-});
-
-describe("withoutActions", () => {
-  it("anula movimiento, salto, sprint, ataque y habilidades; conserva seq, facing y viewTick", () => {
-    const input = new InputState();
-    for (const k of ["KeyW", "Space", "ShiftLeft", "Mouse0", "KeyE", "Digit1", "Digit3"]) input.keyDown(k);
-    const s = withoutActions(input.sample(7, 0.5, 12));
-    expect(s).toEqual({
-      seq: 7, moveX: 0, moveZ: 0, facing: 0.5, sprint: false, jump: false, attack: false, interact: false, abilities: 0, viewTick: 12,
-    });
   });
 });
