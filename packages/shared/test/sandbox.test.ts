@@ -22,6 +22,7 @@ describe("parseDevCommand", () => {
       { cmd: "clock", seconds: 60 },
       { cmd: "weapon", weaponId: "great-sword", tier: 2, nature: "none" },
       { cmd: "weapon", weaponId: "great-sword", tier: 3, nature: "ice" },
+      { cmd: "weapon", weaponId: "great-sword", tier: 4, nature: "fire" },
     ];
     for (const c of ok) expect(parseDevCommand(c)).toEqual(c);
   });
@@ -58,6 +59,7 @@ describe("parseDevCommand", () => {
       { cmd: "clock", seconds: Number.NaN },
       { cmd: "weapon", weaponId: "axe", tier: 1 },
       { cmd: "weapon", weaponId: "great-sword", tier: 0 },
+      { cmd: "weapon", weaponId: "great-sword", tier: 5 },
       { cmd: "weapon", weaponId: "great-sword", tier: 1, nature: "water" },
     ];
     for (const c of bad) expect(parseDevCommand(c)).toBeNull();

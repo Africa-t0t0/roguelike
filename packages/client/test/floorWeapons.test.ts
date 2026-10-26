@@ -8,7 +8,7 @@ describe("armas del suelo", () => {
     expect(
       parseFloorWeapons({
         items: [
-          { weaponId: "great-sword", tier: 3, x: 1, z: 2, ttl: 12.5 },
+          { weaponId: "great-sword", tier: 3, x: 1, z: 2, ttl: 12.5, nature: "fire" },
           { weaponId: "nope", x: 0, z: 0 },
           { weaponId: "great-sword", tier: 7, x: 0, z: 0 },
           { weaponId: "guard-sword", x: Number.NaN, z: 0 },
@@ -17,8 +17,8 @@ describe("armas del suelo", () => {
         ],
       }),
     ).toEqual([
-      { weaponId: "great-sword", tier: 3, x: 1, z: 2, ttl: 12.5 },
-      { weaponId: "guard-sword", tier: 1, x: 3, z: -4, ttl: 40 }, // sin tier: 1; sin ttl: 40
+      { weaponId: "great-sword", tier: 3, x: 1, z: 2, ttl: 12.5, nature: "fire" },
+      { weaponId: "guard-sword", tier: 1, x: 3, z: -4, ttl: 40, nature: "none" }, // sin tier: 1; sin ttl: 40
     ]);
     expect(parseFloorWeapons(null)).toEqual([]);
     expect(parseFloorWeapons({ items: "x" })).toEqual([]);
@@ -26,8 +26,8 @@ describe("armas del suelo", () => {
 
   it("nearestPickup: la más cercana a ≤ PICKUP_RANGE, o ninguna", () => {
     const items = [
-      { weaponId: "great-sword" as const, tier: 1 as const, x: 1, z: 0, ttl: 40 },
-      { weaponId: "guard-sword" as const, tier: 2 as const, x: -0.5, z: 0, ttl: 40 },
+      { weaponId: "great-sword" as const, tier: 1 as const, x: 1, z: 0, ttl: 40, nature: "none" as const },
+      { weaponId: "guard-sword" as const, tier: 2 as const, x: -0.5, z: 0, ttl: 40, nature: "none" as const },
     ];
     expect(nearestPickup(items, 0, 0)?.weaponId).toBe("guard-sword");
     expect(nearestPickup(items, 1 + PICKUP_RANGE, 0)?.weaponId).toBe("great-sword"); // justo en el borde

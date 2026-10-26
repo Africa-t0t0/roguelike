@@ -51,6 +51,8 @@ export type DevCommand =
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 const isTier = (v: unknown): v is 1 | 2 | 3 => isInt(v, 1, 3);
+/** El arma del comando `weapon` admite también la legendaria (tier 4), que no cae del suelo. */
+const isWeaponTierCmd = (v: unknown): v is WeaponTier => isInt(v, 1, 4);
 const isNature = (v: unknown): v is Nature => v === "none" || (ELEMENTS as readonly unknown[]).includes(v);
 const has = <T extends object>(o: T, k: unknown): k is keyof T => typeof k === "string" && Object.hasOwn(o, k);
 
@@ -104,7 +106,7 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
         : null;
     case "weapon": {
       const nature = m.nature ?? "none";
-      return has(WEAPONS, m.weaponId) && isTier(m.tier) && isNature(nature)
+      return has(WEAPONS, m.weaponId) && isWeaponTierCmd(m.tier) && isNature(nature)
         ? { cmd: "weapon", weaponId: m.weaponId as WeaponId, tier: m.tier, nature }
         : null;
     }

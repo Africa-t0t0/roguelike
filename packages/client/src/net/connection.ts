@@ -4,6 +4,7 @@ import {
   MSG,
   STAT_CARDS,
   PROTOCOL_VERSION,
+  ELEMENTS,
   STARTING_WEAPON,
   TAKEOVER_CLOSE_CODE,
   isWeaponId,
@@ -15,6 +16,7 @@ import {
   type EnemyKind,
   type JoinOptions,
   type KinematicState,
+  type Nature,
   type PlayerInput,
   type WeaponId,
   type WeaponTier,
@@ -35,6 +37,13 @@ export type PlayerSnapshot = KinematicState & {
   swingTimer: number;
   weaponId: WeaponId;
   weaponTier: WeaponTier;
+  weaponNature: Nature;
+  /** segundos que le quedan de quemadura, ralentización y aturdimiento (élites) */
+  burnLeft: number;
+  slowLeft: number;
+  stunLeft: number;
+  /** multiplicador de movimiento de los estados (0.7 ralentizado, 0 aturdido); sin el del Bloqueo */
+  statusSpeedMult: number;
   /** casillas en orden (la tecla i+1 usa la i-ésima), sin la pasiva; `cooldown` en s */
   abilities: (AbilitySlotView & { rank: number })[];
   /** rango de la Onda de corte; 0 si no la tiene */
@@ -64,6 +73,13 @@ export interface EnemySnapshot {
   /** null si va desarmado */
   weaponId: WeaponId | null;
   weaponTier: WeaponTier | null;
+  weaponNature: Nature;
+  /** élite: más grande, con naturaleza propia */
+  elite: boolean;
+  nature: Nature;
+  burning: boolean;
+  slowed: boolean;
+  frozen: boolean;
   /** segundos que le quedan aturdido */
   stunned: number;
   /** tier del hechizo (0 si no es hechicero) */
@@ -107,6 +123,29 @@ export function parseHazard(raw: unknown): HazardSnapshot | null {
   };
 }
 
+/** Cofre del piso: abierto o por abrir. */
+export interface ChestSnapshot {
+  x: number;
+  z: number;
+  open: boolean;
+}
+
+/** Valida un cofre crudo del estado: null si falta algo o algún número no es finito. */
+export function parseChest(raw: unknown): ChestSnapshot | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.x !== "number" || !Number.isFinite(c.x) || typeof c.z !== "number" || !Number.isFinite(c.z)) return null;
+  if (typeof c.open !== "boolean") return null;
+  return { x: c.x, z: c.z, open: c.open };
+}
+
+/** Naturaleza del estado; lo que no se reconozca vale "none". */
+function toNature(v: unknown): Nature {
+  return (ELEMENTS as readonly unknown[]).includes(v) ? (v as Nature) : "none";
+}
+
+const finiteOr = (v: unknown, fallback: number): number => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+
 export interface ProjectileSnapshot {
   x: number;
   z: number;
@@ -136,6 +175,7 @@ export interface WorldSnapshot {
   xpToNext: number;
   /** segundos desde que empezó el piso */
   floorTime: number;
+  chests: Map<string, ChestSnapshot>;
   enemies: Map<string, EnemySnapshot>;
   projectiles: Map<string, ProjectileSnapshot>;
   orbs: Map<string, OrbSnapshot>;
@@ -157,30 +197,41 @@ export interface FloorWeapon {
   z: number;
   /** segundos que le quedaban al llegar el mensaje (el cliente los baja con el reloj del juego) */
   ttl: number;
+  nature: Nature;
 }
 
 /**
- * Valida el mensaje `floorWeapons` (`{ items: { weaponId, tier, x, z, ttl }[] }`); descarta lo que no encaje.
- * Sin `tier` vale 1; con un tier inválido el ítem se descarta. Sin `ttl` (o inválido) vale FLOOR_WEAPON_TTL_S.
+ * Valida el mensaje `floorWeapons` (`{ items: { weaponId, tier, x, z, ttl, nature }[] }`); descarta lo que no encaje.
+ * Sin `tier` vale 1; con un tier inválido el ítem se descarta. Sin `ttl` (o inválido) vale FLOOR_WEAPON_TTL_S; una naturaleza desconocida vale "none".
  */
 export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
   const items = (msg as { items?: unknown } | null)?.items;
   if (!Array.isArray(items)) return [];
   const out: FloorWeapon[] = [];
-  for (const it of items as { weaponId?: unknown; tier?: unknown; x?: unknown; z?: unknown; ttl?: unknown }[]) {
+  for (const it of items as { weaponId?: unknown; tier?: unknown; x?: unknown; z?: unknown; ttl?: unknown; nature?: unknown }[]) {
     if (!it || !isWeaponId(it.weaponId) || !Number.isFinite(it.x) || !Number.isFinite(it.z)) continue;
     const tier = it.tier === undefined ? 1 : it.tier;
     if (!isWeaponTier(tier)) continue;
     const ttl = typeof it.ttl === "number" && Number.isFinite(it.ttl) ? it.ttl : FLOOR_WEAPON_TTL_S;
-    out.push({ weaponId: it.weaponId, tier, x: it.x as number, z: it.z as number, ttl });
+    out.push({ weaponId: it.weaponId, tier, x: it.x as number, z: it.z as number, ttl, nature: toNature(it.nature) });
   }
   return out;
+}
+
+/** Los puntos de un evento `chain`: al menos uno, todos [x, z] finitos (las vistas los recorren sin comprobar). */
+function isValidChain(points: unknown): boolean {
+  return (
+    Array.isArray(points) &&
+    points.length > 0 &&
+    points.every((p) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+  );
 }
 
 /** Un evento `ability` con id desconocido se ignora (las vistas indexan ABILITIES[id] y lanzarían). */
 export function isValidCombatEvent(event: unknown): event is CombatEvent {
   const e = event as { type?: unknown; id?: unknown } | null;
   if (!e || typeof e !== "object") return false;
+  if (e.type === "chain") return isValidChain((e as { points?: unknown }).points);
   return e.type !== "ability" || isAbilityId(e.id);
 }
 
@@ -271,9 +322,10 @@ function browserToken(): string {
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
-  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier" | "abilities"> & {
+  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier" | "weaponNature" | "abilities"> & {
     weaponId: string;
     weaponTier: number;
+    weaponNature: string;
     abilities: { forEach(cb: (s: { id: string; rank: number; cooldown: number }) => void): void };
   };
   room.state.players.forEach((p: RawPlayer, key: string) => {
@@ -298,6 +350,11 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       swingTimer: p.swingTimer,
       weaponId: isWeaponId(p.weaponId) ? p.weaponId : STARTING_WEAPON,
       weaponTier: isWeaponTier(p.weaponTier) ? p.weaponTier : 1,
+      weaponNature: toNature(p.weaponNature),
+      burnLeft: finiteOr(p.burnLeft, 0),
+      slowLeft: finiteOr(p.slowLeft, 0),
+      stunLeft: finiteOr(p.stunLeft, 0),
+      statusSpeedMult: finiteOr(p.statusSpeedMult, 1),
       abilities,
       passiveRank: p.passiveRank ?? 0,
       blocking: p.blocking ?? false,
@@ -313,7 +370,12 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
 
 function snapshotWorld(room: Room): WorldSnapshot {
   const enemies = new Map<string, EnemySnapshot>();
-  type RawEnemy = Omit<EnemySnapshot, "weaponId" | "weaponTier"> & { weaponId: string; weaponTier: number };
+  type RawEnemy = Omit<EnemySnapshot, "weaponId" | "weaponTier" | "weaponNature" | "nature"> & {
+    weaponId: string;
+    weaponTier: number;
+    weaponNature: string;
+    nature: string;
+  };
   room.state.enemies.forEach((e: RawEnemy, id: string) => {
     // Desarmado: el servidor manda "" y 0.
     const armed = isWeaponId(e.weaponId) && isWeaponTier(e.weaponTier);
@@ -328,6 +390,12 @@ function snapshotWorld(room: Room): WorldSnapshot {
       aiTime: e.aiTime,
       weaponId: armed ? (e.weaponId as WeaponId) : null,
       weaponTier: armed ? (e.weaponTier as WeaponTier) : null,
+      weaponNature: armed ? toNature(e.weaponNature) : "none",
+      elite: e.elite ?? false,
+      nature: toNature(e.nature),
+      burning: e.burning ?? false,
+      slowed: e.slowed ?? false,
+      frozen: e.frozen ?? false,
       stunned: e.stunned ?? 0,
       spellTier: e.spellTier ?? 0,
     });
@@ -349,6 +417,11 @@ function snapshotWorld(room: Room): WorldSnapshot {
     const h = parseHazard(raw);
     if (h) hazards.set(id, h);
   });
+  const chests = new Map<string, ChestSnapshot>();
+  room.state.chests?.forEach((raw: unknown, id: string) => {
+    const c = parseChest(raw);
+    if (c) chests.set(id, c);
+  });
   const st = room.state;
   return {
     tick: st.tick,
@@ -356,6 +429,7 @@ function snapshotWorld(room: Room): WorldSnapshot {
     xp: st.xp,
     xpToNext: st.xpToNext,
     floorTime: st.floorTime,
+    chests,
     enemies,
     projectiles,
     orbs,

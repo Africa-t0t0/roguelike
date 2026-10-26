@@ -297,12 +297,15 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         // de acciones (el servidor igual las ignora).
         const dead = mine?.dead ?? false;
         const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS));
+        // Aturdido tampoco ataca ni lanza habilidades (el servidor las ignora; no se predicen).
+        const stunned = (mine?.stunLeft ?? 0) > 0;
         const sampled = sanitizeInput(dead ? withoutActions(raw) : raw);
         if (!sampled) continue;
         prev = predictor.current;
         // Como el servidor: se mueve con el Bloqueo del input anterior y luego se actualiza.
         const moveSpeedMult = mine?.moveSpeedMult ?? 1;
-        predictor.setMoveMods({ speedMult: moveSpeedMult * (ability.isBlocking ? BLOCK_MOVE_MULT : 1) });
+        const statusSpeedMult = mine?.statusSpeedMult ?? 1;
+        predictor.setMoveMods({ speedMult: moveSpeedMult * statusSpeedMult * (ability.isBlocking ? BLOCK_MOVE_MULT : 1) });
         predictor.applyLocal(sampled);
         // El golpe y la habilidad propios arrancan su clip ya (como el servidor: tras moverse, el combo
         // avanza, luego la habilidad y al final el ataque); el daño lo decide él. Con el arma que dice el
@@ -310,8 +313,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
         combo.advance(weaponId);
         ability.setCooldownMult(mine?.cooldownMult ?? 1);
-        ability.tick(sampled.abilities, { dead, swingTimer: combo.state().swingTimer }, now);
-        combo.attack(sampled.attack, { dead, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
+        ability.tick(sampled.abilities, { dead: dead || stunned, swingTimer: combo.state().swingTimer }, now);
+        combo.attack(sampled.attack, { dead: dead || stunned, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
       }
       smoother.decay(dt);

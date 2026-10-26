@@ -1,4 +1,4 @@
-import { TIERS, weaponDisplayName, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { TIERS, weaponDisplayName, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 
 /** "96/120" (la vida se muestra entera, redondeando hacia arriba, nunca negativa). */
 export function formatHp(hp: number, maxHp: number): string {
@@ -10,10 +10,25 @@ export function formatXp(xp: number, toNext: number): string {
   return `${Math.floor(xp)}/${toNext} XP`; // la XP puede ser fraccionaria (Aprendizaje)
 }
 
-/** Nombre visible del arma con su tier: "Mandoble templado". */
-export function formatWeapon(weaponId: WeaponId, tier: WeaponTier): string {
-  return weaponDisplayName(weaponId, tier);
+/** Nombre visible del arma con su tier y naturaleza: "Mandoble templado", "Mandoble legendario de fuego". */
+export function formatWeapon(weaponId: WeaponId, tier: WeaponTier, nature: Nature = "none"): string {
+  return weaponDisplayName(weaponId, tier, nature);
 }
+
+export type StatusKind = "burn" | "slow" | "stun";
+
+/** Estados activos del jugador con los segundos que les quedan, en el orden fijo quemadura, ralentización, aturdimiento. */
+export function formatStatus(s: { burnLeft: number; slowLeft: number; stunLeft: number }): { kind: StatusKind; left: number }[] {
+  const all: { kind: StatusKind; left: number }[] = [
+    { kind: "burn", left: s.burnLeft },
+    { kind: "slow", left: s.slowLeft },
+    { kind: "stun", left: s.stunLeft },
+  ];
+  return all.filter((e) => e.left > 0);
+}
+
+/** Glifo de cada estado (texto, sin imágenes); el color va en el CSS (`hud-st-*`). */
+const STATUS_GLYPH: Record<StatusKind, string> = { burn: "♨", slow: "❄", stun: "ϟ" };
 
 /** Color CSS del nombre de un arma: dorado viejo para tier 1, el brillo del tier (aclarado) para 2 y 3. */
 export function tierColor(tier: WeaponTier): string {
@@ -59,6 +74,7 @@ export class Hud {
   private readonly weapon: HTMLDivElement;
   private readonly hpFill: HTMLDivElement;
   private readonly hpText: HTMLSpanElement;
+  private readonly statusIcons: Record<StatusKind, HTMLDivElement>;
   private readonly xpFill: HTMLDivElement;
   private readonly xpText: HTMLDivElement;
   private readonly level: HTMLDivElement;
@@ -79,7 +95,11 @@ export class Hud {
     this.level = div("hud-level", frame);
     const bars = div("hud-bars", card);
     this.weapon = div("hud-weapon", bars);
-    const hp = div("hud-bar hud-hp", bars);
+    const hpRow = div("hud-hprow", bars);
+    const hp = div("hud-bar hud-hp", hpRow);
+    const status = div("hud-status", hpRow);
+    this.statusIcons = { burn: div("hud-st hud-st-burn", status), slow: div("hud-st hud-st-slow", status), stun: div("hud-st hud-st-stun", status) };
+    for (const icon of Object.values(this.statusIcons)) icon.hidden = true;
     this.hpFill = div("hud-fill", hp);
     const hpLabel = div("hud-text", hp);
     const heart = document.createElement("span");
@@ -104,17 +124,31 @@ export class Hud {
     respawnIn: number;
     weaponId: WeaponId;
     weaponTier: WeaponTier;
+    weaponNature: Nature;
+    burnLeft: number;
+    slowLeft: number;
+    stunLeft: number;
     buffDamage: number;
   }): void {
     // Grito de guerra activo: brillo dorado alrededor de la tarjeta.
     this.card.classList.toggle("hud-buffed", p.buffDamage > 0);
-    const name = formatWeapon(p.weaponId, p.weaponTier);
+    const name = formatWeapon(p.weaponId, p.weaponTier, p.weaponNature);
     if (this.weapon.textContent !== name) {
       this.weapon.textContent = name;
       this.weapon.style.color = tierColor(p.weaponTier);
     }
     this.hpFill.style.width = `${clamp01(p.hp / p.maxHp) * 100}%`;
     this.hpText.textContent = formatHp(p.hp, p.maxHp);
+    const active = new Map(formatStatus(p).map((e) => [e.kind, e.left]));
+    for (const kind of Object.keys(this.statusIcons) as StatusKind[]) {
+      const icon = this.statusIcons[kind];
+      const left = active.get(kind);
+      icon.hidden = left === undefined;
+      if (left !== undefined) {
+        const text = `${STATUS_GLYPH[kind]} ${Math.ceil(left)}`; // segundos enteros hacia arriba
+        if (icon.textContent !== text) icon.textContent = text;
+      }
+    }
     this.death.hidden = !p.dead;
     if (p.dead) this.death.textContent = formatRespawn(p.respawnIn);
   }

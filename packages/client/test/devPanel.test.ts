@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ABILITIES, parseDevCommand, STAT_CARDS } from "@roguelike/shared";
-import { devCardOptions, toggleLabel } from "../src/ui/devPanel";
+import { devCardOptions, NATURE_LABELS, toggleLabel } from "../src/ui/devPanel";
 
 describe("panel de pruebas", () => {
   it("ofrece cada habilidad en sus 3 rangos y cada carta de stat, todas válidas para el servidor", () => {
@@ -11,6 +11,10 @@ describe("panel de pruebas", () => {
       "Tajo frontal III",
     );
     expect(options.find((o) => o.card.kind === "stat" && o.card.id === "haste")?.label).toBe("Celeridad");
+  });
+
+  it("el selector de naturaleza usa sus etiquetas", () => {
+    expect(NATURE_LABELS).toEqual(["Sin naturaleza", "Fuego", "Hielo", "Rayo"]);
   });
 
   it("los interruptores muestran sí o no", () => {

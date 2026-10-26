@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatFloorTime, formatHp, formatRespawn, formatWeapon, formatXp, tierColor } from "../src/ui/hud";
+import { formatFloorTime, formatHp, formatRespawn, formatStatus, formatWeapon, formatXp, tierColor } from "../src/ui/hud";
 
 describe("textos del HUD", () => {
   it("formatHp", () => {
@@ -44,5 +44,17 @@ describe("textos del HUD", () => {
     expect(tierColor(1)).toBe("#d9b46a");
     expect(tierColor(2)).toBe("rgb(147, 180, 255)");
     expect(tierColor(3)).toBe("rgb(197, 139, 255)");
+  });
+
+  it("formatWeapon suma la naturaleza", () => {
+    expect(formatWeapon("great-sword", 4, "fire")).toBe("Mandoble legendario de fuego");
+  });
+
+  it("formatStatus lista solo los estados activos, en orden", () => {
+    expect(formatStatus({ burnLeft: 2, slowLeft: 0, stunLeft: 0.2 })).toEqual([
+      { kind: "burn", left: 2 },
+      { kind: "stun", left: 0.2 },
+    ]);
+    expect(formatStatus({ burnLeft: 0, slowLeft: 0, stunLeft: 0 })).toEqual([]);
   });
 });

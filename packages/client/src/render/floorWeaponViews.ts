@@ -5,7 +5,7 @@ import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { FloorWeapon } from "../net/connection";
 import { formatWeapon, tierColor } from "../ui/hud";
 import type { Assets } from "./assets";
@@ -36,8 +36,8 @@ interface FloorNode {
 }
 
 /** "Recoger Mandoble templado" (el aviso lo muestra en dos partes: verbo y nombre). */
-export function pickupPrompt(weaponId: WeaponId, tier: WeaponTier): string {
-  return `Recoger ${formatWeapon(weaponId, tier)}`;
+export function pickupPrompt(weaponId: WeaponId, tier: WeaponTier, nature: Nature = "none"): string {
+  return `Recoger ${formatWeapon(weaponId, tier, nature)}`;
 }
 
 /** El arma del suelo más cercana a ≤ PICKUP_RANGE de (x, z), como la elige el servidor; o undefined. */
@@ -116,7 +116,7 @@ export class FloorWeaponViews {
     if (this.hintName.textContent !== name) {
       this.hintName.textContent = name;
       this.hintName.style.color = tierColor(near.tier);
-      this.hint.setAttribute("aria-label", pickupPrompt(near.weaponId, near.tier));
+      this.hint.setAttribute("aria-label", pickupPrompt(near.weaponId, near.tier, near.nature));
     }
     // Anclado sobre el arma: la línea guía (CSS) baja desde la esquina inferior izquierda del aviso.
     this.hint.style.transform = `translate(${at.x}px, ${at.y}px)`;

@@ -7,6 +7,7 @@ import {
   type CardOffer,
   type DevCommand,
   type EnemyKind,
+  type Nature,
   type StatCardId,
   type WeaponId,
   type CasterTier,
@@ -32,6 +33,14 @@ export function devCardOptions(): { label: string; card: CardOffer }[] {
 
 const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo" };
 const TIER_LABELS = ["Desarmado", "Tier 1", "Tier 2", "Tier 3"];
+/** Etiquetas del selector "Naturaleza" y el valor que cada una manda (la primera es "ninguna"). */
+export const NATURE_LABELS = ["Sin naturaleza", "Fuego", "Hielo", "Rayo"];
+const NATURES: Nature[] = ["none", "fire", "ice", "lightning"];
+const STATUS_BUTTONS: { label: string; kind: "burn" | "slow" | "stun" }[] = [
+  { label: "Quemarme", kind: "burn" },
+  { label: "Ralentizarme", kind: "slow" },
+  { label: "Aturdirme", kind: "stun" },
+];
 
 /** Lo que muestra un interruptor: "Invulnerable: sí". */
 export function toggleLabel(name: string, on: boolean): string {
@@ -87,6 +96,7 @@ export class DevPanel {
     this.toggle(me, "Invulnerable", false, (on) => ({ cmd: "god", on }));
     this.toggle(me, "Sin enfriamiento", false, (on) => ({ cmd: "noCooldown", on }));
     this.button(me, "Curar y recargar", () => ({ cmd: "heal" }));
+    for (const s of STATUS_BUTTONS) this.button(me, s.label, () => ({ cmd: "status", kind: s.kind }));
 
     const enemies = this.section("Enemigos");
     const kinds = Object.keys(ENEMY_LABELS) as EnemyKind[];
@@ -94,12 +104,25 @@ export class DevPanel {
     const countSel = this.select(enemies, ["1", "3", "5", "10", "20"]);
     const tierSel = this.select(enemies, TIER_LABELS);
     tierSel.selectedIndex = 1;
-    this.button(enemies, "Crear delante", () => ({
-      cmd: "spawn",
-      kind: kinds[kindSel.selectedIndex]!,
-      count: Number(countSel.value),
-      tier: tierSel.selectedIndex as 0 | CasterTier,
-    }));
+    const natureSel = this.select(enemies, NATURE_LABELS);
+    let elite = false;
+    const eliteBtn = this.button(enemies, toggleLabel("Élite", elite), () => {
+      elite = !elite;
+      eliteBtn.textContent = toggleLabel("Élite", elite);
+      eliteBtn.classList.toggle("on", elite);
+      return null; // solo cambia el interruptor; "Crear delante" lo lleva
+    });
+    this.button(enemies, "Crear delante", () => {
+      const nature = NATURES[natureSel.selectedIndex]!;
+      return {
+        cmd: "spawn",
+        kind: kinds[kindSel.selectedIndex]!,
+        count: Number(countSel.value),
+        tier: tierSel.selectedIndex as 0 | CasterTier,
+        ...(elite ? { elite } : {}),
+        ...(nature === "none" ? {} : { nature }),
+      };
+    });
     this.button(enemies, "Matar a todos", () => ({ cmd: "killAll" }));
     this.toggle(enemies, "Enemigos quietos", false, (on) => ({ cmd: "freeze", on }));
     this.button(enemies, "Hechizo ya", () => ({ cmd: "castNow" }));
@@ -111,13 +134,17 @@ export class DevPanel {
 
     const weapon = this.section("Arma");
     const weapons: { id: WeaponId; tier: WeaponTier }[] = (Object.keys(WEAPONS) as WeaponId[]).flatMap((id) =>
-      ([1, 2, 3] as const).map((tier) => ({ id, tier })),
+      ([1, 2, 3, 4] as const).map((tier) => ({ id, tier })),
     );
     const weaponSel = this.select(weapon, weapons.map((w) => weaponDisplayName(w.id, w.tier)));
+    const weaponNatureSel = this.select(weapon, NATURE_LABELS);
     this.button(weapon, "Equipar", () => {
       const w = weapons[weaponSel.selectedIndex]!;
-      return { cmd: "weapon", weaponId: w.id, tier: w.tier, nature: "none" };
+      return { cmd: "weapon", weaponId: w.id, tier: w.tier, nature: NATURES[weaponNatureSel.selectedIndex]! };
     });
+
+    const chest = this.section("Cofres");
+    this.button(chest, "Cofre delante", () => ({ cmd: "chest" }));
   }
 
   private section(title: string): HTMLDivElement {
@@ -131,12 +158,14 @@ export class DevPanel {
     return s;
   }
 
-  private button(parent: HTMLElement, label: string, cmd: () => DevCommand): HTMLButtonElement {
+  /** Botón que manda el comando que devuelve `cmd`; con null no manda nada (solo cambia su propio estado). */
+  private button(parent: HTMLElement, label: string, cmd: () => DevCommand | null): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = label;
     b.addEventListener("click", () => {
-      this.send(cmd());
+      const c = cmd();
+      if (c) this.send(c);
       b.blur(); // que Espacio (saltar) no lo vuelva a pulsar
     });
     parent.append(b);
