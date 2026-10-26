@@ -100,12 +100,68 @@ const player = (key: string) => {
   return p;
 };
 const input = (seq: number) => ({ seq, moveX: 1, moveZ: 0, facing: Math.PI / 2 });
+/**
+ * Marca la partida como empezada sin cruzar los sellos: los tests del reloj, las oleadas y el vencimiento de
+ * armas no dependen de dónde está el jugador. (Teletransportarse fuera de la sala inicial también la inicia.)
+ */
+const startRun = () => {
+  room.state.started = true;
+};
 const tileOf = (v: number) => Math.floor(v / TILE_SIZE);
+
+describe("RunRoom: inicio al cruzar el sello", () => {
+  const startRoom = () => {
+    const d = generateDungeon(SEED, 1);
+    return { d, r: d.rooms[d.startRoomId]! };
+  };
+
+  it("sala nueva: started false; el reloj y los enemigos no avanzan con el jugador dentro", async () => {
+    expect(room.state.started).toBe(false);
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect(room.state.started).toBe(false);
+    expect(room.state.floorTime).toBe(0);
+    expect(room.state.enemies.size).toBe(0);
+  });
+
+  it("salir de la sala inicial inicia la partida, el reloj corre y volver a entrar no la revierte", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const { d, r } = startRoom();
+    const out = d.rooms.find((x) => x.id !== r.id)!;
+    teleport("ana", roomSpawnPoints(d, out.id, 1)[0]!);
+    await ticksUntil(() => room.state.started, 5);
+    const t0 = room.state.floorTime;
+    for (let i = 0; i < 5; i++) await room.waitForNextTimestep();
+    expect(room.state.floorTime).toBeGreaterThan(t0);
+    teleport("ana", roomSpawnPoints(d, r.id, 1)[0]!);
+    for (let i = 0; i < 5; i++) await room.waitForNextTimestep();
+    expect(room.state.started).toBe(true);
+  });
+
+  it("un segundo jugador que entra después recibe started true", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    startRun();
+    const beto = await join("Beto", "t-beto");
+    await beto.welcome;
+    await room.waitForNextTimestep();
+    expect(room.state.started).toBe(true);
+  });
+
+  it("la sala sandbox empieza con started true", async () => {
+    await colyseus.cleanup();
+    room = await colyseus.createRoom<RunRoom>("run", { seed: SEED, emptyRoomTtlMs: 200, sandbox: true });
+    expect(room.state.started).toBe(true);
+  });
+});
 
 describe("RunRoom: reloj del piso y oleadas", () => {
   it("floorTime crece ~1/30 por tick con un cliente y se detiene cuando se va", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
+    startRun();
     await room.waitForNextTimestep();
     const t0 = room.state.floorTime;
     const k0 = room.state.tick;
@@ -128,6 +184,7 @@ describe("RunRoom: reloj del piso y oleadas", () => {
     expect(room.state.floorTime).toBe(120);
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
+    startRun();
     await ticksUntil(() => room.state.enemies.size > 0, 10);
     // Los de oleada no pertenecen a ninguna sala y persiguen desde que nacen.
     expect(room.state.enemies.size).toBeLessThanOrEqual(waveGroupSize(120, 1));
@@ -939,6 +996,7 @@ describe("RunRoom: orbes y botín", () => {
   it("Foco 4: al volver por nombre conserva el tier del arma, el de sus armas del suelo, el reloj y los orbes", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
+    startRun();
     await ticksUntil(() => ana.floors.length >= 1, 10);
     const r = record("ana");
     r.combat.weaponId = "great-sword";
@@ -1122,6 +1180,7 @@ describe("RunRoom: vencimiento de las armas del suelo", () => {
   it("un arma soltada vence a los 40 s simulados y se reenvía la lista vacía", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
+    startRun();
     const f = await withDrop(ana);
     // Se adelanta el reloj hasta 0,2 s antes del vencimiento: en el próximo tick aún está.
     room["floorTime"] = f.expiresAt - 0.2;
@@ -1140,6 +1199,7 @@ describe("RunRoom: vencimiento de las armas del suelo", () => {
   it("Foco 1: en la pausa no vence y al reanudar le queda lo mismo", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
+    startRun();
     const f = await withDrop(ana);
     room["floorTime"] = f.expiresAt - 0.5;
     room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());

@@ -158,6 +158,8 @@ export const RunState = schema(
     playerShots: t.map(PlayerShotState),
     /** el grupo está eligiendo cartas: la simulación no avanza */
     paused: t.boolean(),
+    /** La partida ya empezó (un jugador cruzó los sellos de la sala inicial). Una vez true no vuelve a false. */
+    started: t.boolean(),
     /** segundos que quedan de la elección en curso de la pausa */
     pauseLeft: t.number(),
   },

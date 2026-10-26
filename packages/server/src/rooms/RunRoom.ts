@@ -20,6 +20,7 @@ import {
   MSG,
   newComboTimers,
   normalizeName,
+  outsideStartRoom,
   parseDevCommand,
   PATCH_RATE_MS,
   playerMods,
@@ -143,6 +144,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.floorTime = floorTimeStart;
     this.state = new RunState({
       seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart, paused: false, pauseLeft: 0,
+      // El sandbox empieza ya abierto; una sala normal espera a que alguien cruce los sellos.
+      started: sandbox,
     });
     syncWorld(this.state, [], [], this.combat, []);
     for (const spot of chestSpots(this.dungeon)) this.addChest(spot.x, spot.z);
@@ -437,11 +440,14 @@ export class RunRoom extends Room<{ state: RunState }> {
     const alive = this.simPlayers(connected);
     // El reloj avanza solo con jugadores conectados; el sorteo de tiers y el escalado de lo que se cree usan
     // el reloj actual y el nivel del grupo.
-    if (connected.length > 0) this.floorTime += SIM_DT;
+    // Antes de empezar (nadie ha cruzado los sellos) el reloj, las oleadas y el llenado de salas están quietos.
+    if (!this.state.started && alive.some((p) => outsideStartRoom(this.dungeon, p.x, p.z))) this.state.started = true;
+    const started = this.state.started;
+    if (connected.length > 0 && started) this.floorTime += SIM_DT;
     this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor, this.combat.level);
     this.pruneFloorWeapons();
-    if (this.wavesOn) this.enemySystem.activateRooms(alive, this.registry.size());
-    if (connected.length > 0 && this.wavesOn) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
+    if (started && this.wavesOn) this.enemySystem.activateRooms(alive, this.registry.size());
+    if (connected.length > 0 && started && this.wavesOn) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
     this.burnTick();
