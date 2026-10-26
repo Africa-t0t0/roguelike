@@ -111,7 +111,7 @@ interface Piece {
 }
 
 /** Grietas desde el centro: líneas oscuras con borde naranja (o del color de la naturaleza). Pseudoaleatorias con semilla (siempre iguales). */
-function drawCracks(ctx: CanvasRenderingContext2D, s: number, edge: Color3 | undefined): void {
+export function drawCracks(ctx: CanvasRenderingContext2D, s: number, edge: Color3 | undefined): void {
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
   const paths: [number, number][][] = [];

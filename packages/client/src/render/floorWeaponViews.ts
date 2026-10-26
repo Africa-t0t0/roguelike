@@ -11,6 +11,8 @@ import { formatWeapon, pickupInfo, tierColor, type PickupInfo } from "../ui/hud"
 import type { Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
 import { attachNatureFx, NATURE_COLORS, type NatureFx } from "./natureLooks";
+import { FloorItemKit } from "./floorItemViews";
+import { itemGlow } from "./gearLooks";
 import { applyTierGlow } from "./tierGlow";
 
 const SPIN_RAD_PER_S = 0.8;
@@ -71,8 +73,8 @@ export function nearestClosedChest<T extends { x: number; z: number; open: boole
  * Ítems del suelo del propio jugador (las manda solo a él el servidor). Las armas: de pie (punta clavada en el suelo, algo inclinadas), girando
  * despacio y oscilando sobre un disco que brilla. Desde tier 2, el disco y el arma brillan con el color del tier. Cerca de una se
  * muestra "E: tomar <nombre>" (DOM, con textContent). Cada arma vence: su `ttl` baja con el reloj de juego
- * (se congela en la pausa) y con ≤ 5 s parpadea. El equipo y las reliquias comparten lista y aviso (con comparación o texto);
- * su dibujo es de otra parte: aquí solo llevan un pivote vacío.
+ * (se congela en la pausa) y con ≤ 5 s parpadea. El equipo y las reliquias comparten lista, aviso (con comparación o texto),
+ * aro y parpadeo; su forma sale de `FloorItemKit` (equipo con aro y brillo del tier; reliquia: gema con halo y rayo).
  */
 export class FloorWeaponViews {
   private items: FloorItem[] = [];
@@ -82,6 +84,7 @@ export class FloorWeaponViews {
   private shownKey = ""; // aviso mostrado ahora (para no reescribir el DOM)
   private setAtMs = 0; // instante de juego (ms) en que llegó la lista
   private readonly glows = new Map<string, StandardMaterial>(); // material del velo y del aro por tier
+  private readonly kit: FloorItemKit;
   private readonly hint = document.createElement("div");
   private readonly hintName = document.createElement("span");
   private readonly hintVerb = document.createElement("span");
@@ -93,6 +96,7 @@ export class FloorWeaponViews {
     private readonly assets: Assets,
     parent: HTMLElement = document.body,
   ) {
+    this.kit = new FloorItemKit(scene);
     this.hint.className = "pickup-hint";
     this.hint.hidden = true;
     const key = document.createElement("span");
@@ -199,6 +203,7 @@ export class FloorWeaponViews {
     this.clear();
     for (const m of this.glows.values()) m.dispose();
     this.glows.clear();
+    this.kit.dispose();
     this.hint.remove();
   }
 
@@ -232,15 +237,20 @@ export class FloorWeaponViews {
   private build(item: FloorItem, i: number): FloorNode {
     const pivot = new TransformNode(`floor-weapon-${i}`, this.scene);
     pivot.position.set(item.x, 0, item.z);
-    // Equipo y reliquias: pivote vacío (su dibujo es de otra parte).
-    if (item.kind !== "weapon") {
-      const weapon = new TransformNode(`floor-item-bob-${i}`, this.scene);
-      weapon.parent = pivot;
-      const spin = new TransformNode(`floor-item-spin-${i}`, this.scene);
-      spin.parent = weapon;
-      return { pivot, weapon, spin };
+    if (item.kind === "weapon") return this.buildWeapon(item, pivot, i);
+    // Equipo y reliquias: oscilan y giran como las armas.
+    const weapon = new TransformNode(`floor-item-bob-${i}`, this.scene);
+    weapon.parent = pivot;
+    const spin = new TransformNode(`floor-item-spin-${i}`, this.scene);
+    spin.parent = weapon;
+    if (item.kind === "gear") {
+      const nature = itemGlow(item.item);
+      this.kit.gear(spin, item.item.slot, item.item.tier, nature);
+      this.addRing(pivot, item.item.tier, nature, i);
+    } else {
+      this.kit.relic(spin, weapon, item.id);
     }
-    return this.buildWeapon(item, pivot, i);
+    return { pivot, weapon, spin };
   }
 
   private buildWeapon(f: FloorWeapon, pivot: TransformNode, i: number): FloorNode {
@@ -270,18 +280,22 @@ export class FloorWeaponViews {
     lean.rotation.z = LEAN_RAD;
     // Partículas del arma (antes del velo y el aro, que ensancharían la caja que se mide).
     const fx = f.nature === "none" ? undefined : attachNatureFx(this.scene, f.nature, pivot, this.paused);
-    // Un velo tenue y un aro fino que brillan con el color del tier.
+    this.addRing(pivot, f.tier, f.nature, i);
+    return { pivot, weapon, spin, fx };
+  }
+
+  /** Un velo tenue y un aro fino en el suelo que brillan con el color del tier (o del elemento). */
+  private addRing(pivot: TransformNode, tier: WeaponTier, nature: Nature, i: number): void {
     const disc = CreateDisc(`floor-weapon-glow-${i}`, { radius: GLOW_DIAMETER_M / 2, tessellation: 32 }, this.scene);
-    disc.material = this.glow(f.tier, "veil", f.nature);
+    disc.material = this.glow(tier, "veil", nature);
     disc.isPickable = false;
     disc.parent = pivot;
     disc.rotation.x = Math.PI / 2; // el disco mira hacia +Z: se acuesta mirando hacia arriba
     disc.position.y = 0.02;
     const ring = CreateTorus(`floor-weapon-ring-${i}`, { diameter: GLOW_DIAMETER_M, thickness: 0.025, tessellation: 48 }, this.scene);
-    ring.material = this.glow(f.tier, "ring", f.nature);
+    ring.material = this.glow(tier, "ring", nature);
     ring.isPickable = false;
     ring.parent = pivot;
     ring.position.y = 0.03;
-    return { pivot, weapon, spin, fx };
   }
 }

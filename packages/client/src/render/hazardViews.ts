@@ -12,6 +12,7 @@ import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
 import { INTERP_DELAY_MS, SPELLS } from "@roguelike/shared";
 import type { HazardSnapshot, WorldSnapshot } from "../net/connection";
+import { drawCracks } from "./abilityFx";
 import { CASTER_COLORS } from "./casterLooks";
 import { generated, PARTICLE_SPEED, radial, sparkTexture } from "./fxTextures";
 
@@ -29,6 +30,8 @@ const SCORCH_ALPHA = 0.8;
 const BURST_S = 0.5;
 const BURST_COUNT = 30;
 const BEAM_SPARK_RATE = 80;
+const CRACKS_SIZE = 2.2; // lado de la calcomanía en radios (como la del Golpe sísmico)
+const CRACKS_FADE_S = 0.6; // se desvanece en el último tramo de la grieta
 
 /** Fracción llena del disco de una zona: de 0 al empezar el aviso a 1 al estallar. */
 export function zoneFill(left: number, total: number): number {
@@ -71,9 +74,17 @@ interface Burst {
   endMs: number;
 }
 
-/** Zonas del piromante y rayos del invocador: aviso en el suelo, estallido con marca chamuscada y rayo con chispas. */
+/** Opacidad de la calcomanía de una grieta que ralentiza: llena hasta el último `CRACKS_FADE_S` y luego se desvanece. */
+export function crackAlpha(left: number): number {
+  return Math.min(1, Math.max(0, left / CRACKS_FADE_S));
+}
+
+/** Zonas del piromante y rayos del invocador: aviso en el suelo, estallido con marca chamuscada y rayo con chispas. Y las grietas ralentizadoras del Golpe sísmico (equipo). */
 export class HazardViews {
   private readonly views = new Map<string, HazardView>();
+  private readonly cracks = new Map<string, { mesh: Mesh }>();
+  private readonly crackMat: StandardMaterial;
+  private readonly crackTex: DynamicTexture;
   private readonly scorches: Scorch[] = [];
   private readonly bursts: Burst[] = [];
   private readonly ringMat: StandardMaterial;
@@ -110,6 +121,14 @@ export class HazardViews {
         [1, "rgba(0, 0, 0, 0)"],
       ]),
     );
+    this.crackTex = generated(scene, "hazard-cracks", 256, (ctx, size) => drawCracks(ctx, size, undefined));
+    this.crackMat = new StandardMaterial("hazardCracks", scene);
+    this.crackMat.disableLighting = true;
+    this.crackMat.diffuseTexture = this.crackTex;
+    this.crackMat.useAlphaFromDiffuseTexture = true;
+    this.crackMat.specularColor = Color3.Black();
+    this.crackMat.emissiveColor = Color3.Black();
+    this.crackMat.zOffset = -1;
     this.scorchMat = new StandardMaterial("hazardScorch", scene);
     this.scorchMat.diffuseColor = Color3.Black();
     this.scorchMat.specularColor = Color3.Black();
@@ -120,6 +139,7 @@ export class HazardViews {
   }
 
   push(world: WorldSnapshot, receivedAtMs: number): void {
+    this.pushCracks(world);
     for (const [id, h] of world.hazards) {
       let view = this.views.get(id);
       if (view && view.data.phase !== h.phase) {
@@ -166,6 +186,34 @@ export class HazardViews {
     }
   }
 
+  /** Grietas del Golpe sísmico: una calcomanía por zona del estado, que dura lo que le queda y se desvanece al final. */
+  private pushCracks(world: WorldSnapshot): void {
+    for (const [id, z] of world.zones) {
+      let c = this.cracks.get(id);
+      if (!c) {
+        const size = z.radius * CRACKS_SIZE;
+        // Un material por grieta: la opacidad es propia (la textura sí es compartida).
+        const mesh = CreateGround(`hazard-cracks-${id}`, { width: size, height: size }, this.scene);
+        const mat = this.crackMat.clone(`hazardCracks-${id}`);
+        mesh.material = mat;
+        mesh.position.set(z.x, FLOOR_Y, z.z);
+        mesh.isPickable = false;
+        this.cracks.set(id, (c = { mesh }));
+      }
+      c.mesh.material!.alpha = crackAlpha(z.left);
+    }
+    for (const [id, c] of this.cracks) {
+      if (world.zones.has(id)) continue;
+      this.disposeCracks(c);
+      this.cracks.delete(id);
+    }
+  }
+
+  private disposeCracks(c: { mesh: Mesh }): void {
+    c.mesh.material?.dispose(); // clon propio; la textura es compartida
+    c.mesh.dispose();
+  }
+
   /** En la pausa las partículas dejan de avanzar. */
   setPaused(paused: boolean): void {
     this.paused = paused;
@@ -181,6 +229,10 @@ export class HazardViews {
     this.scorches.length = 0;
     for (const b of this.bursts) b.ps.dispose(false);
     this.bursts.length = 0;
+    for (const c of this.cracks.values()) this.disposeCracks(c);
+    this.cracks.clear();
+    this.crackMat.dispose();
+    this.crackTex.dispose();
     for (const m of [this.ringMat, this.discMat, this.beamWarnMat, this.beamFireMat, this.beamStripMat, this.scorchMat]) m.dispose();
     this.spark.dispose();
     this.scorchTex.dispose();

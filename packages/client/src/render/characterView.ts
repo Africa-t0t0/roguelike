@@ -233,7 +233,15 @@ export class CharacterView {
    * colgarle cosas de tamaño en metros con `scaling = perMeter × metros`.
    */
   handMount(): { node: TransformNode; perMeter: number } | undefined {
-    const node = this.nodes.get("righthand");
+    return this.boneMount("righthand");
+  }
+
+  /**
+   * Hueso por su `boneKey` (head, spine2, lefthand, righthand, leftfoot, rightfoot…) y cuánto vale 1 m en su
+   * espacio local; undefined si el modelo no lo tiene.
+   */
+  boneMount(key: string): { node: TransformNode; perMeter: number } | undefined {
+    const node = this.nodes.get(key);
     if (!node) return undefined;
     const s = worldScale(node);
     return { node, perMeter: s > 1e-9 ? 1 / s : 1 };

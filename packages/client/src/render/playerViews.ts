@@ -5,11 +5,13 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type GearSlot, type Nature, type RelicId, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import type { EquippedGear } from "../net/connection";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
 import { CharacterView } from "./characterView";
+import { GearFxShared, GearLooks } from "./gearLooks";
 import { PLAYER_LOOK } from "./looks";
 
 const LABEL_W = 2;
@@ -33,10 +35,14 @@ export interface HeroState {
    * el evento `ability` (los remotos).
    */
   ability?: { id: AbilityId; elapsed: number } | null;
+  /** equipo y reliquia puestos (brillo por parte del cuerpo y gema que orbita); sin ellos, nada */
+  gear?: Partial<Record<GearSlot, EquippedGear>>;
+  relic?: RelicId | null;
 }
 
 interface PlayerView {
   character: CharacterView;
+  gearLooks: GearLooks;
   speed: SpeedMeter;
   /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
   swing?: { step: number; startMs: number; restart: boolean };
@@ -71,6 +77,8 @@ function createLabel(scene: Scene, key: string, text: string, parent: TransformN
 export class PlayerViews {
   private readonly views = new Map<string, PlayerView>();
   private readonly clipLengths: ClipLengths;
+  private readonly gearFx: GearFxShared;
+  private paused = false;
   /**
    * Empezó a dibujarse una habilidad (una vez por lanzamiento, propia o ajena): con la pose dibujada en ese
    * cuadro y cuánto lleva ya (s) en el reloj con el que se dibuja a ese jugador.
@@ -83,6 +91,7 @@ export class PlayerViews {
     private readonly anims: AnimLibrary,
   ) {
     this.clipLengths = { get: (clip) => anims.length(clip) };
+    this.gearFx = new GearFxShared(scene);
   }
 
   /** Crea las vistas de los que entraron y destruye las de los que salieron. */
@@ -126,6 +135,8 @@ export class PlayerViews {
     if (!view) return;
     view.character.setPose(pose.x, pose.y, pose.z, pose.facing);
     view.character.setWeapon(state.weaponId, { tier: state.weaponTier, nature: state.weaponNature });
+    view.gearLooks.set(state.gear ?? {}, state.relic ?? null);
+    view.gearLooks.render(nowMs);
     let { comboStep, swingTimer } = state;
     let attackClip: string | undefined;
     const s = view.swing;
@@ -174,25 +185,34 @@ export class PlayerViews {
     view.character.play(choice, attackClip !== undefined && choice.clip === attackClip);
   }
 
-  /** Congela (o reanuda) las partículas de las armas con naturaleza en la pausa del grupo. */
+  /** Congela (o reanuda) las partículas de las armas y del equipo en la pausa del grupo. */
   setPaused(paused: boolean): void {
-    for (const view of this.views.values()) view.character.setPaused(paused);
+    this.paused = paused;
+    for (const view of this.views.values()) {
+      view.character.setPaused(paused);
+      view.gearLooks.setPaused(paused);
+    }
   }
 
   dispose(): void {
     for (const view of this.views.values()) view.dispose();
     this.views.clear();
+    this.gearFx.dispose();
   }
 
   private create(key: string, name: string): PlayerView {
     const character = new CharacterView(this.scene, this.assets, this.anims, PLAYER_LOOK);
     const label = createLabel(this.scene, key, name, character.root);
+    const gearLooks = new GearLooks(this.scene, this.gearFx, character);
+    gearLooks.setPaused(this.paused);
     return {
       character,
+      gearLooks,
       speed: new SpeedMeter(),
       dispose() {
         label.material?.getActiveTextures().forEach((t) => t.dispose());
         label.material?.dispose();
+        gearLooks.dispose();
         character.dispose();
       },
     };

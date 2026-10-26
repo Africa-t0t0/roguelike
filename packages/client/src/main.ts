@@ -365,6 +365,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         blocking: ability.isBlocking,
         attackSpeedMult: mine?.attackSpeedMult ?? 1,
         ability: heroAbility,
+        gear: mine?.gear,
+        relic: mine?.relic,
       };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
