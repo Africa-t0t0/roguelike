@@ -102,14 +102,22 @@ export interface GearItem {
 /** Evita restos de coma flotante (0,05 × 1,5 = 0,07500000000000001). */
 const round = (v: number): number => Math.round(v * 10000) / 10000;
 
+/** Vida máxima y vida por muerte salen enteras; la regeneración, a un decimal (como la muestra `gearStatText`); el resto, fracciones. */
+function rollValue(stat: GearStat, base: number, mult: number): number {
+  const v = base * mult;
+  if (stat === "maxHp" || stat === "lifeOnKill") return Math.round(v);
+  if (stat === "regen") return Math.round(v * 10) / 10;
+  return round(v);
+}
+
 export function rollGear(rng: Rng, slot: GearSlot, tier: WeaponTier, cls: ClassId): GearItem {
   const mult = GEAR_TIER_MULT[tier];
   const main = GEAR_MAIN[slot];
-  const stats: GearItem["stats"] = [{ stat: main, value: round(GEAR_BASE[main] * mult) }];
+  const stats: GearItem["stats"] = [{ stat: main, value: rollValue(main, GEAR_BASE[main], mult) }];
   const bag = [...SECONDARY_BAG];
   for (let i = 0; i < GEAR_SECONDARIES[tier]; i++) {
     const s = bag.splice(rng.int(0, bag.length - 1), 1)[0]!;
-    stats.push({ stat: s, value: round(GEAR_BASE[s] * mult) });
+    stats.push({ stat: s, value: rollValue(s, GEAR_BASE[s], mult) });
   }
   let legendary: LegendaryId | null = null;
   if (tier === 4) {

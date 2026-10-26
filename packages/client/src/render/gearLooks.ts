@@ -254,6 +254,7 @@ export class GearLooks {
     if (!e.base) return;
     e.ps.color1 = e.base.c1;
     e.ps.color2 = e.base.c2;
+    e.ps.manualEmitCount = -1; // Babylon lo deja en 0 tras el destello: -1 devuelve la emisión continua
   }
 
   private buildRelic(id: RelicId): RelicFx {

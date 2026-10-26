@@ -5,7 +5,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { PARTICLE_SPEED } from "../src/render/fxTextures";
 import { FloorItemKit } from "../src/render/floorItemViews";
 import { GearFxShared, GearLooks, gearGlow, itemGlow, type BoneSource } from "../src/render/gearLooks";
-import { crackAlpha } from "../src/render/hazardViews";
+import { HazardViews, crackAlpha } from "../src/render/hazardViews";
 import { NATURE_COLORS } from "../src/render/natureLooks";
 
 // En node no hay canvas: DynamicTexture pide un OffscreenCanvas falso con un contexto 2D que no dibuja.
@@ -84,7 +84,7 @@ describe("GearLooks", () => {
     const scene = new Scene(new NullEngine());
     const shared = new GearFxShared(scene);
     const looks = new GearLooks(scene, shared, character(scene));
-    looks.set({ helmet: { tier: 2, legendary: true, glow: "none" } }, null);
+    looks.set({ helmet: { tier: 4, legendary: true, glow: "none" } }, null);
     const ps = scene.particleSystems[0]!;
     const c1 = ps.color1.clone();
     looks.render(1000); // programa (primer destello a los 1,5 s)
@@ -96,6 +96,7 @@ describe("GearLooks", () => {
     ps.manualEmitCount = 0; // lo consumió el sistema
     looks.render(2700);
     expect(ps.color1.equals(c1)).toBe(true);
+    expect(ps.manualEmitCount).toBe(-1); // vuelve la emisión continua
     looks.dispose();
     shared.dispose();
   });
@@ -122,5 +123,25 @@ describe("grietas", () => {
     expect(crackAlpha(3)).toBe(1);
     expect(crackAlpha(0.3)).toBeCloseTo(0.5);
     expect(crackAlpha(0)).toBe(0);
+  });
+});
+
+describe("grietas del Golpe sísmico", () => {
+  it("no filtran texturas: usan el material compartido y se desvanecen con visibility", () => {
+    const scene = new Scene(new NullEngine());
+    const views = new HazardViews(scene);
+    const world = (left: number) =>
+      ({ hazards: new Map(), zones: new Map([["z1", { x: 0, z: 0, radius: 3, left, total: 4 }]]) }) as never;
+    const before = scene.textures.length;
+    views.push(world(4), 0);
+    expect(scene.textures).toHaveLength(before);
+    const crack = scene.getMeshByName("hazard-cracks-z1")!;
+    expect(crack.visibility).toBeCloseTo(crackAlpha(4));
+    views.push(world(0.1), 100);
+    expect(crack.visibility).toBeCloseTo(crackAlpha(0.1));
+    views.push({ hazards: new Map(), zones: new Map() } as never, 200);
+    expect(scene.getMeshByName("hazard-cracks-z1")).toBeNull();
+    expect(scene.textures).toHaveLength(before);
+    views.dispose();
   });
 });

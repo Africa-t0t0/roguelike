@@ -27,6 +27,18 @@ describe("rollGear", () => {
     expect(g.stats).toHaveLength(4);
     expect(LEGENDARY_POOL.warrior.boots).toContain(g.legendary);
   });
+  it("stats planas enteras (regen a 1 decimal) en todos los tiers", () => {
+    for (let s = 0; s < 40; s++) {
+      for (const tier of [1, 2, 3, 4] as const) {
+        for (const slot of ["helmet", "chest", "gloves", "boots"] as const) {
+          for (const e of rollGear(createRng(s), slot, tier, "warrior").stats) {
+            if (e.stat === "maxHp" || e.stat === "lifeOnKill") expect(Number.isInteger(e.value)).toBe(true);
+            if (e.stat === "regen") expect(Math.round(e.value * 10) / 10).toBe(e.value);
+          }
+        }
+      }
+    }
+  });
   it("determinista", () => {
     expect(rollGear(createRng(5), "helmet", 4, "warrior")).toEqual(rollGear(createRng(5), "helmet", 4, "warrior"));
   });

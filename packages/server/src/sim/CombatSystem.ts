@@ -160,7 +160,7 @@ export function rewindTick(nowTick: number, viewTick: number): number {
 
 /** Vida máxima: (la del nivel + bonos de cartas y equipo) × `maxHpMult` (Corazón de cristal). */
 export function maxHpFor(cls: ClassId, level: number, mods: PlayerMods): number {
-  return (playerStats(cls, level).maxHp + mods.maxHpBonus) * mods.maxHpMult;
+  return Math.round((playerStats(cls, level).maxHp + mods.maxHpBonus) * mods.maxHpMult);
 }
 
 export function newCombatState(

@@ -192,15 +192,14 @@ export class HazardViews {
       let c = this.cracks.get(id);
       if (!c) {
         const size = z.radius * CRACKS_SIZE;
-        // Un material por grieta: la opacidad es propia (la textura sí es compartida).
+        // Material compartido (clonarlo clona la DynamicTexture y la deja en blanco): la opacidad va por `visibility`.
         const mesh = CreateGround(`hazard-cracks-${id}`, { width: size, height: size }, this.scene);
-        const mat = this.crackMat.clone(`hazardCracks-${id}`);
-        mesh.material = mat;
+        mesh.material = this.crackMat;
         mesh.position.set(z.x, FLOOR_Y, z.z);
         mesh.isPickable = false;
         this.cracks.set(id, (c = { mesh }));
       }
-      c.mesh.material!.alpha = crackAlpha(z.left);
+      c.mesh.visibility = crackAlpha(z.left);
     }
     for (const [id, c] of this.cracks) {
       if (world.zones.has(id)) continue;
@@ -210,7 +209,7 @@ export class HazardViews {
   }
 
   private disposeCracks(c: { mesh: Mesh }): void {
-    c.mesh.material?.dispose(); // clon propio; la textura es compartida
+    // el material es compartido: solo se libera la malla
     c.mesh.dispose();
   }
 

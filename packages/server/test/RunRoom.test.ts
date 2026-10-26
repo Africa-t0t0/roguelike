@@ -1905,7 +1905,7 @@ describe("RunRoom: sandbox", () => {
     dev(ana.client, { cmd: "gear", slot: "helmet", tier: 2, action: "equip" });
     await ticksUntil(() => player("ana").maxHp > base, 10);
     const maxHp = player("ana").maxHp;
-    expect(maxHp).toBe(base + 22.5);
+    expect(maxHp).toBe(base + 23);
     const oldLeft = new Promise<number>((resolve) => ana.client.onLeave((code) => resolve(code)));
     const again = await join("Ana", "t-ana");
     await again.welcome;

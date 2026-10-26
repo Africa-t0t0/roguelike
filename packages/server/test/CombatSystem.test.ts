@@ -20,7 +20,7 @@ import {
 } from "@roguelike/shared";
 import { EnemySystem, type SimPlayer } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
-import { CombatSystem, moveSpeedMult, newCombatState, statusSpeedMult, type CombatState } from "../src/sim/CombatSystem";
+import { CombatSystem, maxHpFor, moveSpeedMult, newCombatState, statusSpeedMult, type CombatState } from "../src/sim/CombatSystem";
 
 function arena(): Dungeon {
   const width = 30;
@@ -660,6 +660,11 @@ describe("mejoras de stat", () => {
     expect(c2.hp).toBe(c2.maxHp);
   });
 
+  it("maxHpFor redondea a entero con multiplicadores fraccionarios", () => {
+    const m = { ...mods({}), maxHpBonus: 7, maxHpMult: 0.75 };
+    expect(Number.isInteger(maxHpFor("warrior", 1, m))).toBe(true);
+    expect(maxHpFor("warrior", 1, { ...m, maxHpBonus: 0, maxHpMult: 1.1 })).toBe(Math.round(maxHpFor("warrior", 1, { ...m, maxHpBonus: 0, maxHpMult: 1 }) * 1.1));
+  });
   it("setMods ajusta la vida máxima (base + maxHpBonus) y grantXp la conserva", () => {
     const cs = new CombatSystem();
     const c = newCombatState("warrior", 1);
