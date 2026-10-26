@@ -23,7 +23,7 @@ const GOLD = new Color3(0.95, 0.75, 0.2);
 
 /** Ángulo (rad, sobre el eje x de la bisagra) de la tapa: 0 cerrada, −55° a 0,2 s y −110° desde 0,4 s. */
 export function lidAngle(openSinceS: number): number {
-  return OPEN_ANGLE * Math.min(1, Math.max(0, openSinceS / OPEN_S));
+  return OPEN_ANGLE * Math.min(1, Math.max(0, openSinceS / OPEN_S)) || 0; // sin -0
 }
 
 interface ChestView {
