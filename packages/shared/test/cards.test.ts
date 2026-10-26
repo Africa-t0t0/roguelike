@@ -44,6 +44,7 @@ describe("playerMods", () => {
       magnetMult: 1,
       xpMult: 1,
       cooldownMult: 1,
+      affinity: 0,
     });
   });
   it("constantes", () => {
@@ -76,7 +77,7 @@ describe("Aprendizaje, Celeridad y Tajo frontal", () => {
     expect(THRUST_WIDTH).toBe(1.2);
     expect(THRUST_IMPACT_FRAC).toBe(0.45);
     expect(ABILITIES.slam.clip).toBe("gs_jump_attack");
-    expect(PROTOCOL_VERSION).toBe(9);
+    expect(PROTOCOL_VERSION).toBe(10);
   });
   it("cardText del Tajo rango 2 menciona 6 m", () => {
     expect(cardText({ kind: "ability", id: "thrust", rank: 2 })).toContain("6 m");

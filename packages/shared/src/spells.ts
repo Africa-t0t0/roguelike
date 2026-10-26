@@ -1,5 +1,7 @@
 import { ENEMY_DEFS, type EnemyKind } from "./combat";
-import type { WeaponTier } from "./weapons";
+
+/** Tier de los hechiceros: nunca llegan al legendario. */
+export type CasterTier = 1 | 2 | 3;
 
 export type CasterKind = "mage" | "pyromancer" | "stormcaller";
 
@@ -18,7 +20,7 @@ export const SPELLS = {
       1: { count: 1, speed: 9, spreadDeg: 0 },
       2: { count: 1, speed: 12, spreadDeg: 0 },
       3: { count: 3, speed: 12, spreadDeg: 15 },
-    } as Record<WeaponTier, { count: number; speed: number; spreadDeg: number }>,
+    } as Record<CasterTier, { count: number; speed: number; spreadDeg: number }>,
   },
   pyromancer: {
     kind: "zone",
@@ -28,7 +30,7 @@ export const SPELLS = {
       1: { count: 1, radius: 2.5 },
       2: { count: 1, radius: 3.2 },
       3: { count: 3, radius: 2.5 },
-    } as Record<WeaponTier, { count: 1 | 3; radius: number }>,
+    } as Record<CasterTier, { count: 1 | 3; radius: number }>,
   },
   stormcaller: {
     kind: "beam",
@@ -39,13 +41,13 @@ export const SPELLS = {
       1: { telegraphS: 1.1, width: 0.8 },
       2: { telegraphS: 0.9, width: 0.8 },
       3: { telegraphS: 0.9, width: 1.3 },
-    } as Record<WeaponTier, { telegraphS: number; width: number }>,
+    } as Record<CasterTier, { telegraphS: number; width: number }>,
   },
 } as const;
 
 /** Segundos de telegrafiado: el de `ENEMY_DEFS`, salvo el tormentoso, que depende del tier (acotado a 1..3). */
 export function casterTelegraphS(kind: EnemyKind, tier: number): number {
   if (kind !== "stormcaller") return ENEMY_DEFS[kind].telegraphS;
-  const t = Math.min(3, Math.max(1, Math.round(tier))) as WeaponTier;
+  const t = Math.min(3, Math.max(1, Math.round(tier))) as CasterTier;
   return SPELLS.stormcaller.tiers[t].telegraphS;
 }

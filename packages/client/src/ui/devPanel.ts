@@ -9,6 +9,7 @@ import {
   type EnemyKind,
   type StatCardId,
   type WeaponId,
+  type CasterTier,
   type WeaponTier,
 } from "@roguelike/shared";
 
@@ -97,7 +98,7 @@ export class DevPanel {
       cmd: "spawn",
       kind: kinds[kindSel.selectedIndex]!,
       count: Number(countSel.value),
-      tier: tierSel.selectedIndex as 0 | WeaponTier,
+      tier: tierSel.selectedIndex as 0 | CasterTier,
     }));
     this.button(enemies, "Matar a todos", () => ({ cmd: "killAll" }));
     this.toggle(enemies, "Enemigos quietos", false, (on) => ({ cmd: "freeze", on }));

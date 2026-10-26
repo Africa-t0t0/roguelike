@@ -25,7 +25,7 @@ import {
   type EnemyKind,
   type EnemyLoadout,
   type Rng,
-  type WeaponTier,
+  type CasterTier,
 } from "@roguelike/shared";
 import { beamLength, inBeam, inZone, type Hazard } from "./hazards";
 
@@ -48,7 +48,7 @@ export interface Enemy {
   /** arma que lleva; null si va desarmado */
   loadout: EnemyLoadout | null;
   /** tier de sus hechizos (1..3), sorteado al crearlo; 0 si no es hechicero */
-  spellTier: 0 | WeaponTier;
+  spellTier: 0 | CasterTier;
   /** segundos que le quedan aturdido (Patada): ni se mueve ni ataca */
   stunned: number;
   /** multiplicador de daño de sus golpes y proyectiles, fijado al crearlo (escalado) */
@@ -168,7 +168,7 @@ export class EnemySystem {
    * Solo sandbox: un enemigo persiguiendo, sin sala, con el tier pedido en vez de sortearlo. Minion y brute:
    * 0 = desarmado, 1..3 = su arma de `ARMED_CHANCE` con ese tier. Hechicero: ese tier de hechizo (0 cuenta como 1).
    */
-  spawnAt(kind: EnemyKind, x: number, z: number, tier: 0 | WeaponTier): Enemy {
+  spawnAt(kind: EnemyKind, x: number, z: number, tier: 0 | CasterTier): Enemy {
     return this.createEnemy(kind, -1, x, z, tier);
   }
 
@@ -193,14 +193,14 @@ export class EnemySystem {
     roomId: number,
     x: number,
     z: number,
-    tier?: 0 | WeaponTier,
+    tier?: 0 | CasterTier,
   ): Enemy {
     const caster = isCaster(kind);
     const armed = ARMED_CHANCE[kind];
     // Con tier pedido (sandbox) no se sortea nada; si no, se sortea el arma o el tier de hechizo.
     const loadout: EnemyLoadout | null =
-      tier === undefined ? this.rollLoadout(kind) : armed && tier !== 0 ? { weaponId: armed.weaponId, tier } : null;
-    const spellTier: 0 | WeaponTier = !caster
+      tier === undefined ? this.rollLoadout(kind) : armed && tier !== 0 ? { weaponId: armed.weaponId, tier, nature: "none" } : null;
+    const spellTier: 0 | CasterTier = !caster
       ? 0
       : tier === undefined ? rollTier(this.rng, this.floorTime, this.floor) : tier === 0 ? 1 : tier;
     const def = ENEMY_DEFS[kind];
@@ -219,7 +219,7 @@ export class EnemySystem {
   private rollLoadout(kind: EnemyKind): EnemyLoadout | null {
     const armed = ARMED_CHANCE[kind];
     if (!armed || this.rng.next() >= armed.chance) return null;
-    return { weaponId: armed.weaponId, tier: rollTier(this.rng, this.floorTime, this.floor) };
+    return { weaponId: armed.weaponId, tier: rollTier(this.rng, this.floorTime, this.floor), nature: "none" };
   }
 
   get enemies(): readonly Enemy[] {
@@ -344,7 +344,7 @@ export class EnemySystem {
   private startTelegraph(e: Enemy, target: SimPlayer): void {
     this.setAi(e, "telegraph");
     const damage = Math.round(ENEMY_DEFS[e.kind].damage * e.damageMult);
-    const tier = Math.max(1, e.spellTier) as WeaponTier;
+    const tier = Math.max(1, e.spellTier) as CasterTier;
     const dx = target.x - e.x;
     const dz = target.z - e.z;
     const d = Math.hypot(dx, dz);
@@ -445,7 +445,7 @@ export class EnemySystem {
       if (e.kind === "mage") {
         const dirX = d > 0 ? dx / d : Math.sin(e.facing);
         const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
-        const spell = SPELLS.mage.tiers[Math.max(1, e.spellTier) as WeaponTier];
+        const spell = SPELLS.mage.tiers[Math.max(1, e.spellTier) as CasterTier];
         // Abanico centrado en el rumbo, de spreadDeg entre orbes vecinos (1 orbe = recto).
         for (let k = 0; k < spell.count; k++) {
           const a = ((k - (spell.count - 1) / 2) * spell.spreadDeg * Math.PI) / 180;

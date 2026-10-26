@@ -1,6 +1,6 @@
 import type { Rng } from "./rng";
 
-export type StatCardId = "vitality" | "regen" | "strength" | "fury" | "reach" | "agility" | "ironskin" | "bloodlust" | "magnet" | "learning" | "haste";
+export type StatCardId = "vitality" | "regen" | "strength" | "fury" | "reach" | "agility" | "ironskin" | "bloodlust" | "magnet" | "learning" | "haste" | "affinity";
 export type AbilityId = "whirlwind" | "kick" | "warcry" | "slam" | "block" | "cleave" | "thrust";
 
 export const BASE_REGEN = 0.5;
@@ -45,6 +45,7 @@ export const STAT_CARDS: Record<StatCardId, { name: string; text: string }> = {
   magnet: { name: "Imán", text: "+50% de radio para recoger orbes" },
   learning: { name: "Aprendizaje", text: "+15% de XP por orbe que recojas" },
   haste: { name: "Celeridad", text: "-10% de enfriamiento de habilidades (máx. -50%)" },
+  affinity: { name: "Afinidad", text: "+25% a los efectos de naturaleza" },
 };
 
 export interface AbilityRank {
@@ -192,8 +193,11 @@ export function activeAbilityCount(p: Progress): number {
   return p.abilities.filter((a) => ABILITIES[a.id].kind !== "passive").length;
 }
 
-/** Sortea 3 cartas: 1 de habilidad (si hay alguna posible) y el resto de stat, distintas entre sí. */
-export function rollOffer(rng: Rng, p: Progress): CardOffer[] {
+/**
+ * Sortea 3 cartas: 1 de habilidad (si hay alguna posible) y el resto de stat, distintas entre sí.
+ * La Afinidad solo entra en la bolsa si el arma equipada tiene naturaleza (`opts.natureWeapon`).
+ */
+export function rollOffer(rng: Rng, p: Progress, opts: { natureWeapon?: boolean } = {}): CardOffer[] {
   const full = activeAbilityCount(p) >= MAX_ACTIVE_ABILITIES;
   const options: CardOffer[] = [];
   for (const id of ABILITY_IDS) {
@@ -206,7 +210,7 @@ export function rollOffer(rng: Rng, p: Progress): CardOffer[] {
   }
   const offer: CardOffer[] = [];
   if (options.length > 0) offer.push(rng.pick(options));
-  const pool = [...STAT_IDS];
+  const pool = STAT_IDS.filter((id) => id !== "affinity" || opts.natureWeapon);
   while (offer.length < 3) {
     const i = rng.int(0, pool.length - 1);
     offer.push({ kind: "stat", id: pool.splice(i, 1)[0]! });
@@ -236,6 +240,8 @@ export interface PlayerMods {
   magnetMult: number;
   xpMult: number;
   cooldownMult: number;
+  /** cartas de Afinidad; multiplica los efectos de naturaleza en `natureEffects` */
+  affinity: number;
 }
 
 /** Multiplicadores de las cartas de stat; el Grito y el Bloqueo los aplica el servidor encima. */
@@ -253,6 +259,7 @@ export function playerMods(p: Progress): PlayerMods {
     magnetMult: 1 + 0.5 * n("magnet"),
     xpMult: 1 + 0.15 * n("learning"),
     cooldownMult: Math.max(MIN_COOLDOWN_MULT, 0.9 ** n("haste")),
+    affinity: n("affinity"),
   };
 }
 

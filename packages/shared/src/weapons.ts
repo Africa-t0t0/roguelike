@@ -1,3 +1,4 @@
+import { natureSuffix, type Nature } from "./natures";
 import { CLASS_DEFS, ENEMY_DEFS, type ClassId, type EnemyKind } from "./combat";
 
 export type MovesetId = "one-hand-sword" | "great-sword";
@@ -111,7 +112,8 @@ export function strikeOf(weaponId: WeaponId, step: number, attackSpeedMult = 1):
   };
 }
 
-export type WeaponTier = 1 | 2 | 3;
+/** 4 = legendaria: solo sale de cofres, nunca de enemigos. */
+export type WeaponTier = 1 | 2 | 3 | 4;
 
 export const TIERS: Record<
   WeaponTier,
@@ -120,16 +122,18 @@ export const TIERS: Record<
   1: { suffix: { f: "oxidada", m: "oxidado" }, damageMult: 1, dropChance: 0.1, glow: null },
   2: { suffix: { f: "templada", m: "templado" }, damageMult: 1.3, dropChance: 0.14, glow: [0.35, 0.55, 1.0] },
   3: { suffix: { f: "rúnica", m: "rúnico" }, damageMult: 1.7, dropChance: 0.18, glow: [0.65, 0.3, 1.0] },
+  4: { suffix: { f: "legendaria", m: "legendario" }, damageMult: 2.2, dropChance: 0, glow: [1, 0.78, 0.25] },
 };
 
 export function isWeaponTier(v: unknown): v is WeaponTier {
-  return v === 1 || v === 2 || v === 3;
+  return v === 1 || v === 2 || v === 3 || v === 4;
 }
 
-/** Nombre visible: "Mandoble templado". */
-export function weaponDisplayName(id: WeaponId, tier: WeaponTier): string {
+/** Nombre visible: "Mandoble templado" o, con naturaleza, "Mandoble templado de fuego". */
+export function weaponDisplayName(id: WeaponId, tier: WeaponTier, nature: Nature = "none"): string {
   const w = WEAPONS[id];
-  return `${w.name} ${TIERS[tier].suffix[w.gender]}`;
+  const base = `${w.name} ${TIERS[tier].suffix[w.gender]}`;
+  return nature === "none" ? base : `${base} ${natureSuffix(nature)}`;
 }
 
 export function strikeDamage(weaponId: WeaponId, cls: ClassId, level: number, step: number, tier: WeaponTier = 1): number {
@@ -138,7 +142,7 @@ export function strikeDamage(weaponId: WeaponId, cls: ClassId, level: number, st
   return Math.round(base * MOVESETS[w.movesetId].combo[step - 1]!.damageMult * TIERS[tier].damageMult);
 }
 
-export type EnemyLoadout = { weaponId: WeaponId; tier: WeaponTier };
+export type EnemyLoadout = { weaponId: WeaponId; tier: WeaponTier; nature: Nature };
 
 /** Probabilidad de que un enemigo nazca armado y con qué arma; los hechiceros nunca. */
 export const ARMED_CHANCE: Record<EnemyKind, { chance: number; weaponId: WeaponId } | null> = {

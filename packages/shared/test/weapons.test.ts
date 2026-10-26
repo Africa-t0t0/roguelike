@@ -113,7 +113,8 @@ describe("tiers de arma", () => {
   it("isWeaponTier", () => {
     expect(isWeaponTier(1)).toBe(true);
     expect(isWeaponTier(0)).toBe(false);
-    expect(isWeaponTier(4)).toBe(false);
+    expect(isWeaponTier(4)).toBe(true);
+    expect(isWeaponTier(5)).toBe(false);
     expect(isWeaponTier("2")).toBe(false);
   });
 });
@@ -123,12 +124,12 @@ describe("enemyAttack / ARMED_CHANCE", () => {
     expect(enemyAttack("minion", null)).toEqual({ damage: 6, attackRange: 1.2 });
   });
   it("brute con mandoble templado", () => {
-    const a = enemyAttack("brute", { weaponId: "great-sword", tier: 2 });
+    const a = enemyAttack("brute", { weaponId: "great-sword", tier: 2, nature: "none" });
     expect(a.damage).toBe(Math.round((12 * 18) / 12 * 1.3));
     expect(a.attackRange).toBeCloseTo(2.25, 9);
   });
   it("minion con espada de guardia", () => {
-    const a = enemyAttack("minion", { weaponId: "guard-sword", tier: 1 });
+    const a = enemyAttack("minion", { weaponId: "guard-sword", tier: 1, nature: "none" });
     expect(a.damage).toBe(5);
     expect(a.attackRange).toBeCloseTo(1.485, 9);
   });

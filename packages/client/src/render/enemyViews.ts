@@ -239,7 +239,7 @@ export class EnemyViews {
       // Aro de telegrafía en el suelo: borde fijo y disco que crece hasta llenarlo. Armado, el alcance
       // es el de su arma.
       const def = ENEMY_DEFS[kind];
-      const { attackRange } = enemyAttack(kind, weaponId ? { weaponId, tier: e.weaponTier ?? 1 } : null);
+      const { attackRange } = enemyAttack(kind, weaponId ? { weaponId, tier: e.weaponTier ?? 1, nature: "none" } : null);
       const radius = Math.max(RING_MIN_RADIUS, def.radius + attackRange);
       ring = new TransformNode(`telegraph-${id}`, scene);
       ring.parent = character.root;

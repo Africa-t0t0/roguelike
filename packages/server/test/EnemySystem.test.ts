@@ -296,7 +296,7 @@ describe("armas de los enemigos", () => {
 
   it("un bruto con mandoble templado golpea por 23 desde 2,2 m", () => {
     const { sys, e } = setup("brute", 30, 30);
-    e.loadout = { weaponId: "great-sword", tier: 2 };
+    e.loadout = { weaponId: "great-sword", tier: 2, nature: "none" };
     const pl = [P("a", 32.2, 30)];
     sys.step(pl, SIM_DT);
     expect(e.ai).toBe("telegraph");
@@ -346,7 +346,7 @@ describe("oleadas", () => {
 
 describe("botín", () => {
   it("al morir un armado devuelve su posición, la XP y a veces suelta su arma", () => {
-    const loadout: EnemyLoadout = { weaponId: "guard-sword", tier: 1 };
+    const loadout: EnemyLoadout = { weaponId: "guard-sword", tier: 1, nature: "none" };
     let drops = 0;
     for (let seed = 1; seed <= 200; seed++) {
       const sys = new EnemySystem(arena(), createRng(seed));
@@ -514,7 +514,7 @@ describe("hechiceros: tier y orbes del arcano", () => {
     const b0 = sys.spawnAt("brute", 30, 30, 0);
     expect(b0.loadout).toBeNull();
     expect(b0.spellTier).toBe(0);
-    expect(sys.spawnAt("brute", 30, 30, 2).loadout).toEqual({ weaponId: "great-sword", tier: 2 });
+    expect(sys.spawnAt("brute", 30, 30, 2).loadout).toEqual({ weaponId: "great-sword", tier: 2, nature: "none" });
     const p = sys.spawnAt("pyromancer", 30, 30, 0);
     expect(p.spellTier).toBe(1);
     expect(p.loadout).toBeNull();
