@@ -75,7 +75,7 @@ export function abilityTimeline(id: AbilityId, rank: number, nature: Nature = "n
     case "kick":
       return [{ kind: "flash", startS: KICK_IMPACT_AT * def.animS, durS: KICK_FLASH_S, radius: r.radius!, color: natureTint(WARM_WHITE, nature) }];
     case "warcry":
-      return [{ kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: WARCRY_RADIUS_M, color: natureTint(GOLD, nature), y: WARCRY_RING_Y }];
+      return [{ kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: WARCRY_RADIUS_M, color: GOLD, y: WARCRY_RING_Y }];
     case "slam":
       return [
         { kind: "shock", startS: SLAM_IMPACT_S, durS: SHOCK_GROW_S, radius: r.radius!, color: natureTint(FIRE, nature) },

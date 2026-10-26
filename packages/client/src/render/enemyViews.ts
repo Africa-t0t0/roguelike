@@ -18,7 +18,7 @@ import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseEnemyAnim, SpeedMeter, type ClipLengths } from "./animState";
 import type { Assets } from "./assets";
-import { applyCasterTint, applyTint, CASTER_COLORS, chargeScale, markNoTint } from "./casterLooks";
+import { applyBodyGlow, applyCasterTint, bodyGlow, CASTER_COLORS, chargeScale, markNoTint, type BodyState } from "./casterLooks";
 import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 import { eliteName, NATURE_COLORS } from "./natureLooks";
 import { CharacterView } from "./characterView";
@@ -44,21 +44,18 @@ const AURA_Y = 0.02; // m: bajo el anillo de tier
 const AURA_RING_Y = 0.03;
 const CHARGE_DIAMETER = 0.35; // m, a carga completa
 
-/** Élite: aura dorada, rótulo sobre la barra de vida y contorno emisivo del color de su naturaleza. */
+/** Élite: rótulo con su nombre sobre la barra de vida y brillo sobre el cuerpo (contorno + capa + motas doradas). */
 const ELITE_GOLD = new Color3(1, 0.8, 0.25);
-const ELITE_AURA_EXTRA = 0.8; // m sobre el radio del enemigo ya escalado
-const ELITE_LABEL_ABOVE_BAR = 0.3; // m
-const ELITE_LABEL_W = 4;
-const ELITE_LABEL_H = 0.5; // letras de ~0,25 m: se leen a la distancia de juego
-/** Brillo suave: el cuerpo conserva su color oscuro y su detalle; el emisivo solo lo "calienta". */
-const ELITE_TINT = 0.2;
-/** Estados: tinte cian suave al ralentizar y fuerte al congelar; brasas al arder. */
-const SLOW_TINT = 0.3;
-const FROZEN_TINT = 0.85;
+const ELITE_LABEL_ABOVE_BAR = 0.2; // m
+const ELITE_LABEL_W = 1.8;
+const ELITE_LABEL_H = 0.22; // letras de ~0,15 m
+/** Más cerca de la cámara que esto, el rótulo se oculta: a esa distancia taparía la pantalla. */
+const ELITE_LABEL_HIDE_M = 3;
+/** Motas doradas que suben alrededor del torso del élite. */
+const ELITE_MOTE_RATE = 14;
+/** Brasas al arder (estado quemado). */
 const BURN_RATE = 24;
 const BURN_EMITTER_FRAC = 0.5; // altura del emisor, fracción del alto del enemigo
-
-type TintState = "base" | "slowed" | "frozen";
 
 function lerpEnemy(a: EnemySnapshot, b: EnemySnapshot, t: number): EnemySnapshot {
   return {
@@ -106,9 +103,11 @@ interface EnemyView {
   /** alto dibujado (m): el del modelo × la escala de élite */
   height: number;
   label?: Mesh;
-  tint: TintState;
+  tint: BodyState;
   /** brasas del estado quemado; solo mientras arde */
   burn?: ParticleSystem;
+  /** motas del aura del élite; solo los élites */
+  aura?: ParticleSystem;
   burnEmitter: Mesh;
   /** Instante (reloj de recepción) en que dejó de estar en el estado; se borra al dibujarlo. */
   goneAtMs?: number;
@@ -165,9 +164,9 @@ export class EnemyViews {
       ctx.lineJoin = "round";
       ctx.lineWidth = 12;
       ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
-      ctx.strokeText(text, 512, 66);
+      ctx.strokeText(text, 512, 66, 1000);
       ctx.fillStyle = css;
-      ctx.fillText(text, 512, 66);
+      ctx.fillText(text, 512, 66, 1000);
       tex.update();
       m = flatMaterial(this.scene, `eliteLabelMat-${key}`, Color3.White());
       m.diffuseTexture = tex;
@@ -177,15 +176,41 @@ export class EnemyViews {
     return m;
   }
 
-  /** Tinte del cuerpo según el estado; "base" es el del élite o el del hechicero, y si no hay, el material original. */
-  private applyBodyTint(view: EnemyView, state: TintState): void {
+  /**
+   * Brillo del cuerpo según el estado, con contorno y capa por-malla (sin clonar materiales). El material del
+   * hechicero (4b-1) se pone una sola vez al crearlo.
+   */
+  private applyBodyGlow(view: EnemyView, state: BodyState): void {
     view.tint = state;
-    const ice = NATURE_COLORS.ice;
-    if (state === "frozen") applyTint(view.character.root, { key: "frozen", color: ice, strength: FROZEN_TINT });
-    else if (state === "slowed") applyTint(view.character.root, { key: "slowed", color: ice, strength: SLOW_TINT });
-    else if (view.elite && view.nature !== "none") applyTint(view.character.root, { key: `elite-${view.nature}`, color: NATURE_COLORS[view.nature], strength: ELITE_TINT });
-    else if (isCaster(view.kind)) applyCasterTint(view.character.root, view.kind);
-    else applyTint(view.character.root, null);
+    applyBodyGlow(view.character.root, bodyGlow(state, view.elite, view.nature), view.character.unitsPerMeter());
+  }
+
+  private sparkTex(): DynamicTexture {
+    return (this.ember ??= sparkTexture(this.scene, "enemy-ember"));
+  }
+
+  /** Motas doradas que suben alrededor del torso (del cuerpo, no del suelo); el color 2 es el de su naturaleza. */
+  private createAura(view: EnemyView): ParticleSystem {
+    const c = view.nature === "none" ? ELITE_GOLD : NATURE_COLORS[view.nature];
+    const ps = new ParticleSystem("eliteAura", 40, this.scene);
+    ps.particleTexture = this.sparkTex();
+    ps.emitter = view.burnEmitter;
+    ps.createSphereEmitter(Math.max(0.3, view.height * 0.22), 1);
+    ps.color1 = new Color4(ELITE_GOLD.r, ELITE_GOLD.g, ELITE_GOLD.b, 0.75);
+    ps.color2 = new Color4(c.r, c.g, c.b, 0.6);
+    ps.colorDead = new Color4(c.r, c.g, c.b, 0);
+    ps.minSize = 0.04;
+    ps.maxSize = 0.09;
+    ps.minLifeTime = 0.9;
+    ps.maxLifeTime = 1.6;
+    ps.emitRate = ELITE_MOTE_RATE;
+    ps.minEmitPower = 0.02;
+    ps.maxEmitPower = 0.1;
+    ps.gravity = new Vector3(0, 0.7, 0);
+    ps.blendMode = ParticleSystem.BLENDMODE_ADD;
+    ps.updateSpeed = this.paused ? 0 : PARTICLE_SPEED;
+    ps.start();
+    return ps;
   }
 
   private setBurning(view: EnemyView, burning: boolean): void {
@@ -195,10 +220,9 @@ export class EnemyViews {
       return;
     }
     if (view.burn) return;
-    this.ember ??= sparkTexture(this.scene, "enemy-ember");
     const c = NATURE_COLORS.fire;
     const ps = new ParticleSystem("enemyBurn", 60, this.scene);
-    ps.particleTexture = this.ember;
+    ps.particleTexture = this.sparkTex();
     ps.emitter = view.burnEmitter;
     ps.createSphereEmitter(Math.max(0.25, view.height * 0.18), 0.6);
     ps.color1 = new Color4(c.r, c.g, c.b, 0.9);
@@ -220,6 +244,7 @@ export class EnemyViews {
 
   private disposeView(view: EnemyView): void {
     view.burn?.dispose(false);
+    view.aura?.dispose(false); // la textura es compartida
     view.character.dispose();
   }
 
@@ -273,10 +298,16 @@ export class EnemyViews {
         ),
       );
 
-      const tintState: TintState = e.frozen && e.ai !== "dead" ? "frozen" : e.slowed ? "slowed" : "base";
-      if (tintState !== view.tint) this.applyBodyTint(view, tintState);
+      const tintState: BodyState = e.frozen && e.ai !== "dead" ? "frozen" : e.slowed ? "slowed" : "base";
+      if (tintState !== view.tint) this.applyBodyGlow(view, tintState);
       this.setBurning(view, e.burning && e.ai !== "dead");
-      view.label?.setEnabled(e.ai !== "dead");
+      if (view.aura) view.aura.emitRate = e.ai === "dead" ? 0 : ELITE_MOTE_RATE;
+      if (view.label) {
+        // Cerca de la cámara el rótulo taparía la pantalla: se oculta.
+        const cam = this.scene.activeCamera;
+        const near = cam ? Vector3.Distance(cam.globalPosition, view.label.getAbsolutePosition()) < ELITE_LABEL_HIDE_M : false;
+        view.label.setEnabled(e.ai !== "dead" && !near);
+      }
 
       const hpFrac = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 1;
       view.bar.setEnabled(e.ai !== "dead" && hpFrac < 1);
@@ -307,6 +338,7 @@ export class EnemyViews {
     for (const view of this.views.values()) {
       view.character.setPaused(paused);
       if (view.burn) view.burn.updateSpeed = paused ? 0 : PARTICLE_SPEED;
+      if (view.aura) view.aura.updateSpeed = paused ? 0 : PARTICLE_SPEED;
     }
   }
 
@@ -420,20 +452,9 @@ export class EnemyViews {
     }
     stars.setEnabled(false);
 
-    // Élite: aura dorada grande bajo los pies, rótulo con el nombre y contorno del color de su naturaleza.
+    // Élite: rótulo con el nombre (el brillo del cuerpo y las motas se ponen al final, ya con la vista armada).
     let label: Mesh | undefined;
     if (e.elite) {
-      const radius = (ENEMY_DEFS[kind].radius + AURA_EXTRA_RADIUS) * k + ELITE_AURA_EXTRA - AURA_EXTRA_RADIUS;
-      const aura = CreateDisc(`eliteAura-${id}`, { radius, tessellation: 40 }, scene);
-      aura.material = this.casterMat("elite-aura", ELITE_GOLD, AURA_ALPHA);
-      aura.parent = character.root;
-      aura.position.y = AURA_Y - 0.005;
-      aura.rotation.x = Math.PI / 2;
-      const edge = CreateTorus(`eliteAuraRing-${id}`, { diameter: radius * 2, thickness: 0.07, tessellation: 40 }, scene);
-      edge.material = this.casterMat("elite-ring", ELITE_GOLD);
-      edge.parent = character.root;
-      edge.position.y = AURA_RING_Y + 0.005;
-      for (const m of [aura, edge]) m.isPickable = false;
       label = CreatePlane(`eliteLabel-${id}`, { width: ELITE_LABEL_W, height: ELITE_LABEL_H }, scene);
       label.material = this.labelMat(kind, e.nature);
       label.billboardMode = Mesh.BILLBOARDMODE_ALL;
@@ -469,7 +490,10 @@ export class EnemyViews {
     };
     // Todo lo creado tras el cuerpo (barra, aros, estrellas, aura, rótulo…) no se tiñe con él.
     for (const m of character.root.getChildMeshes(false)) if (!bodyMeshes.has(m)) markNoTint(m);
-    if (e.elite && e.nature !== "none") this.applyBodyTint(view, "base");
+    if (e.elite) {
+      this.applyBodyGlow(view, "base");
+      view.aura = this.createAura(view);
+    }
     return view;
   }
 }

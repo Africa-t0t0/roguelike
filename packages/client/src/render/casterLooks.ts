@@ -2,7 +2,10 @@ import type { Material } from "@babylonjs/core/Materials/material";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
-import type { CasterKind } from "@roguelike/shared";
+// Registra el OutlineRenderer de la escena: sin él `renderOutline` y `renderOverlay` no dibujan nada.
+import "@babylonjs/core/Rendering/outlineRenderer";
+import { NATURE_COLORS } from "./natureLooks";
+import type { CasterKind, Nature } from "@roguelike/shared";
 
 /** Color de cada hechicero: tinte del cuerpo, aura, esfera de carga y proyectiles. */
 export const CASTER_COLORS: Record<CasterKind, Color3> = {
@@ -77,6 +80,56 @@ export function applyTint(root: TransformNode, tint: { key: string; color: Color
     const original = sourceOf.get(current) ?? current;
     const next = tint ? tinted(original, tint.key, tint.color, tint.strength) : original;
     if (next !== current) mesh.material = next;
+  }
+}
+
+/** Estado del cuerpo que tiñe el overlay: congelado manda sobre ralentizado, y ambos sobre el brillo de élite. */
+export type BodyState = "base" | "slowed" | "frozen";
+
+const ICE_OVERLAY = new Color3(0.55, 0.95, 1);
+const ELITE_GOLD_GLOW = new Color3(1, 0.8, 0.25);
+/** Grosor del contorno de élite, en metros: un borde fino. */
+export const ELITE_OUTLINE_M = 0.025;
+const ELITE_OVERLAY_ALPHA = 0.12;
+const SLOW_OVERLAY_ALPHA = 0.25;
+const FROZEN_OVERLAY_ALPHA = 0.55;
+
+/** Brillo por-malla del cuerpo: contorno fino (élite) y capa de color semitransparente (élite, ralentizado, congelado). */
+export interface BodyGlow {
+  outline: { color: Color3; widthM: number } | null;
+  overlay: { color: Color3; alpha: number } | null;
+}
+
+/**
+ * Qué brillo lleva el cuerpo. El contorno es solo del élite (del color de su naturaleza, dorado si no tiene) y se
+ * mantiene en cualquier estado; la capa la manda el estado: congelado > ralentizado > élite.
+ */
+export function bodyGlow(state: BodyState, elite: boolean, nature: Nature): BodyGlow {
+  const eliteColor = nature === "none" ? ELITE_GOLD_GLOW : NATURE_COLORS[nature];
+  const outline = elite ? { color: eliteColor, widthM: ELITE_OUTLINE_M } : null;
+  if (state === "frozen") return { outline, overlay: { color: ICE_OVERLAY, alpha: FROZEN_OVERLAY_ALPHA } };
+  if (state === "slowed") return { outline, overlay: { color: ICE_OVERLAY, alpha: SLOW_OVERLAY_ALPHA } };
+  return { outline, overlay: elite ? { color: eliteColor, alpha: ELITE_OVERLAY_ALPHA } : null };
+}
+
+/**
+ * Aplica `glow` a las mallas del cuerpo bajo `root` con `renderOutline` / `renderOverlay`, que no clonan
+ * materiales y funcionan con mallas con esqueleto (el OutlineRenderer incluye los huesos). El grosor del contorno
+ * está en unidades locales del modelo: `unitsPerMeter` convierte los metros. Saltan las armas (`grip#…`) y las marcadas `noTint`.
+ */
+export function applyBodyGlow(root: TransformNode, glow: BodyGlow, unitsPerMeter: number): void {
+  for (const mesh of root.getChildMeshes(false)) {
+    if (mesh.getClassName() === "InstancedMesh" || isWeaponPart(mesh) || (mesh.metadata as { noTint?: boolean } | null)?.noTint) continue;
+    if (glow.outline) {
+      mesh.renderOutline = true;
+      mesh.outlineColor = glow.outline.color;
+      mesh.outlineWidth = glow.outline.widthM * unitsPerMeter;
+    } else mesh.renderOutline = false;
+    if (glow.overlay) {
+      mesh.renderOverlay = true;
+      mesh.overlayColor = glow.overlay.color;
+      mesh.overlayAlpha = glow.overlay.alpha;
+    } else mesh.renderOverlay = false;
   }
 }
 

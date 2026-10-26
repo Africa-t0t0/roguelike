@@ -5,7 +5,8 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
-import { applyTint, CASTER_COLORS, casterTint, chargeScale, markNoTint } from "../src/render/casterLooks";
+import { NATURE_COLORS } from "../src/render/natureLooks";
+import { applyBodyGlow, applyTint, bodyGlow, CASTER_COLORS, casterTint, chargeScale, markNoTint } from "../src/render/casterLooks";
 
 describe("aspecto de los hechiceros", () => {
   it("chargeScale crece de 0,15 a 1 y se acota", () => {
@@ -52,5 +53,50 @@ describe("applyTint", () => {
     applyTint(root, null);
     expect(body.material!.name).toBe("body");
     scene.dispose();
+  });
+});
+
+describe("brillo del cuerpo", () => {
+  it("el contorno es solo del élite y sobrevive a los estados; la capa manda congelado > ralentizado > élite", () => {
+    expect(bodyGlow("base", false, "none")).toEqual({ outline: null, overlay: null });
+    const base = bodyGlow("base", true, "fire");
+    expect(base.outline?.color).toBe(NATURE_COLORS.fire);
+    expect(base.overlay).toEqual({ color: NATURE_COLORS.fire, alpha: 0.12 });
+    const slow = bodyGlow("slowed", true, "fire");
+    expect(slow.outline).toEqual(base.outline);
+    expect(slow.overlay?.color.asArray()).toEqual([0.55, 0.95, 1]);
+    expect(slow.overlay?.alpha).toBe(0.25);
+    expect(bodyGlow("frozen", true, "fire").overlay?.alpha).toBe(0.55);
+    expect(bodyGlow("frozen", false, "none").outline).toBeNull();
+  });
+
+  it("el élite sin naturaleza brilla en dorado", () => {
+    expect(bodyGlow("base", true, "none").outline?.color.asArray()).toEqual([1, 0.8, 0.25]);
+  });
+
+  it("applyBodyGlow marca el cuerpo y salta las armas y lo noTint; quitarlo lo apaga", () => {
+    const scene = new Scene(new NullEngine());
+    const root = new TransformNode("root", scene);
+    const body = CreateBox("body", { size: 1 }, scene);
+    body.parent = root;
+    const grip = new TransformNode("grip#sword", scene);
+    grip.parent = root;
+    const blade = CreateBox("blade", { size: 1 }, scene);
+    blade.parent = grip;
+    const bar = CreateBox("bar", { size: 1 }, scene);
+    bar.parent = root;
+    markNoTint(bar);
+    applyBodyGlow(root, bodyGlow("base", true, "ice"), 50);
+    expect(body.renderOutline).toBe(true);
+    expect(body.outlineWidth).toBeCloseTo(0.025 * 50, 6);
+    expect(body.renderOverlay).toBe(true);
+    expect(body.overlayAlpha).toBe(0.12);
+    for (const m of [blade, bar]) {
+      expect(m.renderOutline).toBeFalsy();
+      expect(m.renderOverlay).toBeFalsy();
+    }
+    applyBodyGlow(root, bodyGlow("base", false, "none"), 50);
+    expect(body.renderOutline).toBe(false);
+    expect(body.renderOverlay).toBe(false);
   });
 });

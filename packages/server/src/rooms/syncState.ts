@@ -108,6 +108,9 @@ export function syncWorld(
     }
     ps.x = p.x;
     ps.z = p.z;
+    ps.nature = p.nature ?? "none";
+    ps.dirX = p.dirX;
+    ps.dirZ = p.dirZ;
   }
   for (const id of [...state.projectiles.keys()]) if (!liveShots.has(id)) state.projectiles.delete(id);
 

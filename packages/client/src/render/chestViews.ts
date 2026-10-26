@@ -20,7 +20,7 @@ const D = 0.6;
 const BODY_H = 0.4;
 const LID_H = 0.14;
 const CAP_H = 0.06; // losa sobre la tapa: la abomba en escalón (alto total ~0,6 m)
-const GOLD = new Color3(0.78, 0.58, 0.14); // dorado apagado: herrajes finos, no bloques amarillos
+const GOLD = new Color3(0.42, 0.33, 0.14); // oro apagado: herrajes finos, no bloques amarillos
 
 /** Ángulo (rad, sobre el eje x de la bisagra) de la tapa: 0 cerrada, −55° a 0,2 s y −110° desde 0,4 s. */
 export function lidAngle(openSinceS: number): number {
@@ -60,13 +60,13 @@ export class ChestViews {
       const m = new StandardMaterial(name, scene);
       m.diffuseColor = color;
       m.specularColor = Color3.Black();
-      m.emissiveColor = color.scale(0.2);
+      m.emissiveColor = color.scale(0.04); // casi sin brillo propio: con la antorcha encima sigue siendo madera oscura
       return m;
     };
-    this.wood = mat("chestWood", new Color3(0.2, 0.11, 0.055));
-    this.woodOpen = mat("chestWoodOpen", new Color3(0.1, 0.06, 0.035));
+    this.wood = mat("chestWood", new Color3(0.12, 0.075, 0.045));
+    this.woodOpen = mat("chestWoodOpen", new Color3(0.07, 0.045, 0.03));
     this.gold = mat("chestGold", GOLD);
-    this.gold.emissiveColor = GOLD.scale(0.3);
+    this.gold.emissiveColor = GOLD.scale(0.15);
     this.spark = sparkTexture(scene, "chest-spark");
   }
 

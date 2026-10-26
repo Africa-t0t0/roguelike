@@ -93,7 +93,7 @@ export const EnemyState = schema(
 );
 export type EnemyState = SchemaType<typeof EnemyState>;
 
-export const ProjectileState = schema({ x: t.number(), z: t.number() }, "ProjectileState");
+export const ProjectileState = schema({ x: t.number(), z: t.number(), nature: t.string(), dirX: t.number(), dirZ: t.number() }, "ProjectileState");
 export type ProjectileState = SchemaType<typeof ProjectileState>;
 
 /** Onda de corte de un jugador. */

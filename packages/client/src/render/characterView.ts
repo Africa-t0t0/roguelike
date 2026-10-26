@@ -187,6 +187,12 @@ export class CharacterView {
     this.setNatureFx(this.weapon, nature);
   }
 
+  /** Unidades locales del modelo por metro del mundo (inversa de la escala del cuerpo): para grosores en espacio de malla. */
+  unitsPerMeter(): number {
+    const s = this.body.scaling.x;
+    return s > 1e-9 ? 1 / s : 1;
+  }
+
   /** Congela (o reanuda) las partículas del arma: avanzan con los cuadros, no con el reloj de juego. */
   setPaused(paused: boolean): void {
     if (paused === this.paused) return;

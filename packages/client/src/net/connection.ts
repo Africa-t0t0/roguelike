@@ -149,6 +149,18 @@ const finiteOr = (v: unknown, fallback: number): number => (typeof v === "number
 export interface ProjectileSnapshot {
   x: number;
   z: number;
+  /** elemento del lanzador ("none" = orbe arcano) */
+  nature: Nature;
+  /** dirección de vuelo (para orientar las formas alargadas) */
+  dirX: number;
+  dirZ: number;
+}
+
+/** Copia un proyectil del estado: la naturaleza desconocida vale "none" y la dirección inválida, +X. */
+export function parseProjectile(raw: { x: number; z: number; nature?: unknown; dirX?: unknown; dirZ?: unknown }): ProjectileSnapshot {
+  const dirX = finiteOr(raw.dirX, 1);
+  const dirZ = finiteOr(raw.dirZ, 0);
+  return { x: raw.x, z: raw.z, nature: toNature(raw.nature), dirX, dirZ };
 }
 
 /** Orbe de XP en el suelo (compartido por el grupo). */
@@ -403,8 +415,8 @@ function snapshotWorld(room: Room): WorldSnapshot {
     });
   });
   const projectiles = new Map<string, ProjectileSnapshot>();
-  room.state.projectiles.forEach((p: ProjectileSnapshot, id: string) => {
-    projectiles.set(id, { x: p.x, z: p.z });
+  room.state.projectiles.forEach((p: Parameters<typeof parseProjectile>[0], id: string) => {
+    projectiles.set(id, parseProjectile(p));
   });
   const orbs = new Map<string, OrbSnapshot>();
   room.state.orbs.forEach((o: OrbSnapshot, id: string) => {
