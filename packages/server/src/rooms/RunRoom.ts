@@ -3,6 +3,7 @@ import { matchMaker, Room, ServerError, type Client } from "colyseus";
 import {
   createRng,
   EMPTY_ROOM_TTL_MS,
+  FLOOR_WEAPON_TTL_S,
   generateDungeon,
   isWalkableTile,
   JOIN_ERROR_STATUS,
@@ -39,7 +40,7 @@ import { OrbSystem } from "../sim/OrbSystem";
 import { PositionHistory } from "../sim/PositionHistory";
 import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
-import { PlayerRegistry, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
+import { PlayerRegistry, pruneFloorWeapons, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
 import { PlayerState, RunState } from "./RunState";
 import { syncPlayer, syncWorld } from "./syncState";
@@ -271,10 +272,15 @@ export class RunRoom extends Room<{ state: RunState }> {
     // 3-4. Enemigos (solo ven a los conectados vivos).
     const alive: SimPlayer[] = connected
       .filter((r) => !r.combat.dead)
-      .map((r) => ({ key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true, magnetMult: r.combat.mods.magnetMult }));
-    // El reloj avanza solo con jugadores conectados; el sorteo de tiers de lo que se cree usa el reloj actual.
+      .map((r) => {
+        const { magnetMult, xpMult } = r.combat.mods;
+        return { key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true, magnetMult, xpMult };
+      });
+    // El reloj avanza solo con jugadores conectados; el sorteo de tiers y el escalado de lo que se cree usan
+    // el reloj actual y el nivel del grupo.
     if (connected.length > 0) this.floorTime += SIM_DT;
-    this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor);
+    this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor, this.combat.level);
+    this.pruneFloorWeapons();
     this.enemySystem.activateRooms(alive, this.registry.size());
     if (connected.length > 0) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
@@ -353,10 +359,28 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
   }
 
+  /**
+   * Solo en ticks simulados (el reloj no corre en la pausa): quita de cada registro las armas del suelo
+   * vencidas y reenvía la lista a su dueño, si está conectado y cambió.
+   */
+  private pruneFloorWeapons(): void {
+    for (const r of this.registry.all()) {
+      if (!pruneFloorWeapons(r, this.floorTime)) continue;
+      const client = this.clients.find((c) => c.sessionId === r.sessionId);
+      if (client) this.sendFloorWeapons(client, r);
+    }
+  }
+
+  /** `floorTime` en que vence un arma del suelo creada ahora. */
+  private floorWeaponExpiry(): number {
+    return this.floorTime + FLOOR_WEAPON_TTL_S;
+  }
+
   /** Cada jugador conectado recibe su propia copia del arma soltada y se le reenvía su lista. */
-  private dropWeapon(item: FloorWeapon): void {
+  private dropWeapon(item: Omit<FloorWeapon, "expiresAt">): void {
+    const expiresAt = this.floorWeaponExpiry();
     for (const r of this.registry.connected()) {
-      r.floorWeapons.push({ ...item });
+      r.floorWeapons.push({ ...item, expiresAt });
       const client = this.clients.find((c) => c.sessionId === r.sessionId);
       if (client) this.sendFloorWeapons(client, r);
     }
@@ -370,12 +394,16 @@ export class RunRoom extends Room<{ state: RunState }> {
     const ids = (Object.keys(WEAPONS) as WeaponId[]).filter((id) => id !== equipped);
     const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + ids.length).slice(MAX_PLAYERS);
     if (points.length < ids.length) throw new Error("la sala inicial no tiene sitio para las armas del suelo");
-    return ids.map((weaponId, i) => ({ weaponId, tier: 1, x: points[i]!.x, z: points[i]!.z }));
+    const expiresAt = this.floorWeaponExpiry();
+    return ids.map((weaponId, i) => ({ weaponId, tier: 1, x: points[i]!.x, z: points[i]!.z, expiresAt }));
   }
 
+  /** `ttl`: segundos simulados que le quedan a cada arma al enviarla. */
   private sendFloorWeapons(client: Client, record: PlayerRecord): void {
     client.send(MSG.floorWeapons, {
-      items: record.floorWeapons.map(({ weaponId, tier, x, z }) => ({ weaponId, tier, x, z })),
+      items: record.floorWeapons.map(({ weaponId, tier, x, z, expiresAt }) => ({
+        weaponId, tier, x, z, ttl: expiresAt - this.floorTime,
+      })),
     });
   }
 
@@ -390,7 +418,11 @@ export class RunRoom extends Room<{ state: RunState }> {
     });
     if (best === -1) return;
     const taken = record.floorWeapons[best]!;
-    record.floorWeapons[best] = { weaponId: record.combat.weaponId, tier: record.combat.weaponTier, x: taken.x, z: taken.z };
+    // La que se deja vence a los FLOOR_WEAPON_TTL_S desde ahora.
+    record.floorWeapons[best] = {
+      weaponId: record.combat.weaponId, tier: record.combat.weaponTier, x: taken.x, z: taken.z,
+      expiresAt: this.floorWeaponExpiry(),
+    };
     record.combat.weaponId = taken.weaponId;
     record.combat.weaponTier = taken.tier;
     Object.assign(record.combat, newComboTimers());

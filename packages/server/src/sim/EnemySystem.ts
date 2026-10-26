@@ -9,6 +9,7 @@ import {
   circlesOverlap,
   enemiesForRoom,
   enemyAttack,
+  enemyScale,
   flowSourcesKey,
   hasLineOfSight,
   isWalkableTile,
@@ -41,6 +42,8 @@ export interface Enemy {
   loadout: EnemyLoadout | null;
   /** segundos que le quedan aturdido (Patada): ni se mueve ni ataca */
   stunned: number;
+  /** multiplicador de daño de sus golpes y proyectiles, fijado al crearlo (escalado) */
+  damageMult: number;
 }
 
 export interface Projectile {
@@ -64,6 +67,8 @@ export interface SimPlayer {
   alive: boolean;
   /** multiplicador del radio de imán de orbes (carta Imán); 1 si falta */
   magnetMult?: number;
+  /** multiplicador de la XP de los orbes que recoge (carta Aprendizaje); 1 si falta */
+  xpMult?: number;
 }
 
 export interface EnemyDamageResult {
@@ -103,6 +108,7 @@ export class EnemySystem {
   private readonly field: FlowField;
   private floorTime = 0;
   private floor: number;
+  private partyLevel = 1;
 
   constructor(
     private readonly dungeon: Dungeon,
@@ -117,10 +123,14 @@ export class EnemySystem {
     return this.field;
   }
 
-  /** Reloj del piso con el que se sortean los tiers de los enemigos que se creen después. */
-  setFloorClock(floorTime: number, floor: number): void {
+  /**
+   * Reloj del piso y nivel del grupo: con ellos se sortean los tiers y se escalan la vida y el daño de los
+   * enemigos que se creen después (los ya vivos no cambian).
+   */
+  setFloorClock(floorTime: number, floor: number, partyLevel = 1): void {
     this.floorTime = floorTime;
     this.floor = floor;
+    this.partyLevel = partyLevel;
   }
 
   /** Enemigos que no están en su animación de muerte. */
@@ -143,10 +153,12 @@ export class EnemySystem {
 
   private createEnemy(kind: EnemyKind, roomId: number, x: number, z: number): Enemy {
     const def = ENEMY_DEFS[kind];
+    const { hpMult, damageMult } = enemyScale(this.floorTime, this.partyLevel);
+    const hp = Math.round(def.hp * hpMult);
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
-      hp: def.hp, maxHp: def.hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout: this.rollLoadout(kind), stunned: 0,
+      hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
+      loadout: this.rollLoadout(kind), stunned: 0, damageMult,
     };
     this.list.push(e);
     return e;
@@ -286,10 +298,10 @@ export class EnemySystem {
         const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
         this.shots.push({
           id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX, dirZ, speed: def.ranged.projectileSpeed,
-          radius: def.ranged.projectileRadius, damage: def.damage, life: def.ranged.lifetimeS, sourceId: e.id,
+          radius: def.ranged.projectileRadius, damage: Math.round(def.damage * e.damageMult), life: def.ranged.lifetimeS, sourceId: e.id,
         });
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
-        hits.push({ targetKey: target.key, damage: atk.damage, sourceId: e.id, sourceX: e.x, sourceZ: e.z });
+        hits.push({ targetKey: target.key, damage: Math.round(atk.damage * e.damageMult), sourceId: e.id, sourceX: e.x, sourceZ: e.z });
       }
       e.cooldown = def.cooldownS;
       this.setAi(e, "recover");

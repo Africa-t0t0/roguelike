@@ -53,6 +53,9 @@ export interface AbilityAnim {
   impacts: number[];
   /** dirección del input que la empezó; los impactos la usan aunque el jugador gire */
   facing: number;
+  /** posición del jugador al lanzarla; el Tajo frontal sale de aquí aunque se mueva después */
+  originX: number;
+  originZ: number;
 }
 
 /** El combo (ComboTimers) avanza por input procesado; respawnIn, invulnFor y los plazos, por tick. */

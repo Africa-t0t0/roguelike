@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { KinematicState, WeaponId } from "@roguelike/shared";
 import { newComboTimers, normalizeName } from "@roguelike/shared";
-import { PlayerRegistry } from "../src/rooms/PlayerRegistry";
+import { PlayerRegistry, pruneFloorWeapons } from "../src/rooms/PlayerRegistry";
 import { newCombatState } from "../src/sim/CombatSystem";
 
 const spawn = (): KinematicState => ({ x: 1, z: 2, facing: 0, y: 0, vy: 0 });
@@ -129,13 +129,13 @@ describe("PlayerRegistry", () => {
     const seen: string[] = [];
     const floor = (equipped: WeaponId) => {
       seen.push(equipped);
-      return [{ weaponId: "great-sword" as const, tier: 2 as const, x: 3, z: 5 }];
+      return [{ weaponId: "great-sword" as const, tier: 2 as const, x: 3, z: 5, expiresAt: 40 }];
     };
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn, undefined, floor);
     if (!first.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", tier: 2, x: 3, z: 5 }]);
-    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5 };
+    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", tier: 2, x: 3, z: 5, expiresAt: 40 }]);
+    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5, expiresAt: 40 };
 
     const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn, undefined, floor);
     if (!taken.ok) throw new Error();
@@ -143,7 +143,7 @@ describe("PlayerRegistry", () => {
     const back = r.join({ name: "Jorge", token: "x", sessionId: "s3" }, spawn, undefined, floor);
     if (!back.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5 }]);
+    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5, expiresAt: 40 }]);
   });
 
   it("sin fábrica, un registro nuevo no tiene armas del suelo", () => {
@@ -220,5 +220,21 @@ describe("PlayerRegistry", () => {
       expect(r.join({ name: bad, token: "t", sessionId: "s" }, spawn)).toEqual({ ok: false, code: "invalid-name" });
     }
     expect(r.join({ name: "Ana María_2", token: "t", sessionId: "s" }, spawn).ok).toBe(true);
+  });
+});
+
+describe("pruneFloorWeapons", () => {
+  it("quita las vencidas (expiresAt ≤ floorTime) y dice si cambió la lista", () => {
+    const r = new PlayerRegistry();
+    const res = r.join({ name: "Ana", token: "t", sessionId: "s" }, spawn, undefined, () => [
+      { weaponId: "great-sword", tier: 1, x: 0, z: 0, expiresAt: 40 },
+      { weaponId: "guard-sword", tier: 1, x: 0, z: 0, expiresAt: 50 },
+    ]);
+    if (!res.ok) throw new Error();
+    expect(pruneFloorWeapons(res.record, 39.9)).toBe(false);
+    expect(res.record.floorWeapons).toHaveLength(2);
+    expect(pruneFloorWeapons(res.record, 40)).toBe(true);
+    expect(res.record.floorWeapons.map((f) => f.weaponId)).toEqual(["guard-sword"]);
+    expect(pruneFloorWeapons(res.record, 45)).toBe(false);
   });
 });

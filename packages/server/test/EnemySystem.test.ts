@@ -454,3 +454,36 @@ describe("navegación", () => {
     expect(sys.flow.distance(11, 10)).toBe(0);
   });
 });
+
+describe("escalado al crear", () => {
+  /** Golpe cuerpo a cuerpo de `e` (desarmado) contra un jugador pegado a él. */
+  function meleeHit(sys: EnemySystem, e: Enemy): EnemyHit[] {
+    const pl = [P("a", e.x + 1, e.z)];
+    return run(sys, pl, Math.ceil(ENEMY_DEFS[e.kind].telegraphS / SIM_DT) + 2).filter((h) => h.sourceId === e.id);
+  }
+
+  it("con nivel de grupo 3 y floorTime 300 un esbirro nuevo tiene la vida y el golpe escalados; uno ya vivo no cambia", () => {
+    const sys = new EnemySystem(arena(), createRng(7));
+    const [old] = sys.spawnWave([{ x: 24, z: 24 }], ["minion"]);
+    sys.setFloorClock(300, 1, 3);
+    const [fresh] = sys.spawnWave([{ x: 30, z: 30 }], ["minion"]);
+    old!.loadout = fresh!.loadout = null;
+
+    expect(fresh!.maxHp).toBe(Math.round(20 * 1.24 * 1.4));
+    expect(fresh!.hp).toBe(fresh!.maxHp);
+    expect(old!.maxHp).toBe(20);
+    expect(old!.hp).toBe(20);
+
+    // Uno por vez: el otro queda a 6 m, lejos de alcanzar al jugador en una telegrafía.
+    expect(meleeHit(sys, fresh!).map((h) => h.damage)).toEqual([Math.round(6 * 1.12 * 1.2)]);
+    sys.damage(fresh!.id, 9999);
+    expect(meleeHit(sys, old!).map((h) => h.damage)).toEqual([6]);
+  });
+
+  it("el proyectil del mago lleva el daño escalado", () => {
+    const { sys, e } = setup("mage", 28, 31);
+    e.damageMult = 1.5;
+    const hits = run(sys, [P("a", 20, 31)], 90);
+    expect(hits).toMatchObject([{ targetKey: "a", damage: Math.round(10 * 1.5), sourceId: e.id }]);
+  });
+});

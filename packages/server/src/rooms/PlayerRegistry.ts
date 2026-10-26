@@ -18,6 +18,16 @@ export interface FloorWeapon {
   tier: WeaponTier;
   x: number;
   z: number;
+  /** `floorTime` en que vence (tiempo simulado: se congela en la pausa) */
+  expiresAt: number;
+}
+
+/** Quita del registro las armas del suelo vencidas en `floorTime`; devuelve si quitó alguna. */
+export function pruneFloorWeapons(record: PlayerRecord, floorTime: number): boolean {
+  const keep = record.floorWeapons.filter((f) => f.expiresAt > floorTime);
+  if (keep.length === record.floorWeapons.length) return false;
+  record.floorWeapons = keep;
+  return true;
 }
 
 export interface PlayerRecord {

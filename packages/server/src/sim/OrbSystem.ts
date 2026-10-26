@@ -35,7 +35,8 @@ export class OrbSystem {
 
   /**
    * Cada orbe avanza ORB_SPEED × dt hacia el jugador vivo más cercano que lo tenga a ≤ ORB_MAGNET_RADIUS ×
-   * su `magnetMult` (1 por defecto) y se recoge si queda a ≤ ORB_PICKUP_RADIUS. Devuelve la XP recogida.
+   * su `magnetMult` (1 por defecto) y se recoge si queda a ≤ ORB_PICKUP_RADIUS. Devuelve la XP recogida:
+   * cada orbe vale `value × xpMult` de quien lo recoge (Aprendizaje; puede tener decimales).
    */
   step(alive: readonly SimPlayer[], dt: number): number {
     if (alive.length === 0) return 0;
@@ -55,7 +56,7 @@ export class OrbSystem {
           o.z += ((best.z - o.z) / bestD) * move;
         }
         if (bestD - move <= ORB_PICKUP_RADIUS) {
-          gained += o.value;
+          gained += o.value * (best.xpMult ?? 1);
           continue;
         }
       }

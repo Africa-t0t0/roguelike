@@ -382,3 +382,50 @@ describe("exclusión con el combo", () => {
     expect(env.c.abilityAnim).toBeNull();
   });
 });
+
+describe("Celeridad", () => {
+  it("con haste 2 el Torbellino queda en enfriamiento 8 × cooldownMult (0,9²)", () => {
+    const env = setup([{ id: "whirlwind", rank: 1 }]);
+    env.c.mods = playerMods({ ...newProgress(), stats: { haste: 2 } });
+    expect(feed(env, { abilities: 1 }).a.started).toBe("whirlwind");
+    expect(env.c.abilityCd.whirlwind).toBeCloseTo(8 * 0.9 ** 2, 12);
+  });
+});
+
+describe("Tajo frontal", () => {
+  it("rango 3: golpea a 2 enemigos alineados a 3 y 7,5 m en su impacto; no al de 1,5 m de costado", () => {
+    const env = setup([{ id: "thrust", rank: 3 }]);
+    const inLine = spawn(env.sys, [{ x: 28, z: 31 }, { x: 28, z: 35.5 }]);
+    const [side] = spawn(env.sys, [{ x: 29.5, z: 31 }]);
+    expect(feed(env, { abilities: 1 }).a.started).toBe("thrust");
+    expect(env.c.abilityCd.thrust).toBe(7);
+    const { at, hits } = untilHits(env, 1);
+    expect(at).toBe(inputsFor(0.45 * 0.7));
+    const amount = Math.round(BASE * 2);
+    expect(hits.map((x) => x.enemyId).sort()).toEqual(inLine.map((e) => e.id).sort());
+    expect(hits.every((x) => x.amount === amount)).toBe(true);
+    expect(side!.hp).toBe(9999);
+  });
+
+  it("la línea queda fija al lanzarla: girar después no la cambia", () => {
+    const env = setup([{ id: "thrust", rank: 1 }]);
+    const [ahead] = spawn(env.sys, [{ x: 28, z: 31 }]);
+    feed(env, { abilities: 1, facing: 0 });
+    const hits: string[] = [];
+    for (let i = 0; i < 30; i++) hits.push(...feed(env, { facing: Math.PI }).a.hits.map((h) => h.enemyId));
+    expect(hits).toEqual([ahead!.id]);
+  });
+
+  it("Foco 4: no golpea a un enemigo detrás de un muro", () => {
+    const env = setup([{ id: "thrust", rank: 3 }]);
+    // Muro de 2 casillas (x 26-30 m, z 30-32 m) entre el jugador (28, 28) y el enemigo (28, 33,5).
+    for (const tx of [13, 14]) env.dungeon.tiles[15 * env.dungeon.width + tx] = 0;
+    const [behind] = spawn(env.sys, [{ x: 28, z: 33.5 }]);
+    const [front] = spawn(env.sys, [{ x: 28, z: 29.2 }]);
+    feed(env, { abilities: 1 });
+    const hits: string[] = [];
+    for (let i = 0; i < 30; i++) hits.push(...feed(env).a.hits.map((h) => h.enemyId));
+    expect(hits).toEqual([front!.id]);
+    expect(behind!.hp).toBe(9999);
+  });
+});

@@ -128,3 +128,12 @@ describe("OrbSystem", () => {
     expect(sys.orbs.find((o) => o.id === "x1")!.value).toBe(2);
   });
 });
+
+describe("OrbSystem: Aprendizaje", () => {
+  it("con learning 1 (xpMult 1,15) un orbe de 4 suma 4,6 para quien lo recoge", () => {
+    const sys = single(0.5, 0, 4);
+    const gained = sys.step([{ ...P("a", 0, 0), xpMult: 1.15 }], SIM_DT);
+    expect(gained).toBeCloseTo(4.6, 12);
+    expect(sys.orbs).toHaveLength(0);
+  });
+});

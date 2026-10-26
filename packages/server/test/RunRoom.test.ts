@@ -21,6 +21,8 @@ import {
   TILE_SIZE,
   tileCenter,
   waveGroupSize,
+  enemyScale,
+  FLOOR_WEAPON_TTL_S,
   ENEMY_DEFS,
   xpToNext,
   TIERS,
@@ -62,7 +64,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-type FloorMsg = { items: { weaponId: string; tier: number; x: number; z: number }[] };
+type FloorMsg = { items: { weaponId: string; tier: number; x: number; z: number; ttl: number }[] };
+/** Solo arma y posición (sin vencimiento): para comparar listas de armas del suelo. */
+const place = (items: readonly { weaponId: string; tier: number; x: number; z: number }[]) =>
+  items.map(({ weaponId, tier, x, z }) => ({ weaponId, tier, x, z }));
 type ChoiceMsg = { offerId: number; cards: unknown[]; index: number; total: number; deadlineS: number };
 
 async function join(
@@ -550,14 +555,20 @@ describe("RunRoom: armas", () => {
     expect(player("ana").weaponId).toBe("kingslayer-sword");
     expect(player("ana").weaponTier).toBe(1);
     await floorsUntil(ana.floors, 1);
-    expect(ana.floors).toEqual([{ items: initialFloor }]);
+    expect(ana.floors.map((m) => place(m.items))).toEqual([initialFloor]);
+    // Vencen a los FLOOR_WEAPON_TTL_S simulados desde que se crean, al entrar.
+    const born = record("ana").floorWeapons[0]!.expiresAt - FLOOR_WEAPON_TTL_S;
+    expect(born).toBeGreaterThanOrEqual(0);
+    expect(born).toBeLessThanOrEqual(room.state.floorTime);
+    for (const f of record("ana").floorWeapons) expect(f.expiresAt).toBe(born + FLOOR_WEAPON_TTL_S);
+    for (const it of ana.floors[0]!.items) expect(it.ttl).toBeCloseTo(FLOOR_WEAPON_TTL_S, 0);
     const start = d.rooms[d.startRoomId]!;
     for (const it of ana.floors[0]!.items) {
       const [tx, tz] = [tileOf(it.x), tileOf(it.z)];
       expect(tx >= start.x && tx < start.x + start.w && tz >= start.z && tz < start.z + start.h).toBe(true);
       expect(isWalkableTile(d, tx, tz)).toBe(true);
     }
-    expect(record("ana").floorWeapons).toEqual(initialFloor);
+    expect(place(record("ana").floorWeapons)).toEqual(initialFloor);
     await ticksUntil(() => ana.client.state.players.get("ana")?.weaponId === "kingslayer-sword", 5);
   });
 
@@ -567,13 +578,20 @@ describe("RunRoom: armas", () => {
     await floorsUntil(ana.floors, 1);
     // Combo a medias pero sin swing en curso: el cambio lo reinicia.
     Object.assign(record("ana").combat, { comboStep: 1, comboTimer: 0.3 });
+    // Reloj adelantado 10 s: la que se deje al cambiar vence 10 s después que las iniciales.
+    room["floorTime"] += 10;
     await takeGreatSword(ana, 1);
     expect(player("ana").weaponId).toBe("great-sword");
     expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", comboStep: 0, comboTimer: 0, swingTimer: 0, impactPending: false });
     expect(ana.floors).toHaveLength(2);
-    expect(ana.floors[1]).toEqual({
-      items: [initialFloor[0], { weaponId: "kingslayer-sword", tier: 1, x: greatAt.x, z: greatAt.z }],
-    });
+    expect(place(ana.floors[1]!.items)).toEqual([
+      initialFloor[0], { weaponId: "kingslayer-sword", tier: 1, x: greatAt.x, z: greatAt.z },
+    ]);
+    // La que se deja al cambiar vence a los FLOOR_WEAPON_TTL_S desde el cambio; la otra conserva su plazo.
+    const [kept, left] = record("ana").floorWeapons;
+    expect(left!.expiresAt).toBeGreaterThan(kept!.expiresAt);
+    expect(left!.expiresAt).toBeLessThanOrEqual(room.state.floorTime + FLOOR_WEAPON_TTL_S);
+    expect(ana.floors[1]!.items[1]!.ttl).toBeCloseTo(FLOOR_WEAPON_TTL_S, 0);
     await ticksUntil(() => ana.client.state.players.get("ana")?.weaponId === "great-sword", 5);
   });
 
@@ -587,7 +605,7 @@ describe("RunRoom: armas", () => {
     await ticksUntil(() => player("ana").lastSeq === 1, 5);
     for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
     expect(player("ana").weaponId).toBe("kingslayer-sword");
-    expect(record("ana").floorWeapons).toEqual(initialFloor);
+    expect(place(record("ana").floorWeapons)).toEqual(initialFloor);
     expect(ana.floors).toHaveLength(1);
   });
 
@@ -604,7 +622,7 @@ describe("RunRoom: armas", () => {
     expect(c.weaponId).toBe("kingslayer-sword");
     expect(c.comboStep).toBe(1);
     expect(c.swingTimer).toBeGreaterThan(0);
-    expect(record("ana").floorWeapons).toEqual(initialFloor);
+    expect(place(record("ana").floorWeapons)).toEqual(initialFloor);
     expect(ana.floors).toHaveLength(1);
 
     // El swing termina tras ceil(duración / SIM_DT) inputs posteriores al clic; luego el mismo interact sí funciona.
@@ -631,13 +649,13 @@ describe("RunRoom: armas", () => {
     await back.welcome;
     expect(player("ana").weaponId).toBe("great-sword");
     await floorsUntil(back.floors, 1);
-    expect(back.floors).toEqual([swapped]);
+    expect(back.floors.map((m) => place(m.items))).toEqual([place(swapped.items)]);
 
     const again = await join("Ana", "t-otro");
     await again.welcome;
     expect(player("ana").weaponId).toBe("great-sword");
     await floorsUntil(again.floors, 1);
-    expect(again.floors).toEqual([swapped]);
+    expect(again.floors.map((m) => place(m.items))).toEqual([place(swapped.items)]);
     await ticksUntil(() => again.client.state.players.get("ana")?.weaponId === "great-sword", 5);
   });
 
@@ -649,8 +667,8 @@ describe("RunRoom: armas", () => {
     await floorsUntil(ana.floors, 1);
     await takeGreatSword(ana, 1);
     for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
-    expect(beto.floors).toEqual([{ items: initialFloor }]);
-    expect(record("beto").floorWeapons).toEqual(initialFloor);
+    expect(beto.floors.map((m) => place(m.items))).toEqual([initialFloor]);
+    expect(place(record("beto").floorWeapons)).toEqual(initialFloor);
     expect(player("beto").weaponId).toBe("kingslayer-sword");
   });
 
@@ -820,8 +838,9 @@ describe("RunRoom: orbes y botín", () => {
     }
     const dropped = { weaponId: "great-sword", tier: 2, x: target.x, z: target.z };
     await ticksUntil(() => ana.floors.length >= 2 && beto.floors.length >= 2, 10);
-    expect(ana.floors.at(-1)!.items).toEqual([...ana.floors[0]!.items, dropped]);
-    expect(beto.floors.at(-1)!.items).toEqual([...beto.floors[0]!.items, dropped]);
+    expect(place(ana.floors.at(-1)!.items)).toEqual(place([...ana.floors[0]!.items, dropped]));
+    expect(place(beto.floors.at(-1)!.items)).toEqual(place([...beto.floors[0]!.items, dropped]));
+    expect(ana.floors.at(-1)!.items.at(-1)!.ttl).toBeCloseTo(FLOOR_WEAPON_TTL_S, 0);
 
     // Ana la toma: deja su Kingslayer tier 1 en su lugar; la lista de Beto no cambia.
     teleport("ana", dropped);
@@ -829,8 +848,8 @@ describe("RunRoom: orbes y botín", () => {
     await ticksUntil(() => player("ana").lastSeq === seq, 5);
     expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", weaponTier: 2 });
     expect(player("ana").weaponTier).toBe(2);
-    expect(record("ana").floorWeapons.at(-1)).toEqual({ ...dropped, weaponId: "kingslayer-sword", tier: 1 });
-    expect(record("beto").floorWeapons.at(-1)).toEqual(dropped);
+    expect(record("ana").floorWeapons.at(-1)).toMatchObject({ ...dropped, weaponId: "kingslayer-sword", tier: 1 });
+    expect(record("beto").floorWeapons.at(-1)).toMatchObject(dropped);
 
     // Beto también puede tomar su copia.
     teleport("beto", dropped);
@@ -838,7 +857,7 @@ describe("RunRoom: orbes y botín", () => {
     await ticksUntil(() => player("beto").lastSeq === 1, 5);
     expect(player("beto").weaponId).toBe("great-sword");
     expect(player("beto").weaponTier).toBe(2);
-    expect(record("ana").floorWeapons.at(-1)).toEqual({ ...dropped, weaponId: "kingslayer-sword", tier: 1 });
+    expect(record("ana").floorWeapons.at(-1)).toMatchObject({ ...dropped, weaponId: "kingslayer-sword", tier: 1 });
     await ticksUntil(() => beto.client.state.players.get("beto")?.weaponTier === 2, 5);
   });
 
@@ -875,7 +894,7 @@ describe("RunRoom: orbes y botín", () => {
     expect(player("ana").weaponId).toBe("great-sword");
     expect(player("ana").weaponTier).toBe(3);
     await ticksUntil(() => back.floors.length >= 1, 10);
-    expect(back.floors[0]!.items).toEqual(floor);
+    expect(place(back.floors[0]!.items)).toEqual(place(floor));
     await ticksUntil(
       () => back.client.state.players.get("ana")?.weaponTier === 3 && back.client.state.orbs?.size === orbCount,
       10,
@@ -1020,6 +1039,83 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     ana.client.send(MSG.chooseCard, { offerId: ana.choices[1]!.offerId, index: 1 });
     await ticksUntil(() => !room.state.paused, 10);
     expect(record("ana").pendingChoices).toBe(0);
+  });
+});
+
+describe("RunRoom: vencimiento de las armas del suelo", () => {
+  /** Ana sin sus armas iniciales y con una soltada en (x, z); devuelve el arma soltada de su registro. */
+  async function withDrop(ana: Awaited<ReturnType<typeof join>>) {
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    record("ana").floorWeapons = [];
+    const me = record("ana").kinematic;
+    room["dropWeapon"]({ weaponId: "great-sword", tier: 2, x: me.x + 5, z: me.z });
+    await ticksUntil(() => ana.floors.length >= 2, 10);
+    const f = record("ana").floorWeapons[0]!;
+    expect(f.expiresAt).toBeCloseTo(room["floorTime"] + FLOOR_WEAPON_TTL_S, 0);
+    expect(ana.floors[1]!.items).toHaveLength(1);
+    expect(ana.floors[1]!.items[0]!.ttl).toBeCloseTo(FLOOR_WEAPON_TTL_S, 0);
+    return f;
+  }
+
+  it("un arma soltada vence a los 40 s simulados y se reenvía la lista vacía", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const f = await withDrop(ana);
+    // Se adelanta el reloj hasta 0,2 s antes del vencimiento: en el próximo tick aún está.
+    room["floorTime"] = f.expiresAt - 0.2;
+    await room.waitForNextTimestep();
+    expect(record("ana").floorWeapons).toHaveLength(1);
+    const sent = ana.floors.length;
+    await ticksUntil(() => record("ana").floorWeapons.length === 0, 10);
+    expect(room["floorTime"]).toBeGreaterThanOrEqual(f.expiresAt);
+    await ticksUntil(() => ana.floors.length === sent + 1, 10);
+    expect(ana.floors.at(-1)).toEqual({ items: [] });
+    // Sin cambios no se reenvía.
+    for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
+    expect(ana.floors).toHaveLength(sent + 1);
+  });
+
+  it("Foco 1: en la pausa no vence y al reanudar le queda lo mismo", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const f = await withDrop(ana);
+    room["floorTime"] = f.expiresAt - 0.5;
+    room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => room.state.paused, 5);
+    const left = f.expiresAt - room["floorTime"];
+    expect(left).toBeGreaterThan(0);
+    const sent = ana.floors.length;
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect(room.state.paused).toBe(true);
+    expect(record("ana").floorWeapons).toEqual([f]);
+    expect(f.expiresAt - room["floorTime"]).toBe(left);
+    expect(ana.floors).toHaveLength(sent);
+
+    await ticksUntil(() => ana.choices.length === 1, 10);
+    ana.client.send(MSG.chooseCard, { offerId: ana.choices[0]!.offerId, index: 0 });
+    await ticksUntil(() => !room.state.paused, 10);
+    // Al reanudar vence tras los `left` segundos simulados que le quedaban.
+    const resumedAt = room["floorTime"];
+    await ticksUntil(() => record("ana").floorWeapons.length === 0, 30);
+    expect(room["floorTime"] - resumedAt).toBeGreaterThanOrEqual(left - 0.04);
+    await ticksUntil(() => ana.floors.length === sent + 1, 10);
+    expect(ana.floors.at(-1)).toEqual({ items: [] });
+  });
+});
+
+describe("RunRoom: escalado de enemigos", () => {
+  it("Foco 2: con nivel de grupo 3 y 300 s los enemigos nuevos llegan al cliente con su maxHp escalado", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    room["floorTime"] = 300;
+    room["combat"].level = 3;
+    const { hpMult } = enemyScale(300, 3);
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room["enemySystem"].enemies.length >= 4, 5);
+    const enemies = room["enemySystem"].enemies;
+    for (const e of enemies) expect(e.maxHp).toBe(Math.round(ENEMY_DEFS[e.kind].hp * hpMult));
+    await ticksUntil(() => enemies.every((e) => ana.client.state.enemies?.get(e.id)?.maxHp === e.maxHp), 10);
   });
 });
 

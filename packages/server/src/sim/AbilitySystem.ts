@@ -9,11 +9,14 @@ import {
   MOVESETS,
   SIM_DT,
   SLAM_IMPACT_S,
+  THRUST_IMPACT_FRAC,
+  THRUST_WIDTH,
   TILE_SIZE,
   WARCRY_DURATION_S,
   WEAPONS,
   WHIRLWIND_IMPACT_AT,
   circlesOverlap,
+  hasLineOfSight,
   inArc,
   isWalkableTile,
   strikeDamage,
@@ -62,6 +65,27 @@ const FULL_CIRCLE_DEG = 360;
 /** Resta `dt` y deja en 0 lo que quede por debajo de EPS (como el combo). */
 const countDown = (v: number, dt: number): number => (v - dt > EPS ? v - dt : 0);
 
+/**
+ * ¿El círculo toca el rectángulo que sale de `origin` hacia `facing`, de largo `length` y ancho `width`?
+ * Se mide la distancia del centro al punto más cercano del rectángulo, en ejes (adelante, costado).
+ */
+export function inLine(
+  origin: { x: number; z: number; facing: number },
+  target: { x: number; z: number; radius: number },
+  length: number,
+  width: number,
+): boolean {
+  const dx = target.x - origin.x;
+  const dz = target.z - origin.z;
+  const sin = Math.sin(origin.facing);
+  const cos = Math.cos(origin.facing);
+  const along = dx * sin + dz * cos;
+  const side = dx * cos - dz * sin;
+  const ca = Math.min(Math.max(along, 0), length);
+  const cs = Math.min(Math.max(side, -width / 2), width / 2);
+  return (along - ca) ** 2 + (side - cs) ** 2 <= target.radius ** 2;
+}
+
 /** Casillas de habilidad (activas y mantenidas) en orden de aprendizaje: la tecla i+1 usa la i-ésima. */
 export function abilitySlots(c: CombatState): { id: AbilityId; rank: number }[] {
   return c.abilities.filter((a) => ABILITIES[a.id].kind !== "passive").slice(0, MAX_ACTIVE_ABILITIES);
@@ -80,6 +104,8 @@ function impactTimes(id: AbilityId, rank: number): number[] {
       return [KICK_IMPACT_AT * def.animS];
     case "slam":
       return [SLAM_IMPACT_S];
+    case "thrust":
+      return [THRUST_IMPACT_FRAC * def.animS];
     default:
       return [];
   }
@@ -146,8 +172,11 @@ export class AbilitySystem {
       const { id, rank } = slots[i]!;
       const def = ABILITIES[id];
       if (def.kind !== "active" || (c.abilityCd[id] ?? 0) > 0 || c.swingTimer > 0 || c.abilityAnim) continue;
-      c.abilityCd[id] = def.cooldownS;
-      c.abilityAnim = { id, rank, left: def.animS, impacts: impactTimes(id, rank), facing: input.facing };
+      // Celeridad: el enfriamiento se fija al lanzarla.
+      c.abilityCd[id] = def.cooldownS * c.mods.cooldownMult;
+      c.abilityAnim = {
+        id, rank, left: def.animS, impacts: impactTimes(id, rank), facing: input.facing, originX: k.x, originZ: k.z,
+      };
       if (id === "warcry") this.warcry(c, party, def.ranks[rank - 1]!.buff!);
       res.started = id;
       break;
@@ -252,7 +281,8 @@ export class AbilitySystem {
     const r = ABILITIES[id].ranks[anim.rank - 1];
     if (!r) return;
     const t = rewindTick(nowTick, input.viewTick);
-    const origin = { x: k.x, z: k.z, facing };
+    // El Tajo frontal sale de donde se lanzó; las demás, de donde está el jugador en el impacto.
+    const origin = id === "thrust" ? { x: anim.originX, z: anim.originZ, facing } : { x: k.x, z: k.z, facing };
     const arcDeg = id === "kick" ? KICK_ARC_DEG : FULL_CIRCLE_DEG;
     const amount = this.abilityDamage(c, r.damageMult ?? 0);
     let kills = 0;
@@ -261,7 +291,13 @@ export class AbilitySystem {
     for (const e of [...enemies.enemies]) {
       if (e.ai === "dead" || e.hp <= 0) continue;
       const pos = history.at(t, e.id) ?? { x: e.x, z: e.z };
-      if (!inArc(origin, { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius }, r.radius!, arcDeg)) continue;
+      const target = { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius };
+      const inside =
+        id === "thrust"
+          ? inLine(origin, target, r.range!, THRUST_WIDTH) &&
+            hasLineOfSight(this.dungeon, origin.x, origin.z, pos.x, pos.z, 0)
+          : inArc(origin, target, r.radius!, arcDeg);
+      if (!inside) continue;
       const d = enemies.damage(e.id, amount);
       res.hits.push({ enemyId: e.id, amount, killed: d.killed, x: e.x, z: e.z });
       if (d.killed) {
