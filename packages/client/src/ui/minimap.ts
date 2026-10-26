@@ -47,6 +47,11 @@ const VIEW_RADIUS_TILES = 13; // lo que cabe del centro al borde del círculo
 const FLOOR = "rgba(150, 132, 104, 0.55)";
 const EDGE = "rgba(214, 178, 112, 0.85)";
 
+/** Cofre cerrado: punto dorado; abierto: gris. */
+export function chestStyle(open: boolean): string {
+  return open ? "#8a8a8a" : "#f0c040";
+}
+
 /**
  * Minimapa circular arriba a la derecha (canvas 2D), con el norte arriba: lo descubierto del piso, la flecha del
  * jugador según hacia dónde mira la cámara y los aliados como puntos dorados.
@@ -84,7 +89,7 @@ export class Minimap {
   }
 
   /** `yaw` de la cámara (0 = norte = +Z). `allies` en metros. */
-  render(me: { x: number; z: number }, yaw: number, allies: readonly { x: number; z: number }[]): void {
+  render(me: { x: number; z: number }, yaw: number, allies: readonly { x: number; z: number }[], chests: readonly { x: number; z: number; open: boolean }[] = []): void {
     const tx = Math.floor(me.x / TILE_SIZE);
     const tz = Math.floor(me.z / TILE_SIZE);
     const key = `${tx},${tz}`;
@@ -119,6 +124,16 @@ export class Minimap {
       const ay = c - ((a.z - me.z) / TILE_SIZE) * PX_PER_TILE * scale;
       ctx.beginPath();
       ctx.arc(ax, ay, 3 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const ch of chests) {
+      // Solo los de casillas ya descubiertas: el mapa no revela dónde hay cofres sin explorar.
+      if (!this.fog.isSeen(Math.floor(ch.x / TILE_SIZE), Math.floor(ch.z / TILE_SIZE))) continue;
+      ctx.fillStyle = chestStyle(ch.open);
+      const cx = c + ((ch.x - me.x) / TILE_SIZE) * PX_PER_TILE * scale;
+      const cy = c - ((ch.z - me.z) / TILE_SIZE) * PX_PER_TILE * scale;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5 * dpr, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();

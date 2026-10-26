@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Dungeon } from "@roguelike/shared";
-import { FogOfWar, REVEAL_RADIUS_TILES } from "../src/ui/minimap";
+import { chestStyle, FogOfWar, REVEAL_RADIUS_TILES } from "../src/ui/minimap";
 
 /** 40×12: una sala 8×8 en x 2..9 y un pasillo de una casilla en z = 5 hasta x = 39. */
 function corridorDungeon(): Dungeon {
@@ -39,5 +39,12 @@ describe("FogOfWar", () => {
     const fog = new FogOfWar(corridorDungeon());
     expect(() => fog.reveal(-5, -5)).not.toThrow();
     expect(fog.isSeen(-1, 3)).toBe(false);
+  });
+});
+
+describe("cofres en el minimapa", () => {
+  it("cerrado y abierto se pintan distinto", () => {
+    expect(chestStyle(false)).not.toBe(chestStyle(true));
+    expect(chestStyle(false)).toBe("#f0c040");
   });
 });

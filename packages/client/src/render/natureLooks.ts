@@ -6,7 +6,7 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
-import type { Nature } from "@roguelike/shared";
+import { natureSuffix, type EnemyKind, type Nature } from "@roguelike/shared";
 import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 
 /** Color de cada naturaleza: brillo de las armas, efectos de las habilidades y ondas de corte. */
@@ -19,6 +19,20 @@ export const NATURE_COLORS: Record<Exclude<Nature, "none">, Color3> = {
 /** `base` si no hay naturaleza; si la hay, el color de la naturaleza. */
 export function natureTint(base: Color3, nature: Nature): Color3 {
   return nature === "none" ? base : NATURE_COLORS[nature];
+}
+
+const KIND_NAMES: Record<EnemyKind, string> = {
+  minion: "Esbirro",
+  brute: "Bruto",
+  mage: "Hechicero arcano",
+  pyromancer: "Piromante",
+  stormcaller: "Invocador del rayo",
+};
+
+/** Nombre del élite: "Bruto de hielo", "Piromante del rayo"… */
+export function eliteName(kind: EnemyKind, nature: Nature): string {
+  const suffix = natureSuffix(nature);
+  return suffix ? `${KIND_NAMES[kind]} ${suffix}` : KIND_NAMES[kind];
 }
 
 /** Partículas suaves de un arma con naturaleza: brasas que suben, copos que caen o chispas cortas. */

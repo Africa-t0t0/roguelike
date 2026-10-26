@@ -60,6 +60,10 @@ export class CharacterView {
   private readonly body: TransformNode;
   private bodyYaw = 0;
   private bodyYawTarget = 0;
+  /** escala y altura de los pies del cuerpo medidas al crearlo (sin el factor de `setBodyScale`) */
+  private baseScale = 1;
+  private baseY = 0;
+  private frozen = false;
 
   constructor(
     private readonly scene: Scene,
@@ -100,6 +104,8 @@ export class CharacterView {
     const scale = measured > 1e-6 ? look.height / measured : 1;
     body.scaling.setAll(scale);
     body.position.y = -min.y * scale;
+    this.baseScale = scale;
+    this.baseY = body.position.y;
 
     this.observer = scene.onBeforeRenderObservable.add(() => {
       // En la pausa (animaciones congeladas) tampoco avanzan los fundidos ni el giro del cuerpo.
@@ -112,6 +118,19 @@ export class CharacterView {
   setPose(x: number, y: number, z: number, facing: number): void {
     this.root.position.set(x, y, z);
     this.root.rotation.y = facing;
+  }
+
+  /** Agranda (o achica) el cuerpo `k` veces respecto de `look.height`, con los pies en el suelo; `root` no cambia. */
+  setBodyScale(k: number): void {
+    this.body.scaling.setAll(this.baseScale * k);
+    this.body.position.y = this.baseY * k;
+  }
+
+  /** Congelado: el clip actual se detiene (`speedRatio` 0) y los siguientes arrancan quietos; al soltarlo `play` lo restaura. */
+  setFrozen(frozen: boolean): void {
+    if (frozen === this.frozen) return;
+    this.frozen = frozen;
+    if (frozen && this.current) this.current.group.speedRatio = 0;
   }
 
   /** Gira el cuerpo (no `root`) `yaw` rad respecto de la mirada, de forma suave. */
@@ -182,7 +201,8 @@ export class CharacterView {
   }
 
   /** Cambia de clip con un cruce; si `choice.clip` ya suena solo ajusta la velocidad (salvo `restart`). */
-  play(choice: AnimChoice, restart = false): void {
+  play(requested: AnimChoice, restart = false): void {
+    const choice = this.frozen ? { ...requested, speed: 0 } : requested;
     const group = this.group(choice.clip);
     if (!group) return;
     const cur = this.current;

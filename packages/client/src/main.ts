@@ -25,6 +25,8 @@ import { AbilityFx, SLAM_SHAKE } from "./render/abilityFx";
 import { RecentHits } from "./render/animState";
 import { AnimLibrary } from "./render/animLibrary";
 import { loadAssets, type Assets } from "./render/assets";
+import { ChainFx } from "./render/chainFx";
+import { ChestViews } from "./render/chestViews";
 import { createScene } from "./render/createScene";
 import { damageTiming } from "./render/damageTiming";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
@@ -139,6 +141,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
   const hazards = new HazardViews(scene);
+  const chests = new ChestViews(scene);
+  const chainFx = new ChainFx(scene);
   const playerShots = new PlayerShotViews(scene);
   const floorWeapons = new FloorWeaponViews(scene, assets);
   const orbs = new OrbViews(scene);
@@ -181,6 +185,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   let seq = 0;
   let lastFrame = performance.now();
   let frameNow = clock.now(lastFrame); // reloj de juego del cuadro en curso
+  let chestList: { x: number; z: number; open: boolean }[] = []; // para el minimapa
   let lastPlayers = new Map<string, PlayerSnapshot>(); // para el rango de las habilidades de cada uno
 
   // Efectos de habilidad: una vez por lanzamiento, cuando su clip empieza a dibujarse (propia predicha o
@@ -243,6 +248,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.push(world, at);
     projectiles.push(world, at);
     hazards.push(world, at);
+    chests.push(world, at);
+    chestList = [...world.chests.values()];
     // La onda no dice de quién es: lleva la naturaleza del jugador más cercano (su dueño, que la acaba de lanzar).
     playerShots.push(world, at, (x, z) => {
       let best: PlayerSnapshot | undefined;
@@ -274,6 +281,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       const height = event.targetKind === "enemy" ? enemies.heightOf(event.targetId) : undefined;
       damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt, height);
       if (t.hurtMe) hurtFlash.flash();
+    } else if (event.type === "chain") {
+      chainFx.play(event.points, now);
     } else if (event.type === "levelUp") {
       hud.levelUp(event.level);
     }
@@ -364,10 +373,12 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       allies.push(s);
     }
     compass.render(camera.yaw);
-    if (predictor) minimap.render(predictor.current, camera.yaw, allies);
+    if (predictor) minimap.render(predictor.current, camera.yaw, allies, chestList);
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
     hazards.render(renderAt);
+    chests.render(renderAt);
+    chainFx.render(renderAt);
     playerShots.render(renderAt);
     // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
     abilityBar.render(
@@ -381,6 +392,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     floorWeapons.setPaused(paused);
     projectiles.setPaused(paused);
     hazards.setPaused(paused);
+    chests.setPaused(paused);
     abilityFx.update(now);
     scene.render();
     damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame
@@ -403,6 +415,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.dispose();
     projectiles.dispose();
     hazards.dispose();
+    chests.dispose();
+    chainFx.dispose();
     playerShots.dispose();
     floorWeapons.dispose();
     orbs.dispose();

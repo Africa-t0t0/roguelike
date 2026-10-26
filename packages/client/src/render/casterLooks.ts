@@ -29,43 +29,53 @@ export function chargeScale(aiTime: number, telegraphS: number): number {
 type Emissive = Material & { emissiveColor: Color3 };
 const hasEmissive = (m: Material): m is Emissive => (m as { emissiveColor?: unknown }).emissiveColor instanceof Color3;
 
-/** Original → clones teñidos por tipo; y de cada clon, su original (para no clonar clones). */
-const clones = new WeakMap<Material, Map<CasterKind, Material>>();
+/** Original → clones teñidos por clave de tinte; y de cada clon, su original (para no clonar clones). */
+const clones = new WeakMap<Material, Map<string, Material>>();
 const sourceOf = new WeakMap<Material, Material>();
 
-function tinted(source: Material, kind: CasterKind): Material {
+function tinted(source: Material, key: string, color: Color3, strength: number): Material {
   if (!(source instanceof MultiMaterial || hasEmissive(source))) return source;
-  let byKind = clones.get(source);
-  if (!byKind) clones.set(source, (byKind = new Map()));
-  let clone = byKind.get(kind);
+  let byKey = clones.get(source);
+  if (!byKey) clones.set(source, (byKey = new Map()));
+  let clone = byKey.get(key);
   if (!clone) {
     if (source instanceof MultiMaterial) {
-      const multi = new MultiMaterial(`${source.name}-${kind}`, source.getScene());
-      multi.subMaterials = source.subMaterials.map((sub) => (sub ? tinted(sub, kind) : sub));
+      const multi = new MultiMaterial(`${source.name}-${key}`, source.getScene());
+      multi.subMaterials = source.subMaterials.map((sub) => (sub ? tinted(sub, key, color, strength) : sub));
       clone = multi;
     } else {
-      clone = source.clone(`${source.name}-${kind}`) ?? source;
-      if (clone !== source && hasEmissive(clone)) {
-        const { color, strength } = casterTint(kind);
-        clone.emissiveColor = color.scale(strength);
-      }
+      clone = source.clone(`${source.name}-${key}`) ?? source;
+      if (clone !== source && hasEmissive(clone)) clone.emissiveColor = color.scale(strength);
     }
-    byKind.set(kind, clone);
+    byKey.set(key, clone);
     if (clone !== source) sourceOf.set(clone, source);
   }
   return clone;
 }
 
+/** Las mallas del arma (cuelgan de un nodo `grip#…`) conservan su brillo de tier: el tinte es del cuerpo. */
+function isWeaponPart(mesh: TransformNode): boolean {
+  for (let n = mesh.parent; n; n = n.parent) if (n.name.startsWith("grip#")) return true;
+  return false;
+}
+
 /**
- * Tiñe el emisivo de las mallas bajo `root` con el color del hechicero (sin luces: solo material).
- * Cada material se clona como mucho una vez por (material, tipo) y se reutiliza entre instancias.
+ * Tiñe el emisivo de las mallas del cuerpo bajo `root` con `color` × `strength` (sin luces: solo material), o
+ * con `tint = null` las devuelve a su material original. Cada material se clona como mucho una vez por
+ * (material, clave) y se reutiliza entre instancias; cambiar de tinte siempre parte del original.
  */
-export function applyCasterTint(root: TransformNode, kind: CasterKind): void {
+export function applyTint(root: TransformNode, tint: { key: string; color: Color3; strength: number } | null): void {
   for (const mesh of root.getChildMeshes(false)) {
-    if (mesh.getClassName() === "InstancedMesh") continue;
+    if (mesh.getClassName() === "InstancedMesh" || isWeaponPart(mesh)) continue;
     const current = mesh.material;
     if (!current) continue;
-    const next = tinted(sourceOf.get(current) ?? current, kind);
+    const original = sourceOf.get(current) ?? current;
+    const next = tint ? tinted(original, tint.key, tint.color, tint.strength) : original;
     if (next !== current) mesh.material = next;
   }
+}
+
+/** Tinte del hechicero (color de su tipo) sobre el cuerpo. */
+export function applyCasterTint(root: TransformNode, kind: CasterKind): void {
+  applyTint(root, { key: kind, ...casterTint(kind) });
 }

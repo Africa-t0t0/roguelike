@@ -1,5 +1,6 @@
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreatePolyhedron } from "@babylonjs/core/Meshes/Builders/polyhedronBuilder";
@@ -7,14 +8,19 @@ import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
+import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
-import { casterTelegraphS, ENEMY_DEFS, enemyAttack, isCaster, TIERS, type CasterKind, type EnemyKind, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { casterTelegraphS, ELITE, ENEMY_DEFS, enemyAttack, isCaster, TIERS, type CasterKind, type EnemyKind, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { EnemySnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseEnemyAnim, SpeedMeter, type ClipLengths } from "./animState";
 import type { Assets } from "./assets";
-import { applyCasterTint, CASTER_COLORS, chargeScale } from "./casterLooks";
+import { applyCasterTint, applyTint, CASTER_COLORS, chargeScale } from "./casterLooks";
+import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
+import { eliteName, NATURE_COLORS } from "./natureLooks";
 import { CharacterView } from "./characterView";
 import { lerpAngle } from "./interpolation";
 import { ENEMY_LOOKS } from "./looks";
@@ -37,6 +43,21 @@ const AURA_EXTRA_RADIUS = 0.5; // m sobre el radio del enemigo
 const AURA_Y = 0.02; // m: bajo el anillo de tier
 const AURA_RING_Y = 0.03;
 const CHARGE_DIAMETER = 0.35; // m, a carga completa
+
+/** Élite: aura dorada, rótulo sobre la barra de vida y contorno emisivo del color de su naturaleza. */
+const ELITE_GOLD = new Color3(1, 0.8, 0.25);
+const ELITE_AURA_EXTRA = 0.8; // m sobre el radio del enemigo ya escalado
+const ELITE_LABEL_ABOVE_BAR = 0.3; // m
+const ELITE_LABEL_W = 3;
+const ELITE_LABEL_H = 0.375;
+const ELITE_TINT = 0.5;
+/** Estados: tinte cian suave al ralentizar y fuerte al congelar; brasas al arder. */
+const SLOW_TINT = 0.3;
+const FROZEN_TINT = 0.85;
+const BURN_RATE = 24;
+const BURN_EMITTER_FRAC = 0.5; // altura del emisor, fracción del alto del enemigo
+
+type TintState = "base" | "slowed" | "frozen";
 
 function lerpEnemy(a: EnemySnapshot, b: EnemySnapshot, t: number): EnemySnapshot {
   return {
@@ -79,6 +100,15 @@ interface EnemyView {
   /** unidades locales de la mano por metro, para escalar la esfera */
   chargePerMeter: number;
   stars: TransformNode;
+  elite: boolean;
+  nature: Nature;
+  /** alto dibujado (m): el del modelo × la escala de élite */
+  height: number;
+  label?: Mesh;
+  tint: TintState;
+  /** brasas del estado quemado; solo mientras arde */
+  burn?: ParticleSystem;
+  burnEmitter: Mesh;
   /** Instante (reloj de recepción) en que dejó de estar en el estado; se borra al dibujarlo. */
   goneAtMs?: number;
 }
@@ -89,6 +119,10 @@ export class EnemyViews {
   private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star", StandardMaterial>;
   /** Materiales de los hechiceros, uno por tipo o tier (nunca por instancia). */
   private readonly casterMats = new Map<string, StandardMaterial>();
+  /** Rótulos de élite compartidos por (tipo, naturaleza): material y textura. */
+  private readonly labelMats = new Map<string, StandardMaterial>();
+  private ember?: DynamicTexture;
+  private paused = false;
   private readonly clipLengths: ClipLengths;
 
   constructor(
@@ -112,11 +146,75 @@ export class EnemyViews {
     return m;
   }
 
+  private labelMat(kind: EnemyKind, nature: Nature): StandardMaterial {
+    const key = `${kind}-${nature}`;
+    let m = this.labelMats.get(key);
+    if (!m) {
+      const text = eliteName(kind, nature);
+      const tex = new DynamicTexture(`eliteLabel-${key}`, { width: 768, height: 96 }, this.scene, false);
+      tex.hasAlpha = true;
+      const c = nature === "none" ? ELITE_GOLD : NATURE_COLORS[nature];
+      const css = `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
+      tex.drawText(text, null, 66, "700 40px Cinzel, Georgia, serif", css, "transparent", true);
+      m = flatMaterial(this.scene, `eliteLabelMat-${key}`, Color3.White());
+      m.diffuseTexture = tex;
+      m.useAlphaFromDiffuseTexture = true;
+      this.labelMats.set(key, m);
+    }
+    return m;
+  }
+
+  /** Tinte del cuerpo según el estado; "base" es el del élite o el del hechicero, y si no hay, el material original. */
+  private applyBodyTint(view: EnemyView, state: TintState): void {
+    view.tint = state;
+    const ice = NATURE_COLORS.ice;
+    if (state === "frozen") applyTint(view.character.root, { key: "frozen", color: ice, strength: FROZEN_TINT });
+    else if (state === "slowed") applyTint(view.character.root, { key: "slowed", color: ice, strength: SLOW_TINT });
+    else if (view.elite && view.nature !== "none") applyTint(view.character.root, { key: `elite-${view.nature}`, color: NATURE_COLORS[view.nature], strength: ELITE_TINT });
+    else if (isCaster(view.kind)) applyCasterTint(view.character.root, view.kind);
+    else applyTint(view.character.root, null);
+  }
+
+  private setBurning(view: EnemyView, burning: boolean): void {
+    if (!burning) {
+      view.burn?.dispose(false); // la textura es compartida
+      view.burn = undefined;
+      return;
+    }
+    if (view.burn) return;
+    this.ember ??= sparkTexture(this.scene, "enemy-ember");
+    const c = NATURE_COLORS.fire;
+    const ps = new ParticleSystem("enemyBurn", 60, this.scene);
+    ps.particleTexture = this.ember;
+    ps.emitter = view.burnEmitter;
+    ps.createSphereEmitter(Math.max(0.25, view.height * 0.18), 0.6);
+    ps.color1 = new Color4(c.r, c.g, c.b, 0.9);
+    ps.color2 = new Color4(1, 0.8, 0.3, 0.7);
+    ps.colorDead = new Color4(c.r, c.g, c.b, 0);
+    ps.minSize = 0.06;
+    ps.maxSize = 0.14;
+    ps.minLifeTime = 0.4;
+    ps.maxLifeTime = 0.8;
+    ps.emitRate = BURN_RATE;
+    ps.minEmitPower = 0.2;
+    ps.maxEmitPower = 0.5;
+    ps.gravity = new Vector3(0, 1.5, 0);
+    ps.blendMode = ParticleSystem.BLENDMODE_ADD;
+    ps.updateSpeed = this.paused ? 0 : PARTICLE_SPEED;
+    ps.start();
+    view.burn = ps;
+  }
+
+  private disposeView(view: EnemyView): void {
+    view.burn?.dispose(false);
+    view.character.dispose();
+  }
+
   push(world: WorldSnapshot, receivedAtMs: number): void {
     for (const [id, e] of world.enemies) {
       let view = this.views.get(id);
-      if (!view || view.kind !== e.kind || view.weaponId !== e.weaponId || (isCaster(e.kind) && view.spellTier !== e.spellTier)) {
-        view?.character.dispose();
+      if (!view || view.kind !== e.kind || view.weaponId !== e.weaponId || (isCaster(e.kind) && view.spellTier !== e.spellTier) || view.elite !== e.elite || view.nature !== e.nature) {
+        if (view) this.disposeView(view);
         view = this.create(id, e);
         this.views.set(id, view);
       }
@@ -131,14 +229,14 @@ export class EnemyViews {
   /** Alto (m) del enemigo `id`, si existe su vista. */
   heightOf(id: string): number | undefined {
     const view = this.views.get(id);
-    return view ? ENEMY_LOOKS[view.kind].height : undefined;
+    return view?.height;
   }
 
   /** `renderAtMs`: instante interpolado (ahora − INTERP_DELAY_MS). */
   render(renderAtMs: number, dtS: number, hurt: (id: string) => boolean): void {
     for (const [id, view] of this.views) {
       if (view.goneAtMs !== undefined && renderAtMs >= view.goneAtMs) {
-        view.character.dispose();
+        this.disposeView(view);
         this.views.delete(id);
         continue;
       }
@@ -146,6 +244,7 @@ export class EnemyViews {
       if (!e) continue;
       view.character.setPose(e.x, 0, e.z, e.facing);
       view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, nature: e.weaponNature, gripScale: ENEMY_LOOKS[e.kind].gripScale });
+      view.character.setFrozen(e.frozen);
       view.character.play(
         chooseEnemyAnim(
           {
@@ -160,6 +259,11 @@ export class EnemyViews {
           this.clipLengths,
         ),
       );
+
+      const tintState: TintState = e.frozen ? "frozen" : e.slowed ? "slowed" : "base";
+      if (tintState !== view.tint) this.applyBodyTint(view, tintState);
+      this.setBurning(view, e.burning && e.ai !== "dead");
+      view.label?.setEnabled(e.ai !== "dead");
 
       const hpFrac = e.maxHp > 0 ? Math.max(0, Math.min(1, e.hp / e.maxHp)) : 1;
       view.bar.setEnabled(e.ai !== "dead" && hpFrac < 1);
@@ -186,12 +290,19 @@ export class EnemyViews {
 
   /** Congela (o reanuda) las partículas de las armas con naturaleza en la pausa del grupo. */
   setPaused(paused: boolean): void {
-    for (const view of this.views.values()) view.character.setPaused(paused);
+    this.paused = paused;
+    for (const view of this.views.values()) {
+      view.character.setPaused(paused);
+      if (view.burn) view.burn.updateSpeed = paused ? 0 : PARTICLE_SPEED;
+    }
   }
 
   dispose(): void {
-    for (const view of this.views.values()) view.character.dispose();
+    for (const view of this.views.values()) this.disposeView(view);
     this.views.clear();
+    for (const m of this.labelMats.values()) m.dispose(false, true); // con su textura
+    this.labelMats.clear();
+    this.ember?.dispose();
     for (const m of Object.values(this.mats)) m.dispose();
     for (const m of this.casterMats.values()) m.dispose();
     this.casterMats.clear();
@@ -223,11 +334,14 @@ export class EnemyViews {
     const scene = this.scene;
     const look = ENEMY_LOOKS[kind];
     const character = new CharacterView(scene, this.assets, this.anims, look);
+    const k = e.elite ? ELITE.scale : 1;
+    const height = look.height * k;
+    if (e.elite) character.setBodyScale(k);
 
     // Barra de vida: fondo + relleno, siempre de cara a la cámara.
     const bar = new TransformNode(`enemyBar-${id}`, scene);
     bar.parent = character.root;
-    bar.position.y = look.height + BAR_ABOVE_HEAD;
+    bar.position.y = height + BAR_ABOVE_HEAD;
     bar.billboardMode = TransformNode.BILLBOARDMODE_ALL;
     const back = CreatePlane(`enemyBarBack-${id}`, { width: BAR_W + 0.06, height: BAR_H + 0.06 }, scene);
     back.material = this.mats.barBack;
@@ -281,7 +395,7 @@ export class EnemyViews {
     // Estrellas del aturdido: octaedros pequeños en círculo; el nodo gira.
     const stars = new TransformNode(`stunStars-${id}`, scene);
     stars.parent = character.root;
-    stars.position.y = look.height + STUN_ABOVE_HEAD;
+    stars.position.y = height + STUN_ABOVE_HEAD;
     for (let i = 0; i < STUN_STARS; i++) {
       const a = (i / STUN_STARS) * Math.PI * 2;
       const star = CreatePolyhedron(`stunStar-${id}-${i}`, { type: 1, size: 0.06 }, scene);
@@ -292,7 +406,33 @@ export class EnemyViews {
     }
     stars.setEnabled(false);
 
-    return {
+    // Élite: aura dorada grande bajo los pies, rótulo con el nombre y contorno del color de su naturaleza.
+    let label: Mesh | undefined;
+    if (e.elite) {
+      const radius = (ENEMY_DEFS[kind].radius + AURA_EXTRA_RADIUS) * k + ELITE_AURA_EXTRA - AURA_EXTRA_RADIUS;
+      const aura = CreateDisc(`eliteAura-${id}`, { radius, tessellation: 40 }, scene);
+      aura.material = this.casterMat("elite-aura", ELITE_GOLD, AURA_ALPHA);
+      aura.parent = character.root;
+      aura.position.y = AURA_Y - 0.005;
+      aura.rotation.x = Math.PI / 2;
+      const edge = CreateTorus(`eliteAuraRing-${id}`, { diameter: radius * 2, thickness: 0.07, tessellation: 40 }, scene);
+      edge.material = this.casterMat("elite-ring", ELITE_GOLD);
+      edge.parent = character.root;
+      edge.position.y = AURA_RING_Y + 0.005;
+      for (const m of [aura, edge]) m.isPickable = false;
+      label = CreatePlane(`eliteLabel-${id}`, { width: ELITE_LABEL_W, height: ELITE_LABEL_H }, scene);
+      label.material = this.labelMat(kind, e.nature);
+      label.billboardMode = Mesh.BILLBOARDMODE_ALL;
+      label.parent = character.root;
+      label.position.y = height + BAR_ABOVE_HEAD + ELITE_LABEL_ABOVE_BAR;
+      label.isPickable = false;
+    }
+    const burnEmitter = new Mesh(`burnEmitter-${id}`, scene);
+    burnEmitter.isPickable = false;
+    burnEmitter.parent = character.root;
+    burnEmitter.position.y = height * BURN_EMITTER_FRAC;
+
+    const view: EnemyView = {
       kind,
       weaponId,
       spellTier: e.spellTier,
@@ -306,6 +446,14 @@ export class EnemyViews {
       ring,
       ringFill,
       stars,
+      elite: e.elite,
+      nature: e.nature,
+      height,
+      label,
+      tint: "base",
+      burnEmitter,
     };
+    if (e.elite && e.nature !== "none") this.applyBodyTint(view, "base");
+    return view;
   }
 }
