@@ -47,8 +47,8 @@ const CHARGE_DIAMETER = 0.35; // m, a carga completa
 /** Élite: rótulo con su nombre sobre la barra de vida y brillo sobre el cuerpo (contorno + capa + motas doradas). */
 const ELITE_GOLD = new Color3(1, 0.8, 0.25);
 const ELITE_LABEL_ABOVE_BAR = 0.2; // m
-const ELITE_LABEL_W = 1.8;
-const ELITE_LABEL_H = 0.22; // letras de ~0,15 m
+const ELITE_LABEL_W = 1.4;
+const ELITE_LABEL_H = 0.17; // letras de ~0,11 m
 /** Más cerca de la cámara que esto, el rótulo se oculta: a esa distancia taparía la pantalla. */
 const ELITE_LABEL_HIDE_M = 3;
 /** Motas doradas que suben alrededor del torso del élite. */

@@ -61,7 +61,7 @@ describe("brillo del cuerpo", () => {
     expect(bodyGlow("base", false, "none")).toEqual({ outline: null, overlay: null });
     const base = bodyGlow("base", true, "fire");
     expect(base.outline?.color).toBe(NATURE_COLORS.fire);
-    expect(base.overlay).toEqual({ color: NATURE_COLORS.fire, alpha: 0.12 });
+    expect(base.overlay).toEqual({ color: NATURE_COLORS.fire, alpha: 0.18 });
     const slow = bodyGlow("slowed", true, "fire");
     expect(slow.outline).toEqual(base.outline);
     expect(slow.overlay?.color.asArray()).toEqual([0.55, 0.95, 1]);
@@ -88,9 +88,9 @@ describe("brillo del cuerpo", () => {
     markNoTint(bar);
     applyBodyGlow(root, bodyGlow("base", true, "ice"), 50);
     expect(body.renderOutline).toBe(true);
-    expect(body.outlineWidth).toBeCloseTo(0.025 * 50, 6);
+    expect(body.outlineWidth).toBeCloseTo(0.01 * 50, 6);
     expect(body.renderOverlay).toBe(true);
-    expect(body.overlayAlpha).toBe(0.12);
+    expect(body.overlayAlpha).toBe(0.18);
     for (const m of [blade, bar]) {
       expect(m.renderOutline).toBeFalsy();
       expect(m.renderOverlay).toBeFalsy();

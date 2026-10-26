@@ -89,8 +89,8 @@ export type BodyState = "base" | "slowed" | "frozen";
 const ICE_OVERLAY = new Color3(0.55, 0.95, 1);
 const ELITE_GOLD_GLOW = new Color3(1, 0.8, 0.25);
 /** Grosor del contorno de élite, en metros: un borde fino. */
-export const ELITE_OUTLINE_M = 0.025;
-const ELITE_OVERLAY_ALPHA = 0.12;
+export const ELITE_OUTLINE_M = 0.01;
+const ELITE_OVERLAY_ALPHA = 0.18;
 const SLOW_OVERLAY_ALPHA = 0.25;
 const FROZEN_OVERLAY_ALPHA = 0.55;
 
