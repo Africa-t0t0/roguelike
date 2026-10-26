@@ -25,7 +25,7 @@ beforeAll(() => {
 
 function character(scene: Scene): BoneSource {
   const root = new TransformNode("root", scene);
-  const bones = new Map(["head", "spine2", "lefthand", "righthand", "leftfoot", "rightfoot"].map((k) => [k, new TransformNode(k, scene)]));
+  const bones = new Map(["head", "spine2", "hips", "lefthand", "righthand", "leftfoot", "rightfoot"].map((k) => [k, new TransformNode(k, scene)]));
   return { root, height: 2, boneMount: (k) => (bones.has(k) ? { node: bones.get(k)!, perMeter: 2 } : undefined) };
 }
 
