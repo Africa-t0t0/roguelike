@@ -33,3 +33,23 @@ export function sparkTexture(scene: Scene, name = "fx-spark"): DynamicTexture {
     ]),
   );
 }
+
+/** Llama suave: gota vertical (ancha y brillante abajo, punta tenue arriba), blanca para teñirla con la partícula. */
+export function flameTexture(scene: Scene, name = "fx-flame"): DynamicTexture {
+  return generated(scene, name, 64, (ctx, s) => {
+    ctx.globalCompositeOperation = "lighter";
+    // Dos elipses de gradiente radial: el cuerpo (abajo, ancho) y la punta (arriba, estrecha y alta).
+    for (const [cy, rx, ry, a] of [[0.64, 0.27, 0.3, 1], [0.38, 0.13, 0.36, 0.7]] as const) {
+      ctx.save();
+      ctx.translate(s / 2, s * cy);
+      ctx.scale(rx * 2, ry * 2);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, s / 2);
+      g.addColorStop(0, `rgba(255, 255, 255, ${a})`);
+      g.addColorStop(0.45, `rgba(255, 255, 255, ${a * 0.45})`);
+      g.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(-s / 2, -s / 2, s, s);
+      ctx.restore();
+    }
+  });
+}

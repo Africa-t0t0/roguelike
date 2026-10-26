@@ -12,14 +12,15 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
-import { casterTelegraphS, ELITE, ENEMY_DEFS, enemyAttack, isCaster, TIERS, type CasterKind, type EnemyKind, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { casterTelegraphS, ELITE, ENEMY_DEFS, enemyAttack, isCaster, type CasterKind, type EnemyKind, type Nature, type WeaponId } from "@roguelike/shared";
 import type { EnemySnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseEnemyAnim, SpeedMeter, type ClipLengths } from "./animState";
 import type { Assets } from "./assets";
+import { auraParams, BodyAura } from "./bodyAura";
 import { applyBodyGlow, applyCasterTint, bodyGlow, CASTER_COLORS, chargeScale, markNoTint, type BodyState } from "./casterLooks";
-import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
+import { flameTexture, PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 import { eliteName, NATURE_COLORS } from "./natureLooks";
 import { CharacterView } from "./characterView";
 import { lerpAngle } from "./interpolation";
@@ -37,22 +38,16 @@ const STUN_STARS = 5;
 const STUN_RADIUS = 0.38; // m
 const STUN_ABOVE_HEAD = 0.08; // m: bajo la barra de vida
 const STUN_SPIN = 3.2; // rad/s, con el reloj de juego (quieto en la pausa)
-/** Hechiceros: aura bajo los pies (alfa fijo), anillo de tier y esfera de carga en la mano. */
-const AURA_ALPHA = 0.35;
-const AURA_EXTRA_RADIUS = 0.5; // m sobre el radio del enemigo
-const AURA_Y = 0.02; // m: bajo el anillo de tier
-const AURA_RING_Y = 0.03;
+/** Hechiceros: aura de llamas sobre el cuerpo (su tier la sube) y esfera de carga en la mano. */
 const CHARGE_DIAMETER = 0.35; // m, a carga completa
 
-/** Élite: rótulo con su nombre sobre la barra de vida y brillo sobre el cuerpo (contorno + capa + motas doradas). */
+/** Élite: rótulo con su nombre sobre la barra de vida y brillo sobre el cuerpo (contorno + capa + aura de llamas). */
 const ELITE_GOLD = new Color3(1, 0.8, 0.25);
 const ELITE_LABEL_ABOVE_BAR = 0.2; // m
 const ELITE_LABEL_W = 1.4;
 const ELITE_LABEL_H = 0.17; // letras de ~0,11 m
 /** Más cerca de la cámara que esto, el rótulo se oculta: a esa distancia taparía la pantalla. */
 const ELITE_LABEL_HIDE_M = 3;
-/** Motas doradas que suben alrededor del torso del élite. */
-const ELITE_MOTE_RATE = 14;
 /** Brasas al arder (estado quemado). */
 const BURN_RATE = 24;
 const BURN_EMITTER_FRAC = 0.5; // altura del emisor, fracción del alto del enemigo
@@ -106,8 +101,8 @@ interface EnemyView {
   tint: BodyState;
   /** brasas del estado quemado; solo mientras arde */
   burn?: ParticleSystem;
-  /** motas del aura del élite; solo los élites */
-  aura?: ParticleSystem;
+  /** llamas sobre el cuerpo: élites y hechiceros */
+  aura?: BodyAura;
   burnEmitter: Mesh;
   /** Instante (reloj de recepción) en que dejó de estar en el estado; se borra al dibujarlo. */
   goneAtMs?: number;
@@ -122,6 +117,7 @@ export class EnemyViews {
   /** Rótulos de élite compartidos por (tipo, naturaleza): material y textura. */
   private readonly labelMats = new Map<string, StandardMaterial>();
   private ember?: DynamicTexture;
+  private flame?: DynamicTexture;
   private paused = false;
   private readonly clipLengths: ClipLengths;
 
@@ -189,28 +185,12 @@ export class EnemyViews {
     return (this.ember ??= sparkTexture(this.scene, "enemy-ember"));
   }
 
-  /** Motas doradas que suben alrededor del torso (del cuerpo, no del suelo); el color 2 es el de su naturaleza. */
-  private createAura(view: EnemyView): ParticleSystem {
-    const c = view.nature === "none" ? ELITE_GOLD : NATURE_COLORS[view.nature];
-    const ps = new ParticleSystem("eliteAura", 40, this.scene);
-    ps.particleTexture = this.sparkTex();
-    ps.emitter = view.burnEmitter;
-    ps.createSphereEmitter(Math.max(0.3, view.height * 0.22), 1);
-    ps.color1 = new Color4(ELITE_GOLD.r, ELITE_GOLD.g, ELITE_GOLD.b, 0.75);
-    ps.color2 = new Color4(c.r, c.g, c.b, 0.6);
-    ps.colorDead = new Color4(c.r, c.g, c.b, 0);
-    ps.minSize = 0.04;
-    ps.maxSize = 0.09;
-    ps.minLifeTime = 0.9;
-    ps.maxLifeTime = 1.6;
-    ps.emitRate = ELITE_MOTE_RATE;
-    ps.minEmitPower = 0.02;
-    ps.maxEmitPower = 0.1;
-    ps.gravity = new Vector3(0, 0.7, 0);
-    ps.blendMode = ParticleSystem.BLENDMODE_ADD;
-    ps.updateSpeed = this.paused ? 0 : PARTICLE_SPEED;
-    ps.start();
-    return ps;
+  /** Aura de llamas del cuerpo: fuerte y de su naturaleza en el élite, tenue y del color de su tipo en el hechicero. */
+  private createAura(view: EnemyView): BodyAura {
+    const params = view.elite ? auraParams("elite", 1, view.nature) : auraParams(view.kind as CasterKind, view.spellTier);
+    const aura = new BodyAura(this.scene, (this.flame ??= flameTexture(this.scene, "enemy-flame")), view.character, params, view.height);
+    aura.setPaused(this.paused);
+    return aura;
   }
 
   private setBurning(view: EnemyView, burning: boolean): void {
@@ -244,7 +224,7 @@ export class EnemyViews {
 
   private disposeView(view: EnemyView): void {
     view.burn?.dispose(false);
-    view.aura?.dispose(false); // la textura es compartida
+    view.aura?.dispose(); // la textura es compartida
     view.character.dispose();
   }
 
@@ -301,7 +281,7 @@ export class EnemyViews {
       const tintState: BodyState = e.frozen && e.ai !== "dead" ? "frozen" : e.slowed ? "slowed" : "base";
       if (tintState !== view.tint) this.applyBodyGlow(view, tintState);
       this.setBurning(view, e.burning && e.ai !== "dead");
-      if (view.aura) view.aura.emitRate = e.ai === "dead" ? 0 : ELITE_MOTE_RATE;
+      view.aura?.setActive(e.ai !== "dead");
       if (view.label) {
         // Cerca de la cámara el rótulo taparía la pantalla: se oculta.
         const cam = this.scene.activeCamera;
@@ -338,7 +318,7 @@ export class EnemyViews {
     for (const view of this.views.values()) {
       view.character.setPaused(paused);
       if (view.burn) view.burn.updateSpeed = paused ? 0 : PARTICLE_SPEED;
-      if (view.aura) view.aura.updateSpeed = paused ? 0 : PARTICLE_SPEED;
+      view.aura?.setPaused(paused);
     }
   }
 
@@ -348,30 +328,15 @@ export class EnemyViews {
     for (const m of this.labelMats.values()) m.dispose(false, true); // con su textura
     this.labelMats.clear();
     this.ember?.dispose();
+    this.flame?.dispose();
     for (const m of Object.values(this.mats)) m.dispose();
     for (const m of this.casterMats.values()) m.dispose();
     this.casterMats.clear();
   }
 
-  /** Tinte del cuerpo y aura bajo los pies (disco del color del tipo y, en tier 2 y 3, un anillo del brillo del tier). */
-  private decorateCaster(id: string, kind: CasterKind, spellTier: number, character: CharacterView): void {
-    const scene = this.scene;
+  /** Tinte del cuerpo del hechicero (su aura de llamas se crea con la vista). */
+  private decorateCaster(kind: CasterKind, character: CharacterView): void {
     applyCasterTint(character.root, kind);
-    const radius = ENEMY_DEFS[kind].radius + AURA_EXTRA_RADIUS;
-    const aura = CreateDisc(`casterAura-${id}`, { radius, tessellation: 32 }, scene);
-    aura.material = this.casterMat(`aura-${kind}`, CASTER_COLORS[kind], AURA_ALPHA);
-    aura.parent = character.root;
-    aura.position.y = AURA_Y;
-    aura.rotation.x = Math.PI / 2;
-    aura.isPickable = false;
-    const glow = spellTier >= 2 ? TIERS[Math.min(3, spellTier) as WeaponTier].glow : null;
-    if (glow) {
-      const edge = CreateTorus(`casterAuraRing-${id}`, { diameter: radius * 2, thickness: 0.05, tessellation: 32 }, scene);
-      edge.material = this.casterMat(`ring-t${Math.min(3, spellTier)}`, new Color3(glow[0], glow[1], glow[2]));
-      edge.parent = character.root;
-      edge.position.y = AURA_RING_Y;
-      edge.isPickable = false;
-    }
   }
 
   private create(id: string, e: EnemySnapshot): EnemyView {
@@ -422,11 +387,11 @@ export class EnemyViews {
     }
     for (const m of [back, barFill]) m.isPickable = false;
 
-    // Hechiceros: tinte del cuerpo, aura bajo los pies y esfera de carga en la mano.
+    // Hechiceros: tinte del cuerpo y esfera de carga en la mano.
     let charge: Mesh | undefined;
     let chargePerMeter = 1;
     if (isCaster(kind)) {
-      this.decorateCaster(id, kind, e.spellTier, character);
+      this.decorateCaster(kind, character);
       const hand = character.handMount();
       if (hand) {
         charge = CreateSphere(`casterCharge-${id}`, { diameter: 1, segments: 8 }, scene);
@@ -490,10 +455,8 @@ export class EnemyViews {
     };
     // Todo lo creado tras el cuerpo (barra, aros, estrellas, aura, rótulo…) no se tiñe con él.
     for (const m of character.root.getChildMeshes(false)) if (!bodyMeshes.has(m)) markNoTint(m);
-    if (e.elite) {
-      this.applyBodyGlow(view, "base");
-      view.aura = this.createAura(view);
-    }
+    if (e.elite) this.applyBodyGlow(view, "base");
+    if (e.elite || isCaster(kind)) view.aura = this.createAura(view);
     return view;
   }
 }
