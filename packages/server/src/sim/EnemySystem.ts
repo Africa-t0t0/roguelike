@@ -8,12 +8,15 @@ import {
   PLAYER_RADIUS,
   TIERS,
   TILE_SIZE,
+  casterKinds,
+  casterTelegraphS,
   circlesOverlap,
   enemiesForRoom,
   enemyAttack,
   enemyScale,
   flowSourcesKey,
   hasLineOfSight,
+  isCaster,
   isWalkableTile,
   moveCircle,
   rollTier,
@@ -22,6 +25,7 @@ import {
   type EnemyKind,
   type EnemyLoadout,
   type Rng,
+  type WeaponTier,
 } from "@roguelike/shared";
 
 export type EnemyAi = "idle" | "chase" | "telegraph" | "recover" | "dead";
@@ -42,6 +46,8 @@ export interface Enemy {
   cooldown: number;
   /** arma que lleva; null si va desarmado */
   loadout: EnemyLoadout | null;
+  /** tier de sus hechizos (1..3), sorteado al crearlo; 0 si no es hechicero */
+  spellTier: 0 | WeaponTier;
   /** segundos que le quedan aturdido (Patada): ni se mueve ni ataca */
   stunned: number;
   /** multiplicador de daño de sus golpes y proyectiles, fijado al crearlo (escalado) */
@@ -147,18 +153,25 @@ export class EnemySystem {
     const created: Enemy[] = [];
     if (kinds.length === 0) return created;
     for (let i = 0; i < spots.length; i++) {
-      const e = this.createEnemy(kinds[i % kinds.length]!, -1, spots[i]!.x, spots[i]!.z);
+      const e = this.createEnemy(this.casterFor(kinds[i % kinds.length]!), -1, spots[i]!.x, spots[i]!.z);
       created.push(e);
     }
     return created;
   }
 
   /**
-   * Solo sandbox: un enemigo persiguiendo, sin sala, con el arma pedida en vez de sortearla (null = desarmado;
-   * los magos van siempre desarmados).
+   * Solo sandbox: un enemigo persiguiendo, sin sala, con el tier pedido en vez de sortearlo. Minion y brute:
+   * 0 = desarmado, 1..3 = su arma de `ARMED_CHANCE` con ese tier. Hechicero: ese tier de hechizo (0 cuenta como 1).
    */
-  spawnAt(kind: EnemyKind, x: number, z: number, loadout: EnemyLoadout | null): Enemy {
-    return this.createEnemy(kind, -1, x, z, ARMED_CHANCE[kind] ? loadout : null);
+  spawnAt(kind: EnemyKind, x: number, z: number, tier: 0 | WeaponTier): Enemy {
+    return this.createEnemy(kind, -1, x, z, tier);
+  }
+
+  /** Cada "mage" pedido se cambia por un hechicero de `casterKinds`; sin RNG si solo hay uno. */
+  private casterFor(kind: EnemyKind): EnemyKind {
+    if (kind !== "mage") return kind;
+    const options = casterKinds(this.floorTime);
+    return options.length > 1 ? this.rng.pick(options) : options[0]!;
   }
 
   /** Solo sandbox: mata a todos los vivos sin orbes ni armas soltadas. */
@@ -175,15 +188,23 @@ export class EnemySystem {
     roomId: number,
     x: number,
     z: number,
-    loadout: EnemyLoadout | null = this.rollLoadout(kind),
+    tier?: 0 | WeaponTier,
   ): Enemy {
+    const caster = isCaster(kind);
+    const armed = ARMED_CHANCE[kind];
+    // Con tier pedido (sandbox) no se sortea nada; si no, se sortea el arma o el tier de hechizo.
+    const loadout: EnemyLoadout | null =
+      tier === undefined ? this.rollLoadout(kind) : armed && tier !== 0 ? { weaponId: armed.weaponId, tier } : null;
+    const spellTier: 0 | WeaponTier = !caster
+      ? 0
+      : tier === undefined ? rollTier(this.rng, this.floorTime, this.floor) : tier === 0 ? 1 : tier;
     const def = ENEMY_DEFS[kind];
     const { hpMult, damageMult } = enemyScale(this.floorTime, this.partyLevel);
     const hp = Math.round(def.hp * hpMult);
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout, stunned: 0, damageMult,
+      loadout, spellTier, stunned: 0, damageMult,
     };
     this.list.push(e);
     return e;
@@ -227,7 +248,7 @@ export class EnemySystem {
       const tiles = this.spawnTiles(room, players, n);
       for (let i = 0; i < Math.min(n, tiles.length); i++) {
         const c = tileCenter(tiles[i]!.tx, tiles[i]!.tz);
-        created.push(this.createEnemy(kinds[i]!, room.id, c.x, c.z));
+        created.push(this.createEnemy(this.casterFor(kinds[i]!), room.id, c.x, c.z));
       }
     }
     return created;
@@ -317,14 +338,23 @@ export class EnemySystem {
     }
 
     if (e.ai === "telegraph") {
-      if (e.aiTime < def.telegraphS) return;
-      if (def.ranged) {
+      if (e.aiTime < casterTelegraphS(e.kind, e.spellTier)) return;
+      if (e.kind === "mage") {
         const dirX = d > 0 ? dx / d : Math.sin(e.facing);
         const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
-        this.shots.push({
-          id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX, dirZ, speed: SPELLS.mage.tiers[1].speed,
-          radius: ORB.radius, damage: Math.round(def.damage * e.damageMult), life: ORB.lifetimeS, sourceId: e.id,
-        });
+        const spell = SPELLS.mage.tiers[Math.max(1, e.spellTier) as WeaponTier];
+        // Abanico centrado en el rumbo, de spreadDeg entre orbes vecinos (1 orbe = recto).
+        for (let k = 0; k < spell.count; k++) {
+          const a = ((k - (spell.count - 1) / 2) * spell.spreadDeg * Math.PI) / 180;
+          const [cos, sin] = [Math.cos(a), Math.sin(a)];
+          this.shots.push({
+            id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX: dirX * cos + dirZ * sin, dirZ: dirZ * cos - dirX * sin,
+            speed: spell.speed, radius: ORB.radius, damage: Math.round(def.damage * e.damageMult),
+            life: ORB.lifetimeS, sourceId: e.id,
+          });
+        }
+      } else if (def.ranged) {
+        // Pirómano y tormentoso: sin proyectil; los peligros de la tarea 3 reemplazan este vacío.
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
         hits.push({ targetKey: target.key, damage: Math.round(atk.damage * e.damageMult), sourceId: e.id, sourceX: e.x, sourceZ: e.z });
       }

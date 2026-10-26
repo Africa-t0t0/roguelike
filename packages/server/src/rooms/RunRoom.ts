@@ -3,7 +3,6 @@ import { matchMaker, Room, ServerError, type Client } from "colyseus";
 import {
   activeAbilityCount,
   ABILITIES,
-  ARMED_CHANCE,
   applyCard,
   createRng,
   EMPTY_ROOM_TTL_MS,
@@ -309,12 +308,8 @@ export class RunRoom extends Room<{ state: RunState }> {
         c.abilityCd = {};
         break;
       case "spawn": {
-        // El arma es la que llevaría ese tipo; los magos van siempre desarmados.
-        const armed = ARMED_CHANCE[cmd.kind];
-        const tier = cmd.tier;
         for (const spot of sandboxSpawnSpots(this.dungeon, record.kinematic, cmd.count)) {
-          const loadout = tier === 0 || !armed ? null : { weaponId: armed.weaponId, tier };
-          this.enemySystem.spawnAt(cmd.kind, spot.x, spot.z, loadout);
+          this.enemySystem.spawnAt(cmd.kind, spot.x, spot.z, cmd.tier);
         }
         break;
       }

@@ -487,3 +487,64 @@ describe("escalado al crear", () => {
     expect(hits).toMatchObject([{ targetKey: "a", damage: Math.round(10 * 1.5), sourceId: e.id }]);
   });
 });
+
+describe("hechiceros: tier y orbes del arcano", () => {
+  const spot = [{ x: 30, z: 30 }];
+
+  it("a 400 s aparecen los 3 hechiceros, todos con spellTier de 1 a 3", () => {
+    const sys = new EnemySystem(arena(), createRng(11));
+    sys.setFloorClock(400, 1);
+    const kinds = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const [e] = sys.spawnWave(spot, ["mage"]);
+      kinds.add(e!.kind);
+      expect(e!.spellTier).toBeGreaterThanOrEqual(1);
+      expect(e!.spellTier).toBeLessThanOrEqual(3);
+    }
+    expect([...kinds].sort()).toEqual(["mage", "pyromancer", "stormcaller"]);
+  });
+
+  it("a 0 s un mago de oleada es arcano", () => {
+    const sys = new EnemySystem(arena(), createRng(11));
+    expect(sys.spawnWave(spot, ["mage"])[0]!.kind).toBe("mage");
+  });
+
+  it("spawnAt: tier 0 desarma, 1..3 arma, y un hechicero con tier 0 cuenta como 1", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    const b0 = sys.spawnAt("brute", 30, 30, 0);
+    expect(b0.loadout).toBeNull();
+    expect(b0.spellTier).toBe(0);
+    expect(sys.spawnAt("brute", 30, 30, 2).loadout).toEqual({ weaponId: "great-sword", tier: 2 });
+    const p = sys.spawnAt("pyromancer", 30, 30, 0);
+    expect(p.spellTier).toBe(1);
+    expect(p.loadout).toBeNull();
+  });
+
+  function fire(tier: 1 | 3) {
+    const sys = new EnemySystem(arena(), createRng(5));
+    const e = sys.spawnAt("mage", 30, 30, tier);
+    const players = [P("a", 38, 30)];
+    for (let i = 0; i < 400 && sys.projectiles.length === 0; i++) sys.step(players, SIM_DT);
+    return sys.projectiles;
+  }
+
+  it("arcano tier 3: 3 orbes a 12 m/s a -15, 0 y +15 grados del rumbo", () => {
+    const shots = fire(3);
+    expect(shots).toHaveLength(3);
+    const angles = shots.map((s) => Math.atan2(s.dirX, s.dirZ) - Math.PI / 2).sort((a, b) => a - b);
+    shots.forEach((s) => {
+      expect(s.speed).toBe(12);
+      expect(s.radius).toBe(0.3);
+    });
+    const deg = (15 * Math.PI) / 180;
+    expect(angles[0]).toBeCloseTo(-deg, 6);
+    expect(angles[1]).toBeCloseTo(0, 6);
+    expect(angles[2]).toBeCloseTo(deg, 6);
+  });
+
+  it("arcano tier 1: 1 orbe a 9 m/s", () => {
+    const shots = fire(1);
+    expect(shots).toHaveLength(1);
+    expect(shots[0]!.speed).toBe(9);
+  });
+});
