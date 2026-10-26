@@ -66,6 +66,45 @@ export interface EnemySnapshot {
   weaponTier: WeaponTier | null;
   /** segundos que le quedan aturdido */
   stunned: number;
+  /** tier del hechizo (0 si no es hechicero) */
+  spellTier: number;
+}
+
+/** Peligro en el suelo: zona circular o rayo, con aviso ("warn") y luego daño ("fire"). */
+export interface HazardSnapshot {
+  kind: "zone" | "beam";
+  x: number;
+  z: number;
+  dirX: number;
+  dirZ: number;
+  length: number;
+  size: number;
+  left: number;
+  total: number;
+  phase: "warn" | "fire";
+}
+
+const HAZARD_NUMBERS = ["x", "z", "dirX", "dirZ", "length", "size", "left", "total"] as const;
+
+/** Valida un peligro crudo del estado: null si el kind o la fase no se conocen o algún número no es finito. */
+export function parseHazard(raw: unknown): HazardSnapshot | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const h = raw as Record<string, unknown>;
+  if (h.kind !== "zone" && h.kind !== "beam") return null;
+  if (h.phase !== "warn" && h.phase !== "fire") return null;
+  for (const k of HAZARD_NUMBERS) if (typeof h[k] !== "number" || !Number.isFinite(h[k])) return null;
+  return {
+    kind: h.kind,
+    x: h.x as number,
+    z: h.z as number,
+    dirX: h.dirX as number,
+    dirZ: h.dirZ as number,
+    length: h.length as number,
+    size: h.size as number,
+    left: h.left as number,
+    total: h.total as number,
+    phase: h.phase,
+  };
 }
 
 export interface ProjectileSnapshot {
@@ -101,6 +140,7 @@ export interface WorldSnapshot {
   projectiles: Map<string, ProjectileSnapshot>;
   orbs: Map<string, OrbSnapshot>;
   playerShots: Map<string, PlayerShotSnapshot>;
+  hazards: Map<string, HazardSnapshot>;
   /** el grupo está eligiendo cartas: la simulación no avanza */
   paused: boolean;
   /** segundos que quedan de la elección en curso de la pausa */
@@ -289,6 +329,7 @@ function snapshotWorld(room: Room): WorldSnapshot {
       weaponId: armed ? (e.weaponId as WeaponId) : null,
       weaponTier: armed ? (e.weaponTier as WeaponTier) : null,
       stunned: e.stunned ?? 0,
+      spellTier: e.spellTier ?? 0,
     });
   });
   const projectiles = new Map<string, ProjectileSnapshot>();
@@ -303,6 +344,11 @@ function snapshotWorld(room: Room): WorldSnapshot {
   room.state.playerShots?.forEach((w: PlayerShotSnapshot, id: string) => {
     playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius });
   });
+  const hazards = new Map<string, HazardSnapshot>();
+  room.state.hazards?.forEach((raw: unknown, id: string) => {
+    const h = parseHazard(raw);
+    if (h) hazards.set(id, h);
+  });
   const st = room.state;
   return {
     tick: st.tick,
@@ -314,6 +360,7 @@ function snapshotWorld(room: Room): WorldSnapshot {
     projectiles,
     orbs,
     playerShots,
+    hazards,
     paused: st.paused ?? false,
     pauseLeft: st.pauseLeft ?? 0,
   };

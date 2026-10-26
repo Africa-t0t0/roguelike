@@ -29,7 +29,7 @@ export function devCardOptions(): { label: string; card: CardOffer }[] {
   return [...abilities, ...stats];
 }
 
-const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Tormentoso" };
+const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo" };
 const TIER_LABELS = ["Desarmado", "Tier 1", "Tier 2", "Tier 3"];
 
 /** Lo que muestra un interruptor: "Invulnerable: sí". */
@@ -100,6 +100,8 @@ export class DevPanel {
       tier: tierSel.selectedIndex as 0 | WeaponTier,
     }));
     this.button(enemies, "Matar a todos", () => ({ cmd: "killAll" }));
+    this.toggle(enemies, "Enemigos quietos", false, (on) => ({ cmd: "freeze", on }));
+    this.button(enemies, "Hechizo ya", () => ({ cmd: "castNow" }));
     this.toggle(enemies, "Oleadas", false, (on) => ({ cmd: "waves", on }));
 
     const clock = this.section("Reloj del piso");
