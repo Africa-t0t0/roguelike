@@ -1384,4 +1384,54 @@ describe("RunRoom: sandbox", () => {
     expect(room.state.floorTime - t0).toBeLessThan(61);
     expect(player("ana")).toMatchObject({ weaponId: "great-sword", weaponTier: 3 });
   });
+
+  it("freeze + castNow: el piromante lanza una zona que llega al cliente y explota, y el bruto no se mueve", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "god", on: true });
+    dev(ana.client, { cmd: "freeze", on: true });
+    dev(ana.client, { cmd: "spawn", kind: "pyromancer", count: 1, tier: 2 });
+    dev(ana.client, { cmd: "spawn", kind: "brute", count: 1, tier: 0 });
+    await ticksUntil(() => room["enemySystem"].enemies.length === 2, 10);
+    const [pyro, brute] = room["enemySystem"].enemies;
+    expect(pyro!.kind).toBe("pyromancer");
+    const p0 = { x: pyro!.x, z: pyro!.z };
+    const b0 = { x: brute!.x, z: brute!.z };
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect({ x: brute!.x, z: brute!.z }).toEqual(b0);
+    expect(room.state.hazards.size).toBe(0);
+
+    dev(ana.client, { cmd: "castNow" });
+    await ticksUntil(() => room.state.hazards.size === 1, 10);
+    const [h] = [...room.state.hazards.values()];
+    expect(h).toMatchObject({ kind: "zone", phase: "warn" });
+    await ticksUntil(() => ana.client.state.hazards.size === 1, 10);
+    for (let i = 0; i < 30; i++) await room.waitForNextTimestep();
+    expect({ x: pyro!.x, z: pyro!.z }).toEqual(p0);
+    expect({ x: brute!.x, z: brute!.z }).toEqual(b0);
+    await ticksUntil(() => room.state.hazards.size === 0, 60);
+    await ticksUntil(() => ana.client.state.hazards.size === 0, 10);
+    const es = [...room.state.enemies.values()].find((e) => e.kind === "pyromancer")!;
+    expect(es.spellTier).toBe(2);
+  });
+
+  it("pausa: una zona en aviso no avanza con la elección abierta y explota en el tiempo que le quedaba", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "god", on: true });
+    dev(ana.client, { cmd: "freeze", on: true });
+    dev(ana.client, { cmd: "spawn", kind: "pyromancer", count: 1, tier: 1 });
+    await ticksUntil(() => room["enemySystem"].enemies.length === 1, 10);
+    dev(ana.client, { cmd: "castNow" });
+    await ticksUntil(() => room.state.hazards.size === 1, 10);
+    dev(ana.client, { cmd: "levelUp", count: 1, choose: true });
+    await ticksUntil(() => room.state.paused && ana.choices.length === 1, 10);
+    const h = [...room.state.hazards.values()][0]!;
+    const left = h.left;
+    for (let i = 0; i < 20; i++) await room.waitForNextTimestep();
+    expect(room.state.hazards.size).toBe(1);
+    expect(h.left).toBe(left);
+    ana.client.send(MSG.chooseCard, { offerId: ana.choices[0]!.offerId, index: 0 });
+    await ticksUntil(() => !room.state.paused, 10);
+    expect(room.state.hazards.size).toBe(1);
+    await ticksUntil(() => room.state.hazards.size === 0, Math.ceil(left * 30) + 10);
+  });
 });

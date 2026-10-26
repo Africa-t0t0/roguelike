@@ -16,6 +16,8 @@ describe("parseDevCommand", () => {
       { cmd: "spawn", kind: "brute", count: SANDBOX_MAX_SPAWN, tier: 3 },
       { cmd: "spawn", kind: "mage", count: 1, tier: 0 },
       { cmd: "killAll" },
+      { cmd: "freeze", on: true },
+      { cmd: "castNow" },
       { cmd: "clock", seconds: 60 },
       { cmd: "weapon", weaponId: "great-sword", tier: 2 },
     ];
@@ -39,6 +41,7 @@ describe("parseDevCommand", () => {
       { cmd: "card", card: { kind: "ability", id: "thrust", rank: 4 } },
       { cmd: "card", card: null },
       { cmd: "god", on: 1 },
+      { cmd: "freeze" },
       { cmd: "spawn", kind: "dragon", count: 1, tier: 1 },
       { cmd: "spawn", kind: "minion", count: SANDBOX_MAX_SPAWN + 1, tier: 1 },
       { cmd: "spawn", kind: "minion", count: 1, tier: 4 },

@@ -319,12 +319,28 @@ export class RunRoom extends Room<{ state: RunState }> {
       case "clock":
         this.floorTime += cmd.seconds;
         break;
+      case "freeze":
+        this.enemySystem.frozen = cmd.on;
+        break;
+      case "castNow":
+        this.enemySystem.castNow(this.simPlayers());
+        break;
       case "weapon":
         c.weaponId = cmd.weaponId;
         c.weaponTier = cmd.tier;
         Object.assign(c, newComboTimers());
         break;
     }
+  }
+
+  /** Los jugadores conectados y vivos, como los ve la simulación de enemigos. */
+  private simPlayers(connected: readonly PlayerRecord[] = this.registry.connected()): SimPlayer[] {
+    return connected
+      .filter((r) => !r.combat.dead)
+      .map((r) => {
+        const { magnetMult, xpMult } = r.combat.mods;
+        return { key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true, magnetMult, xpMult };
+      });
   }
 
   private emit(event: CombatEvent): void {
@@ -381,12 +397,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.state.tick++;
 
     // 3-4. Enemigos (solo ven a los conectados vivos).
-    const alive: SimPlayer[] = connected
-      .filter((r) => !r.combat.dead)
-      .map((r) => {
-        const { magnetMult, xpMult } = r.combat.mods;
-        return { key: r.key, x: r.kinematic.x, z: r.kinematic.z, alive: true, magnetMult, xpMult };
-      });
+    const alive = this.simPlayers(connected);
     // El reloj avanza solo con jugadores conectados; el sorteo de tiers y el escalado de lo que se cree usan
     // el reloj actual y el nivel del grupo.
     if (connected.length > 0) this.floorTime += SIM_DT;
@@ -421,7 +432,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.state.floorTime = this.floorTime;
     syncWorld(
       this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat, this.orbs.orbs,
-      this.abilities.playerShots,
+      this.abilities.playerShots, this.enemySystem.hazards,
     );
   }
 

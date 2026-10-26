@@ -69,6 +69,8 @@ export const EnemyState = schema(
     weaponTier: t.number(),
     /** segundos que le quedan aturdido */
     stunned: t.number(),
+    /** tier de sus hechizos (1..3); 0 si no es hechicero */
+    spellTier: t.number(),
   },
   "EnemyState",
 );
@@ -83,6 +85,28 @@ export const PlayerShotState = schema(
   "PlayerShotState",
 );
 export type PlayerShotState = SchemaType<typeof PlayerShotState>;
+
+/** Peligro de un hechicero: zona (círculo) o rayo, en aviso o ya activo. */
+export const HazardState = schema(
+  {
+    /** "zone" | "beam" */
+    kind: t.string(),
+    x: t.number(),
+    z: t.number(),
+    dirX: t.number(),
+    dirZ: t.number(),
+    length: t.number(),
+    size: t.number(),
+    /** segundos que le quedan a la fase actual */
+    left: t.number(),
+    /** duración total de la fase actual */
+    total: t.number(),
+    /** "warn" | "fire" */
+    phase: t.string(),
+  },
+  "HazardState",
+);
+export type HazardState = SchemaType<typeof HazardState>;
 
 export const OrbState = schema({ x: t.number(), z: t.number(), value: t.number() }, "OrbState");
 export type OrbState = SchemaType<typeof OrbState>;
@@ -103,6 +127,8 @@ export const RunState = schema(
     enemies: t.map(EnemyState),
     /** indexado por id de proyectil ("p1", …) */
     projectiles: t.map(ProjectileState),
+    /** peligros de los hechiceros, indexados por id ("h1", …) */
+    hazards: t.map(HazardState),
     /** orbes de XP compartidos, indexados por id ("o1", …) */
     orbs: t.map(OrbState),
     /** ondas de los jugadores, indexadas por id ("w1", …) */

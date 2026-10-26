@@ -111,8 +111,10 @@ function tileOf(v: number): number {
 export class EnemySystem {
   private list: Enemy[] = [];
   private shots: Projectile[] = [];
-  private zones: Hazard[] = [];
+  private hazardList: Hazard[] = [];
   private nextHazard = 1;
+  /** Solo sandbox: congela a los enemigos que no preparan un ataque (los que ya preparan, terminan). */
+  frozen = false;
   private activated = new Set<number>();
   private nextEnemy = 1;
   private nextShot = 1;
@@ -229,7 +231,7 @@ export class EnemySystem {
   }
 
   get hazards(): readonly Hazard[] {
-    return this.zones;
+    return this.hazardList;
   }
 
   activateRooms(players: readonly SimPlayer[], playerCount: number): Enemy[] {
@@ -301,6 +303,7 @@ export class EnemySystem {
         e.stunned = e.stunned - dt > STUN_EPS ? e.stunned - dt : 0;
         continue;
       }
+      if (this.frozen && e.ai !== "telegraph") continue;
       this.stepEnemy(e, alive, dt, hits);
     }
     this.list = this.list.filter((e) => !(e.ai === "dead" && e.aiTime >= DEAD_LINGER_S));
@@ -321,6 +324,22 @@ export class EnemySystem {
     e.aiTime = 0;
   }
 
+  /**
+   * Solo sandbox: cada hechicero vivo, sin aturdir y fuera de telegrafía apunta al jugador vivo más cercano
+   * y lanza ya su hechizo (con su aviso, igual que al atacar solo).
+   */
+  castNow(players: readonly SimPlayer[]): void {
+    const alive = players.filter((p) => p.alive);
+    for (const e of this.list) {
+      if (!isCaster(e.kind) || e.ai === "dead" || e.ai === "telegraph" || e.stunned > 0) continue;
+      const target = this.nearest(e, alive);
+      if (!target) continue;
+      e.targetKey = target.key;
+      e.cooldown = 0;
+      this.startTelegraph(e, target);
+    }
+  }
+
   /** Entra en telegrafía; los hechiceros de zona y rayo crean aquí su peligro en aviso. */
   private startTelegraph(e: Enemy, target: SimPlayer): void {
     this.setAi(e, "telegraph");
@@ -336,7 +355,7 @@ export class EnemySystem {
       // Una zona en el objetivo; con tres, otras dos a los lados (perpendicular a mago→objetivo).
       const offsets = spell.count === 3 ? [0, -SPELLS.pyromancer.sideOffsetM, SPELLS.pyromancer.sideOffsetM] : [0];
       for (const off of offsets) {
-        this.zones.push({
+        this.hazardList.push({
           id: `h${this.nextHazard++}`, kind: "zone", sourceId: e.id,
           x: target.x + dirZ * off, z: target.z - dirX * off, dirX: 0, dirZ: 0, length: 0, size: spell.radius,
           damage, left: SPELLS.pyromancer.fuseS, total: SPELLS.pyromancer.fuseS, phase: "warn",
@@ -344,7 +363,7 @@ export class EnemySystem {
       }
     } else if (e.kind === "stormcaller") {
       const total = casterTelegraphS(e.kind, e.spellTier);
-      this.zones.push({
+      this.hazardList.push({
         id: `h${this.nextHazard++}`, kind: "beam", sourceId: e.id, x: e.x, z: e.z, dirX, dirZ,
         length: beamLength(this.dungeon, e.x, e.z, dirX, dirZ, SPELLS.stormcaller.length),
         size: SPELLS.stormcaller.tiers[tier].width, damage, left: total, total, phase: "warn",
@@ -354,7 +373,7 @@ export class EnemySystem {
 
   /** El rayo en aviso del tormentoso pasa a disparo (queda fijo) y golpea una vez a cada jugador en la línea. */
   private fireBeam(e: Enemy, alive: readonly SimPlayer[], hits: EnemyHit[]): void {
-    const h = this.zones.find((z) => z.kind === "beam" && z.sourceId === e.id && z.phase === "warn");
+    const h = this.hazardList.find((z) => z.kind === "beam" && z.sourceId === e.id && z.phase === "warn");
     if (!h) return;
     h.phase = "fire";
     h.left = h.total = SPELLS.stormcaller.fireS;
@@ -365,7 +384,7 @@ export class EnemySystem {
 
   private stepHazards(alive: readonly SimPlayer[], dt: number, hits: EnemyHit[]): void {
     const keep: Hazard[] = [];
-    for (const h of this.zones) {
+    for (const h of this.hazardList) {
       const owner = this.list.find((e) => e.id === h.sourceId);
       if (h.kind === "beam" && h.phase === "warn") {
         // Aviso huérfano (aturdido, muerto o fuera de telegrafía sin disparar): se quita.
@@ -394,7 +413,7 @@ export class EnemySystem {
         }
       }
     }
-    this.zones = keep;
+    this.hazardList = keep;
   }
 
   private stepEnemy(e: Enemy, alive: readonly SimPlayer[], dt: number, hits: EnemyHit[]): void {

@@ -22,6 +22,8 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `spawn`: `count` enemigos delante del jugador; `tier` 0 = desarmado (los magos siempre lo van).
  * - `killAll`: mata a todos los enemigos sin dejar orbes ni armas.
  * - `clock`: adelanta el reloj del piso `seconds`.
+ * - `freeze`: congela a los enemigos que no preparan un ataque (proyectiles y peligros siguen).
+ * - `castNow`: todos los hechiceros libres lanzan ya su hechizo sobre el jugador más cercano.
  * - `weapon`: equipa el arma con su tier.
  */
 export type DevCommand =
@@ -35,6 +37,8 @@ export type DevCommand =
   | { cmd: "spawn"; kind: EnemyKind; count: number; tier: 0 | WeaponTier }
   | { cmd: "killAll" }
   | { cmd: "clock"; seconds: number }
+  | { cmd: "freeze"; on: boolean }
+  | { cmd: "castNow" }
   | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
@@ -63,10 +67,12 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
     case "god":
     case "noCooldown":
     case "waves":
+    case "freeze":
       return typeof m.on === "boolean" ? { cmd: m.cmd, on: m.on } : null;
     case "clearCards":
     case "heal":
     case "killAll":
+    case "castNow":
       return { cmd: m.cmd };
     case "spawn":
       return has(ENEMY_DEFS, m.kind) && isInt(m.count, 1, SANDBOX_MAX_SPAWN) && isInt(m.tier, 0, 3)

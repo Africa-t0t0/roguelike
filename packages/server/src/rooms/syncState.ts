@@ -2,11 +2,13 @@ import { xpToNext } from "@roguelike/shared";
 import { abilitySlots, type PlayerShot } from "../sim/AbilitySystem";
 import { abilityRank, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
+import type { Hazard } from "../sim/hazards";
 import type { Orb } from "../sim/OrbSystem";
 import type { PlayerRecord } from "./PlayerRegistry";
 import {
   AbilitySlotState,
   EnemyState,
+  HazardState,
   OrbState,
   PlayerShotState,
   ProjectileState,
@@ -51,7 +53,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   });
 }
 
-/** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles`, `orbs` y `playerShots`. */
+/** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles`, `orbs`, `playerShots` y `hazards`. */
 export function syncWorld(
   state: RunState,
   enemies: readonly Enemy[],
@@ -59,6 +61,7 @@ export function syncWorld(
   combat: CombatSystem,
   orbs: readonly Orb[],
   playerShots: readonly PlayerShot[] = [],
+  hazards: readonly Hazard[] = [],
 ): void {
   const liveEnemies = new Set<string>();
   for (const e of enemies) {
@@ -80,6 +83,7 @@ export function syncWorld(
     es.ai = e.ai;
     es.aiTime = e.aiTime;
     es.stunned = e.stunned;
+    es.spellTier = e.spellTier;
   }
   for (const id of [...state.enemies.keys()]) if (!liveEnemies.has(id)) state.enemies.delete(id);
 
@@ -125,6 +129,27 @@ export function syncWorld(
     ws.z = w.z;
   }
   for (const id of [...state.playerShots.keys()]) if (!liveWaves.has(id)) state.playerShots.delete(id);
+
+  const liveHazards = new Set<string>();
+  for (const h of hazards) {
+    liveHazards.add(h.id);
+    let hs = state.hazards.get(h.id);
+    if (!hs) {
+      hs = new HazardState();
+      hs.kind = h.kind;
+      hs.x = h.x;
+      hs.z = h.z;
+      hs.dirX = h.dirX;
+      hs.dirZ = h.dirZ;
+      hs.length = h.length;
+      hs.size = h.size;
+      state.hazards.set(h.id, hs);
+    }
+    hs.left = h.left;
+    hs.total = h.total;
+    hs.phase = h.phase;
+  }
+  for (const id of [...state.hazards.keys()]) if (!liveHazards.has(id)) state.hazards.delete(id);
 
   syncLevel(state, combat);
 }
