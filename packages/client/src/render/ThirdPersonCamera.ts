@@ -13,6 +13,8 @@ const DEFAULT_PITCH = 0.25; // ≈ 3 m de altura a 6 m de distancia
 const SENSITIVITY = 0.0025; // rad por píxel
 const RAY_STEP = 0.1; // m
 const WALL_MARGIN = 0.3; // m antes del muro
+/** frecuencias (rad/s) del temblor por eje: distintas para que no se vea periódico */
+const SHAKE_FREQ = [83, 71, 97] as const;
 
 /** Cámara detrás del hombro. Con yaw 0 mira hacia +Z; el mouse controla yaw y pitch con pointer lock. */
 export class ThirdPersonCamera {
@@ -22,6 +24,8 @@ export class ThirdPersonCamera {
   /** false mientras un panel (p. ej. el de cartas) necesita el puntero libre: el clic no lo captura. */
   pointerLockAllowed = true;
   // requestPointerLock puede rechazar (p. ej. clic justo después de soltar con Esc): se reintenta al próximo clic.
+  /** temblor en curso: segundos que le quedan, su duración e intensidad (m) y su fase (s) */
+  private shakeState = { left: 0, durationS: 0, intensity: 0, phase: 0 };
   private readonly onClick = () => {
     if (!this.pointerLockAllowed) return;
     void Promise.resolve(this.canvas.requestPointerLock()).catch(() => undefined);
@@ -43,8 +47,22 @@ export class ThirdPersonCamera {
     document.addEventListener("mousemove", this.onMouseMove);
   }
 
-  /** Coloca la cámara siguiendo al jugador en (x, z). */
-  follow(x: number, z: number): void {
+  /**
+   * Hace temblar la cámara `durationS` segundos con `intensity` metros que decaen hasta 0. Solo desplaza la
+   * posición: no toca el yaw ni el pitch (los del input). Si ya temblaba, se queda con el más fuerte.
+   */
+  shake(durationS: number, intensity: number): void {
+    const s = this.shakeState;
+    const current = s.durationS > 0 ? s.intensity * (s.left / s.durationS) : 0;
+    if (intensity < current) return;
+    this.shakeState = { left: durationS, durationS, intensity, phase: s.phase };
+  }
+
+  /**
+   * Coloca la cámara siguiendo al jugador en (x, z). `dtS`: tiempo de juego del cuadro, con el que decae el
+   * temblor (0 en la pausa: queda quieto).
+   */
+  follow(x: number, z: number, dtS = 0): void {
     const sinY = Math.sin(this.yaw);
     const cosY = Math.cos(this.yaw);
     // Pivote sobre el hombro derecho; la derecha de la cámara es (cos yaw, −sin yaw).
@@ -55,6 +73,20 @@ export class ThirdPersonCamera {
     const dist = this.clearDistance(pivot, back);
     this.camera.position.copyFrom(pivot.add(back.scale(dist)));
     this.camera.setTarget(pivot);
+    this.applyShake(dtS);
+  }
+
+  /** Desplaza la posición (no el objetivo) según el temblor, que decae linealmente con `dtS`. */
+  private applyShake(dtS: number): void {
+    const s = this.shakeState;
+    if (s.left <= 0) return;
+    s.left = Math.max(0, s.left - dtS);
+    s.phase += dtS;
+    const amp = s.intensity * (s.left / s.durationS);
+    const [fx, fy, fz] = SHAKE_FREQ;
+    this.camera.position.x += amp * Math.sin(s.phase * fx);
+    this.camera.position.y += amp * Math.sin(s.phase * fy + 1.3);
+    this.camera.position.z += amp * Math.sin(s.phase * fz + 2.1);
   }
 
   dispose(): void {

@@ -21,6 +21,7 @@ import { PauseClock } from "./net/pauseClock";
 import { Predictor } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
 import { createTickClock } from "./net/tickClock";
+import { AbilityFx, SLAM_SHAKE } from "./render/abilityFx";
 import { RecentHits } from "./render/animState";
 import { AnimLibrary } from "./render/animLibrary";
 import { loadAssets, type Assets } from "./render/assets";
@@ -136,6 +137,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const playerShots = new PlayerShotViews(scene);
   const floorWeapons = new FloorWeaponViews(scene, assets);
   const orbs = new OrbViews(scene);
+  const abilityFx = new AbilityFx(scene);
   const hits = new RecentHits();
   const camera = new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
@@ -166,9 +168,24 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   let prev: KinematicState | undefined; // estado antes del último paso, para dibujar entre pasos
   let seq = 0;
   let lastFrame = performance.now();
+  let frameNow = clock.now(lastFrame); // reloj de juego del cuadro en curso
+  let lastPlayers = new Map<string, PlayerSnapshot>(); // para el rango de las habilidades de cada uno
+
+  // Efectos de habilidad: una vez por lanzamiento, cuando su clip empieza a dibujarse (propia predicha o
+  // ajena por evento), con la pose dibujada. Lo que ya lleve se descuenta del inicio: así el efecto queda
+  // alineado con el clip también para los remotos, dibujados INTERP_DELAY_MS tarde.
+  views.onAbilityStart = (key, id, pose, elapsedS) => {
+    const rank = lastPlayers.get(key)?.abilities.find((a) => a.id === id)?.rank ?? 1;
+    abilityFx.play(id, pose, rank, frameNow - elapsedS * 1000);
+  };
+  abilityFx.onSlamImpact = (x, z) => {
+    const me = predictor?.current;
+    if (me && Math.hypot(me.x - x, me.z - z) < SLAM_SHAKE.rangeM) camera.shake(SLAM_SHAKE.durationS, SLAM_SHAKE.intensity);
+  };
 
   conn.onPlayers((players, receivedAt) => {
     views.sync(players);
+    lastPlayers = players;
     group = [...players.values()].map((p) => ({ name: p.name, choosing: p.choosing }));
     // En la pausa los parches repiten las mismas posiciones: no se apilan en los buffers.
     const at = clock.now(receivedAt);
@@ -245,6 +262,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     const paused = clock.paused;
     // En la pausa el tiempo de juego no corre: dt 0 y `now` fijo (todo lo dibujado queda quieto).
     const now = clock.now(realNow);
+    frameNow = now;
     const dt = paused ? 0 : Math.min(MAX_FRAME_S, (realNow - lastFrame) / 1000);
     lastFrame = realNow;
 
@@ -303,7 +321,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
-      camera.follow(x, z);
+      camera.follow(x, z, dt);
       torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
       const canPickUp = !(mine?.dead ?? true) && swing.swingTimer <= 0 && !heroAbility;
@@ -329,6 +347,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       mine?.passiveRank ?? 0,
     );
     orbs.render(dt, now);
+    abilityFx.setPaused(paused);
+    abilityFx.update(now);
     scene.render();
     damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame
   };
@@ -351,6 +371,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     playerShots.dispose();
     floorWeapons.dispose();
     orbs.dispose();
+    abilityFx.dispose();
     torches.dispose();
     dungeonMeshes.dispose();
     scene.dispose();

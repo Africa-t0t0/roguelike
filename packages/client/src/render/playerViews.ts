@@ -70,6 +70,11 @@ function createLabel(scene: Scene, key: string, text: string, parent: TransformN
 export class PlayerViews {
   private readonly views = new Map<string, PlayerView>();
   private readonly clipLengths: ClipLengths;
+  /**
+   * Empezó a dibujarse una habilidad (una vez por lanzamiento, propia o ajena): con la pose dibujada en ese
+   * cuadro y cuánto lleva ya (s) en el reloj con el que se dibuja a ese jugador.
+   */
+  onAbilityStart?: (key: string, id: AbilityId, pose: { x: number; z: number; facing: number }, elapsedS: number) => void;
 
   constructor(
     private readonly scene: Scene,
@@ -147,6 +152,7 @@ export class PlayerViews {
     // usa el clip del golpe 2 del mandoble).
     if (ability && (view.abilityElapsed === undefined || ability.elapsed < view.abilityElapsed)) {
       attackClip = ABILITIES[ability.id].clip;
+      this.onAbilityStart?.(key, ability.id, pose, ability.elapsed);
     }
     view.abilityElapsed = ability?.elapsed;
     const input: HeroAnimInput = {
