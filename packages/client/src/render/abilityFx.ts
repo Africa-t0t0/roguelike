@@ -19,8 +19,10 @@ import {
   THRUST_IMPACT_FRAC,
   THRUST_WIDTH,
   type AbilityId,
+  type Nature,
 } from "@roguelike/shared";
 import { generated, PARTICLE_SPEED, radial, sparkTexture } from "./fxTextures";
+import { natureTint } from "./natureLooks";
 
 /** Temblor de cámara del Golpe sísmico, si el jugador propio está a menos de `rangeM`. */
 export const SLAM_SHAKE = { durationS: 0.25, intensity: 0.08, rangeM: 8 } as const;
@@ -48,37 +50,40 @@ const DUST_LIFE_MAX_S = 1.2;
 type Pose = { x: number; z: number; facing: number };
 
 /** Un paso del efecto: qué se dibuja, cuándo empieza (s desde el inicio de la habilidad) y cuánto dura. */
-type FxStep =
+export type FxStep =
   | { kind: "ring"; startS: number; durS: number; to: number; color: Color3; y: number }
-  | { kind: "sparks"; startS: number; durS: number; emitS: number; radius: number }
-  | { kind: "shock"; startS: number; durS: number; radius: number }
-  | { kind: "cracks"; startS: number; durS: number; radius: number }
+  | { kind: "sparks"; startS: number; durS: number; emitS: number; radius: number; nature: Nature }
+  | { kind: "shock"; startS: number; durS: number; radius: number; color: Color3 }
+  | { kind: "cracks"; startS: number; durS: number; radius: number; nature: Nature }
   | { kind: "dust"; startS: number; durS: number; emitS: number; radius: number }
-  | { kind: "flash"; startS: number; durS: number; radius: number }
-  | { kind: "trail"; startS: number; durS: number; range: number };
+  | { kind: "flash"; startS: number; durS: number; radius: number; color: Color3 }
+  | { kind: "trail"; startS: number; durS: number; range: number; color: Color3 };
 
-/** Los pasos del efecto de cada habilidad; los momentos de impacto salen de las constantes de `cards.ts`. */
-function timeline(id: AbilityId, rank: number): FxStep[] {
+/**
+ * Los pasos del efecto de cada habilidad; los momentos de impacto salen de las constantes de `cards.ts`.
+ * Los colores fijos pasan por `natureTint`: sin naturaleza quedan como siempre.
+ */
+export function abilityTimeline(id: AbilityId, rank: number, nature: Nature = "none"): FxStep[] {
   const def = ABILITIES[id];
   const r = def.ranks[Math.min(3, Math.max(1, rank)) - 1]!;
   switch (id) {
     case "whirlwind":
       return [
-        { kind: "ring", startS: 0, durS: def.animS, to: r.radius!, color: FIRE, y: WHIRL_RING_Y },
-        { kind: "sparks", startS: 0, durS: def.animS + SPARK_LIFE_MAX_S, emitS: def.animS, radius: r.radius! },
+        { kind: "ring", startS: 0, durS: def.animS, to: r.radius!, color: natureTint(FIRE, nature), y: WHIRL_RING_Y },
+        { kind: "sparks", startS: 0, durS: def.animS + SPARK_LIFE_MAX_S, emitS: def.animS, radius: r.radius!, nature },
       ];
     case "kick":
-      return [{ kind: "flash", startS: KICK_IMPACT_AT * def.animS, durS: KICK_FLASH_S, radius: r.radius! }];
+      return [{ kind: "flash", startS: KICK_IMPACT_AT * def.animS, durS: KICK_FLASH_S, radius: r.radius!, color: natureTint(WARM_WHITE, nature) }];
     case "warcry":
-      return [{ kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: WARCRY_RADIUS_M, color: GOLD, y: WARCRY_RING_Y }];
+      return [{ kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: WARCRY_RADIUS_M, color: natureTint(GOLD, nature), y: WARCRY_RING_Y }];
     case "slam":
       return [
-        { kind: "shock", startS: SLAM_IMPACT_S, durS: SHOCK_GROW_S, radius: r.radius! },
-        { kind: "cracks", startS: SLAM_IMPACT_S, durS: CRACKS_FADE_S, radius: r.radius! },
+        { kind: "shock", startS: SLAM_IMPACT_S, durS: SHOCK_GROW_S, radius: r.radius!, color: natureTint(FIRE, nature) },
+        { kind: "cracks", startS: SLAM_IMPACT_S, durS: CRACKS_FADE_S, radius: r.radius!, nature },
         { kind: "dust", startS: SLAM_IMPACT_S, durS: DUST_EMIT_S + DUST_LIFE_MAX_S, emitS: DUST_EMIT_S, radius: r.radius! },
       ];
     case "thrust":
-      return [{ kind: "trail", startS: THRUST_IMPACT_FRAC * def.animS, durS: TRAIL_FADE_S, range: r.range! }];
+      return [{ kind: "trail", startS: THRUST_IMPACT_FRAC * def.animS, durS: TRAIL_FADE_S, range: r.range!, color: natureTint(TRAIL, nature) }];
     default:
       return [];
   }
@@ -86,7 +91,7 @@ function timeline(id: AbilityId, rank: number): FxStep[] {
 
 /** Cuánto dura (ms) el efecto completo de esa habilidad y rango, desde su inicio. */
 export function abilityFxDurationMs(id: AbilityId, rank: number): number {
-  return Math.max(0, ...timeline(id, rank).map((s) => (s.startS + s.durS) * 1000));
+  return Math.max(0, ...abilityTimeline(id, rank).map((s) => (s.startS + s.durS) * 1000));
 }
 
 /** Una pieza viva de un efecto (malla o sistema de partículas), con sus tiempos en el reloj de juego. */
@@ -105,8 +110,8 @@ interface Piece {
   apply?(t: number): void;
 }
 
-/** Grietas desde el centro: líneas oscuras con borde naranja. Pseudoaleatorias con semilla (siempre iguales). */
-function drawCracks(ctx: CanvasRenderingContext2D, s: number): void {
+/** Grietas desde el centro: líneas oscuras con borde naranja (o del color de la naturaleza). Pseudoaleatorias con semilla (siempre iguales). */
+function drawCracks(ctx: CanvasRenderingContext2D, s: number, edge: Color3 | undefined): void {
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
   const paths: [number, number][][] = [];
@@ -136,7 +141,7 @@ function drawCracks(ctx: CanvasRenderingContext2D, s: number): void {
       ctx.stroke();
     }
   };
-  stroke("rgba(255, 120, 30, 0.85)", s * 0.03);
+  stroke(edge ? `rgba(${Math.round(edge.r * 255)}, ${Math.round(edge.g * 255)}, ${Math.round(edge.b * 255)}, 0.85)` : "rgba(255, 120, 30, 0.85)", s * 0.03);
   stroke("rgba(20, 12, 6, 0.95)", s * 0.012);
   radial(ctx, s, [
     [0, "rgba(20, 12, 6, 0.9)"],
@@ -159,6 +164,8 @@ export class AbilityFx {
   private readonly spark: DynamicTexture;
   private readonly ringTex: DynamicTexture;
   private readonly cracks: DynamicTexture;
+  /** texturas de grietas de las naturalezas, creadas al primer uso */
+  private readonly natureCracks = new Map<Nature, DynamicTexture>();
   private paused = false;
   private seq = 0;
 
@@ -172,12 +179,12 @@ export class AbilityFx {
         [1, "rgba(255, 255, 255, 0)"],
       ]),
     );
-    this.cracks = generated(scene, "fx-cracks", 256, drawCracks);
+    this.cracks = generated(scene, "fx-cracks", 256, (ctx, size) => drawCracks(ctx, size, undefined));
   }
 
   /** Arranca el efecto de `id` en `at` (pose dibujada del jugador al empezar), con `startMs` en el reloj de juego. */
-  play(id: AbilityId, at: Pose, rank: number, startMs: number): void {
-    for (const step of timeline(id, rank)) {
+  play(id: AbilityId, at: Pose, rank: number, startMs: number, nature: Nature = "none"): void {
+    for (const step of abilityTimeline(id, rank, nature)) {
       const piece = this.build(step, at);
       piece.startMs = startMs + step.startS * 1000;
       piece.endMs = piece.startMs + step.durS * 1000;
@@ -236,6 +243,19 @@ export class AbilityFx {
     this.spark.dispose();
     this.ringTex.dispose();
     this.cracks.dispose();
+    for (const t of this.natureCracks.values()) t.dispose();
+    this.natureCracks.clear();
+  }
+
+  private cracksTexture(nature: Nature): DynamicTexture {
+    if (nature === "none") return this.cracks;
+    let tex = this.natureCracks.get(nature);
+    if (!tex) {
+      const edge = natureTint(FIRE, nature);
+      tex = generated(this.scene, `fx-cracks-${nature}`, 256, (ctx, size) => drawCracks(ctx, size, edge));
+      this.natureCracks.set(nature, tex);
+    }
+    return tex;
   }
 
   private free(p: Piece): void {
@@ -286,7 +306,7 @@ export class AbilityFx {
       case "shock": {
         // Disco anular (textura de anillo) que crece hasta el radio y se desvanece.
         const mesh = CreateDisc(`fx-shock-${n}`, { radius: 1, tessellation: 48 }, this.scene);
-        const mat = this.glow(`fx-shockMat-${n}`, FIRE, this.ringTex);
+        const mat = this.glow(`fx-shockMat-${n}`, step.color, this.ringTex);
         mesh.material = mat;
         mesh.rotation.x = Math.PI / 2;
         mesh.position.set(at.x, FLOOR_Y + 0.02, at.z);
@@ -304,7 +324,7 @@ export class AbilityFx {
         const mesh = CreateGround(`fx-cracks-${n}`, { width: size, height: size }, this.scene);
         const mat = new StandardMaterial(`fx-cracksMat-${n}`, this.scene);
         mat.disableLighting = true;
-        mat.diffuseTexture = this.cracks;
+        mat.diffuseTexture = this.cracksTexture(step.nature);
         mat.useAlphaFromDiffuseTexture = true;
         mat.diffuseColor = Color3.White();
         mat.specularColor = Color3.Black();
@@ -323,7 +343,7 @@ export class AbilityFx {
         // centro mira a π/2 − arco/2 (medido como `facing`, desde +Z hacia +X) y se gira hasta `facing`.
         const arc = KICK_ARC_DEG / 360;
         const mesh = CreateDisc(`fx-kick-${n}`, { radius: step.radius, tessellation: 24, arc }, this.scene);
-        const mat = this.glow(`fx-kickMat-${n}`, WARM_WHITE);
+        const mat = this.glow(`fx-kickMat-${n}`, step.color);
         mesh.material = mat;
         mesh.rotation.x = Math.PI / 2;
         mesh.rotation.y = at.facing - (Math.PI / 2 - (arc * Math.PI * 2) / 2);
@@ -336,7 +356,7 @@ export class AbilityFx {
       case "trail": {
         // Plano alargado del ancho de la línea y del largo del alcance, desde donde se lanzó.
         const mesh = CreateGround(`fx-thrust-${n}`, { width: THRUST_WIDTH, height: step.range }, this.scene);
-        const mat = this.glow(`fx-thrustMat-${n}`, TRAIL, this.spark);
+        const mat = this.glow(`fx-thrustMat-${n}`, step.color, this.spark);
         mesh.material = mat;
         mesh.position.set(at.x + (fwdX * step.range) / 2, TRAIL_Y, at.z + (fwdZ * step.range) / 2);
         mesh.rotation.y = at.facing;
@@ -350,9 +370,17 @@ export class AbilityFx {
         ps.particleTexture = this.spark;
         ps.emitter = new Vector3(at.x, WHIRL_RING_Y, at.z);
         ps.createCylinderEmitter(step.radius, 0.3, 1, 0.2);
-        ps.color1 = new Color4(1, 0.75, 0.3, 1);
-        ps.color2 = new Color4(1, 0.4, 0.08, 1);
-        ps.colorDead = new Color4(0.6, 0.1, 0, 0);
+        if (step.nature === "none") {
+          ps.color1 = new Color4(1, 0.75, 0.3, 1);
+          ps.color2 = new Color4(1, 0.4, 0.08, 1);
+          ps.colorDead = new Color4(0.6, 0.1, 0, 0);
+        } else {
+          // Chispas del color de la naturaleza: más claras en un extremo y apagándose a su tono oscuro.
+          const c = natureTint(FIRE, step.nature);
+          ps.color1 = new Color4(Math.min(1, c.r + 0.3), Math.min(1, c.g + 0.3), Math.min(1, c.b + 0.3), 1);
+          ps.color2 = new Color4(c.r, c.g, c.b, 1);
+          ps.colorDead = new Color4(c.r * 0.5, c.g * 0.5, c.b * 0.5, 0);
+        }
         ps.minSize = 0.06;
         ps.maxSize = 0.16;
         ps.minLifeTime = 0.2;

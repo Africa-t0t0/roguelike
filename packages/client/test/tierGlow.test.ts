@@ -6,6 +6,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
 import { TIERS } from "@roguelike/shared";
+import { NATURE_COLORS } from "../src/render/natureLooks";
 import { applyTierGlow, GLOW_STRENGTH } from "../src/render/tierGlow";
 
 function weapon(scene: Scene, blade: PBRMaterial, hilt: StandardMaterial) {
@@ -58,6 +59,37 @@ describe("brillo por tier", () => {
     applyTierGlow(w1.root, 2);
     expect(w1.a.material).toBe(tinted);
     applyTierGlow(w1.root, 1);
+    expect(w1.a.material).toBe(blade);
+  });
+
+  it("tier 4 tiñe de dorado con la misma fuerza que los demás", () => {
+    const scene = new Scene(new NullEngine());
+    const blade = new PBRMaterial("blade", scene);
+    const w = weapon(scene, blade, new StandardMaterial("hilt", scene));
+    applyTierGlow(w.root, 4);
+    const [r, g, b] = TIERS[4].glow!.map((c) => c * GLOW_STRENGTH);
+    expect((w.a.material as PBRMaterial).emissiveColor.asArray()).toEqual([r, g, b]);
+  });
+
+  it("la naturaleza se suma al brillo del tier, con un clon por (material, tier, naturaleza)", () => {
+    const scene = new Scene(new NullEngine());
+    const blade = new PBRMaterial("blade", scene);
+    const w1 = weapon(scene, blade, new StandardMaterial("hilt", scene));
+    const w2 = weapon(scene, blade, new StandardMaterial("hilt", scene));
+    applyTierGlow(w1.root, 1, "ice"); // sin brillo de tier: solo el del hielo
+    applyTierGlow(w2.root, 1, "ice");
+    const ice = w1.a.material as PBRMaterial;
+    expect(ice).not.toBe(blade);
+    expect(w2.a.material).toBe(ice);
+    expect(ice.emissiveColor.r).toBeCloseTo(NATURE_COLORS.ice.r * GLOW_STRENGTH);
+    expect(ice.emissiveColor.b).toBeCloseTo(NATURE_COLORS.ice.b * GLOW_STRENGTH);
+
+    applyTierGlow(w1.root, 3, "fire");
+    const sum = (w1.a.material as PBRMaterial).emissiveColor;
+    expect(sum.r).toBeCloseTo((TIERS[3].glow![0] + NATURE_COLORS.fire.r) * GLOW_STRENGTH);
+    expect(sum.g).toBeCloseTo((TIERS[3].glow![1] + NATURE_COLORS.fire.g) * GLOW_STRENGTH);
+
+    applyTierGlow(w1.root, 1, "none");
     expect(w1.a.material).toBe(blade);
   });
 });

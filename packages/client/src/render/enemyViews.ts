@@ -145,7 +145,7 @@ export class EnemyViews {
       const e = view.buffer.sample(renderAtMs);
       if (!e) continue;
       view.character.setPose(e.x, 0, e.z, e.facing);
-      view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, gripScale: ENEMY_LOOKS[e.kind].gripScale });
+      view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, nature: e.weaponNature, gripScale: ENEMY_LOOKS[e.kind].gripScale });
       view.character.play(
         chooseEnemyAnim(
           {
@@ -182,6 +182,11 @@ export class EnemyViews {
       view.stars.setEnabled(stunned);
       if (stunned) view.stars.rotation.y = ((renderAtMs / 1000) * STUN_SPIN) % (Math.PI * 2);
     }
+  }
+
+  /** Congela (o reanuda) las partículas de las armas con naturaleza en la pausa del grupo. */
+  setPaused(paused: boolean): void {
+    for (const view of this.views.values()) view.character.setPaused(paused);
   }
 
   dispose(): void {

@@ -10,6 +10,7 @@ import type { FloorWeapon } from "../net/connection";
 import { formatWeapon, tierColor } from "../ui/hud";
 import type { Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
+import { attachNatureFx, NATURE_COLORS, type NatureFx } from "./natureLooks";
 import { applyTierGlow } from "./tierGlow";
 
 const SPIN_RAD_PER_S = 0.8;
@@ -33,6 +34,8 @@ interface FloorNode {
   pivot: TransformNode;
   weapon: TransformNode;
   spin: TransformNode;
+  /** partículas del arma si tiene naturaleza */
+  fx?: NatureFx;
 }
 
 /** "Recoger Mandoble templado" (el aviso lo muestra en dos partes: verbo y nombre). */
@@ -61,6 +64,7 @@ export class FloorWeaponViews {
   private items: FloorWeapon[] = [];
   private nodes: FloorNode[] = [];
   private ttls: number[] = []; // ttl de cada arma al llegar la lista
+  private paused = false;
   private setAtMs = 0; // instante de juego (ms) en que llegó la lista
   private readonly glows = new Map<string, StandardMaterial>(); // material del velo y del aro por tier
   private readonly hint = document.createElement("div");
@@ -112,7 +116,7 @@ export class FloorWeaponViews {
     const at = near && this.project(near.x, near.z);
     this.hint.hidden = !at;
     if (!near || !at) return;
-    const name = formatWeapon(near.weaponId, near.tier);
+    const name = formatWeapon(near.weaponId, near.tier, near.nature);
     if (this.hintName.textContent !== name) {
       this.hintName.textContent = name;
       this.hintName.style.color = tierColor(near.tier);
@@ -120,6 +124,13 @@ export class FloorWeaponViews {
     }
     // Anclado sobre el arma: la línea guía (CSS) baja desde la esquina inferior izquierda del aviso.
     this.hint.style.transform = `translate(${at.x}px, ${at.y}px)`;
+  }
+
+  /** Congela (o reanuda) las partículas de las armas con naturaleza: avanzan con los cuadros, no con el reloj de juego. */
+  setPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    for (const n of this.nodes) n.fx?.setPaused(paused);
   }
 
   /** Posición en pantalla (px CSS) del punto sobre el arma; undefined si queda fuera de la vista. */
@@ -142,17 +153,20 @@ export class FloorWeaponViews {
 
   private clear(): void {
     // Sin materiales: los del arma son del contenedor (o clones de tier cacheados) y los discos se reutilizan.
-    for (const n of this.nodes) n.pivot.dispose();
+    for (const n of this.nodes) {
+      n.fx?.dispose();
+      n.pivot.dispose();
+    }
     this.nodes = [];
     this.ttls = [];
     this.items = [];
   }
 
-  private glow(tier: WeaponTier, part: "veil" | "ring"): StandardMaterial {
-    const id = `${part}-${tier}`;
+  private glow(tier: WeaponTier, part: "veil" | "ring", nature: Nature): StandardMaterial {
+    const id = nature === "none" ? `${part}-${tier}` : `${part}-${tier}-${nature}`;
     let m = this.glows.get(id);
     if (m) return m;
-    const [r, g, b] = TIERS[tier].glow ?? BASE_GLOW;
+    const [r, g, b] = nature === "none" ? (TIERS[tier].glow ?? BASE_GLOW) : [NATURE_COLORS[nature].r, NATURE_COLORS[nature].g, NATURE_COLORS[nature].b];
     m = new StandardMaterial(`floor-weapon-${id}`, this.scene);
     m.diffuseColor = Color3.Black();
     m.specularColor = Color3.Black();
@@ -185,24 +199,26 @@ export class FloorWeaponViews {
     });
     for (const root of model.rootNodes) root.parent = tilt;
     for (const mesh of tilt.getChildMeshes()) mesh.isPickable = false;
-    applyTierGlow(tilt, f.tier);
+    applyTierGlow(tilt, f.tier, f.nature);
     // Centra el arma sobre el eje (gira sobre su centro) y clava la punta SINK_M bajo el piso; la
     // inclinación se aplica después, alrededor del punto del suelo, así la punta no se corre.
     const { min, max } = pivot.getHierarchyBoundingVectors(true);
     tilt.position.set(f.x - (min.x + max.x) / 2, -SINK_M - min.y, f.z - (min.z + max.z) / 2);
     lean.rotation.z = LEAN_RAD;
+    // Partículas del arma (antes del velo y el aro, que ensancharían la caja que se mide).
+    const fx = f.nature === "none" ? undefined : attachNatureFx(this.scene, f.nature, pivot, this.paused);
     // Un velo tenue y un aro fino que brillan con el color del tier.
     const disc = CreateDisc(`floor-weapon-glow-${i}`, { radius: GLOW_DIAMETER_M / 2, tessellation: 32 }, this.scene);
-    disc.material = this.glow(f.tier, "veil");
+    disc.material = this.glow(f.tier, "veil", f.nature);
     disc.isPickable = false;
     disc.parent = pivot;
     disc.rotation.x = Math.PI / 2; // el disco mira hacia +Z: se acuesta mirando hacia arriba
     disc.position.y = 0.02;
     const ring = CreateTorus(`floor-weapon-ring-${i}`, { diameter: GLOW_DIAMETER_M, thickness: 0.025, tessellation: 48 }, this.scene);
-    ring.material = this.glow(f.tier, "ring");
+    ring.material = this.glow(f.tier, "ring", f.nature);
     ring.isPickable = false;
     ring.parent = pivot;
     ring.position.y = 0.03;
-    return { pivot, weapon, spin };
+    return { pivot, weapon, spin, fx };
   }
 }

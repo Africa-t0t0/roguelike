@@ -6,9 +6,12 @@ import type { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import "@babylonjs/core/Meshes/instancedMesh"; // registra Mesh.createInstance
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
+import type { Nature } from "@roguelike/shared";
 import type { PlayerShotSnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
+import { NATURE_COLORS } from "./natureLooks";
 
+const BASE_COLOR = new Color3(1, 0.85, 0.5);
 const WAVE_Y = 1.0; // m: a la altura del tajo
 /** Apertura del arco (rad) y grosor del tubo, para un radio 1 (se escala por el radio de la onda). */
 const ARC = Math.PI * 0.75;
@@ -32,42 +35,54 @@ interface ShotView {
  */
 export class PlayerShotViews {
   private readonly views = new Map<string, ShotView>();
-  private readonly material: StandardMaterial;
-  private readonly template: Mesh;
+  /** Modelo y material por naturaleza ("none" es el dorado de siempre); los otros nacen al primer uso. */
+  private readonly looks = new Map<Nature, { template: Mesh; material: StandardMaterial }>();
+  private readonly path: Vector3[] = [];
+  private readonly segments = 16;
 
   constructor(private readonly scene: Scene) {
-    const m = new StandardMaterial("cleaveWave", scene);
+    // Arco en el plano XZ, centrado en el origen y combado hacia +Z (la dirección de avance).
+    const n = this.segments;
+    for (let i = 0; i <= n; i++) {
+      const a = -ARC / 2 + (ARC * i) / n;
+      this.path.push(new Vector3(Math.sin(a), 0, Math.cos(a) - 1));
+    }
+    this.look("none");
+  }
+
+  private look(nature: Nature): { template: Mesh; material: StandardMaterial } {
+    let look = this.looks.get(nature);
+    if (look) return look;
+    const m = new StandardMaterial(nature === "none" ? "cleaveWave" : `cleaveWave-${nature}`, this.scene);
     m.diffuseColor = Color3.Black();
     m.specularColor = Color3.Black();
-    m.emissiveColor = new Color3(1, 0.85, 0.5);
+    m.emissiveColor = nature === "none" ? BASE_COLOR : NATURE_COLORS[nature].clone();
     m.disableLighting = true;
     m.fogEnabled = false;
     m.alpha = 0.85;
-    this.material = m;
-
-    // Arco en el plano XZ, centrado en el origen y combado hacia +Z (la dirección de avance).
-    const path: Vector3[] = [];
-    const n = 16;
-    for (let i = 0; i <= n; i++) {
-      const a = -ARC / 2 + (ARC * i) / n;
-      path.push(new Vector3(Math.sin(a), 0, Math.cos(a) - 1));
-    }
+    const n = this.segments;
     const template = CreateTube(
-      "cleaveWaveTemplate",
-      { path, radiusFunction: (i) => THICKNESS * Math.sin((Math.PI * i) / n) + 0.005, tessellation: 6, cap: 0 },
-      scene,
+      nature === "none" ? "cleaveWaveTemplate" : `cleaveWaveTemplate-${nature}`,
+      { path: this.path, radiusFunction: (i) => THICKNESS * Math.sin((Math.PI * i) / n) + 0.005, tessellation: 6, cap: 0 },
+      this.scene,
     );
     template.material = m;
     template.isPickable = false;
     template.isVisible = false;
-    this.template = template;
+    look = { template, material: m };
+    this.looks.set(nature, look);
+    return look;
   }
 
-  push(world: WorldSnapshot, receivedAtMs: number): void {
+  /**
+   * `natureAt(x, z)`: naturaleza del arma de quien lanzó la onda. La onda no dice de quién es, así que se
+   * pregunta al ver una nueva por el jugador más cercano a ella (su dueño, que acaba de lanzarla).
+   */
+    push(world: WorldSnapshot, receivedAtMs: number, natureAt: (x: number, z: number) => Nature = () => "none"): void {
     for (const [id, s] of world.playerShots) {
       let view = this.views.get(id);
       if (!view) {
-        const mesh = this.template.createInstance(`cleaveWave-${id}`);
+        const mesh = this.look(natureAt(s.x, s.z)).template.createInstance(`cleaveWave-${id}`);
         mesh.isPickable = false;
         mesh.scaling.set(s.radius, 1, s.radius);
         mesh.rotation.y = Math.atan2(s.dirX, s.dirZ);
@@ -98,7 +113,10 @@ export class PlayerShotViews {
   dispose(): void {
     for (const view of this.views.values()) view.mesh.dispose();
     this.views.clear();
-    this.template.dispose();
-    this.material.dispose();
+    for (const { template, material } of this.looks.values()) {
+      template.dispose();
+      material.dispose();
+    }
+    this.looks.clear();
   }
 }

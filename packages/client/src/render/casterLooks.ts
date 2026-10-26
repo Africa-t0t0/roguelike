@@ -8,7 +8,7 @@ import type { CasterKind } from "@roguelike/shared";
 export const CASTER_COLORS: Record<CasterKind, Color3> = {
   mage: new Color3(0.3, 1, 0.55),
   pyromancer: new Color3(1, 0.45, 0.1),
-  stormcaller: new Color3(0.45, 0.8, 1),
+  stormcaller: new Color3(1, 0.92, 0.4), // el color del rayo (antes celeste, que ahora es el del hielo)
 };
 
 const TINT_STRENGTH = 0.6;

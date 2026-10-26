@@ -5,11 +5,12 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Observer } from "@babylonjs/core/Misc/observable";
 import type { Node } from "@babylonjs/core/node";
 import type { Scene } from "@babylonjs/core/scene";
-import type { WeaponId, WeaponTier } from "@roguelike/shared";
+import type { Nature, WeaponId, WeaponTier } from "@roguelike/shared";
 import { boneKey, type AnimLibrary } from "./animLibrary";
 import type { AnimChoice } from "./animState";
 import type { AssetId, Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
+import { attachNatureFx, type NatureFx } from "./natureLooks";
 import { applyTierGlow } from "./tierGlow";
 
 /**
@@ -52,7 +53,8 @@ export class CharacterView {
   private readonly groups = new Map<string, AnimationGroup | null>();
   private readonly fadingOut = new Set<AnimationGroup>();
   private current: { clip: string; group: AnimationGroup } | undefined;
-  private weapon: { id: WeaponId; tier: WeaponTier; grip: TransformNode } | undefined;
+  private weapon: { id: WeaponId; tier: WeaponTier; nature: Nature; grip: TransformNode; fx?: NatureFx } | undefined;
+  private paused = false;
   private readonly observer: Observer<Scene>;
   private readonly skeletons: Skeleton[];
   private readonly body: TransformNode;
@@ -119,19 +121,24 @@ export class CharacterView {
 
   /**
    * Cuelga el arma de la mano derecha con su agarre de `WEAPON_LOOKS` (posición y escala por
-   * `opts.gripScale`, por defecto 1) y el brillo de `opts.tier` (por defecto 1); con `null` la quita.
-   * Con la misma arma solo vuelve a teñir si cambió el tier (`gripScale` se fija al colgarla).
+   * `opts.gripScale`, por defecto 1), el brillo de `opts.tier` (por defecto 1) y el de `opts.nature` (por
+   * defecto ninguna, con sus partículas); con `null` la quita.
+   * Con la misma arma solo vuelve a teñir si cambió el tier o la naturaleza (`gripScale` se fija al colgarla).
    */
-  setWeapon(weaponId: WeaponId | null, opts: { tier?: WeaponTier; gripScale?: number } = {}): void {
+  setWeapon(weaponId: WeaponId | null, opts: { tier?: WeaponTier; gripScale?: number; nature?: Nature } = {}): void {
     const tier = opts.tier ?? 1;
+    const nature = opts.nature ?? "none";
     if (this.weapon && this.weapon.id === weaponId) {
-      if (this.weapon.tier !== tier) {
-        applyTierGlow(this.weapon.grip, tier);
+      if (this.weapon.tier !== tier || this.weapon.nature !== nature) {
+        applyTierGlow(this.weapon.grip, tier, nature);
+        if (this.weapon.nature !== nature) this.setNatureFx(this.weapon, nature);
         this.weapon.tier = tier;
+        this.weapon.nature = nature;
       }
       return;
     }
     if (!this.weapon && weaponId === null) return;
+    this.weapon?.fx?.dispose();
     this.weapon?.grip.dispose(); // sin materiales: son del contenedor o clones por tier, compartidos
     this.weapon = undefined;
     if (weaponId === null) return;
@@ -156,8 +163,22 @@ export class CharacterView {
       for (const child of wroot.getChildren()) child.parent = node;
       wroot.dispose();
     }
-    if (tier !== 1) applyTierGlow(node, tier);
-    this.weapon = { id: weaponId, tier, grip: node };
+    if (tier !== 1 || nature !== "none") applyTierGlow(node, tier, nature);
+    this.weapon = { id: weaponId, tier, nature, grip: node };
+    this.setNatureFx(this.weapon, nature);
+  }
+
+  /** Congela (o reanuda) las partículas del arma: avanzan con los cuadros, no con el reloj de juego. */
+  setPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    this.weapon?.fx?.setPaused(paused);
+  }
+
+  /** Cambia el emisor de partículas del arma a la naturaleza dada (ninguno si es `"none"`). */
+  private setNatureFx(weapon: { grip: TransformNode; fx?: NatureFx }, nature: Nature): void {
+    weapon.fx?.dispose();
+    weapon.fx = nature === "none" ? undefined : attachNatureFx(this.scene, nature, weapon.grip, this.paused);
   }
 
   /** Cambia de clip con un cruce; si `choice.clip` ya suena solo ajusta la velocidad (salvo `restart`). */
@@ -198,6 +219,7 @@ export class CharacterView {
     this.groups.clear();
     this.fadingOut.clear();
     this.current = undefined;
+    this.weapon?.fx?.dispose();
     this.weapon = undefined;
     this.root.dispose();
     for (const s of this.skeletons) s.dispose();

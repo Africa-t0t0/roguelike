@@ -5,7 +5,7 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
@@ -24,6 +24,7 @@ export interface HeroState {
   dead: boolean;
   weaponId: WeaponId;
   weaponTier: WeaponTier;
+  weaponNature: Nature;
   blocking: boolean;
   /** velocidad de ataque (Furia): ajusta la duración de los golpes */
   attackSpeedMult: number;
@@ -124,7 +125,7 @@ export class PlayerViews {
     const view = this.views.get(key);
     if (!view) return;
     view.character.setPose(pose.x, pose.y, pose.z, pose.facing);
-    view.character.setWeapon(state.weaponId, { tier: state.weaponTier });
+    view.character.setWeapon(state.weaponId, { tier: state.weaponTier, nature: state.weaponNature });
     let { comboStep, swingTimer } = state;
     let attackClip: string | undefined;
     const s = view.swing;
@@ -171,6 +172,11 @@ export class PlayerViews {
     const choice = chooseHeroAnim(input, this.clipLengths);
     view.character.setBodyYaw(heroBodyYaw(input));
     view.character.play(choice, attackClip !== undefined && choice.clip === attackClip);
+  }
+
+  /** Congela (o reanuda) las partículas de las armas con naturaleza en la pausa del grupo. */
+  setPaused(paused: boolean): void {
+    for (const view of this.views.values()) view.character.setPaused(paused);
   }
 
   dispose(): void {

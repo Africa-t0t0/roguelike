@@ -188,7 +188,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   // alineado con el clip también para los remotos, dibujados INTERP_DELAY_MS tarde.
   views.onAbilityStart = (key, id, pose, elapsedS) => {
     const rank = lastPlayers.get(key)?.abilities.find((a) => a.id === id)?.rank ?? 1;
-    abilityFx.play(id, pose, rank, frameNow - elapsedS * 1000);
+    abilityFx.play(id, pose, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
   };
   abilityFx.onSlamImpact = (x, z) => {
     const me = predictor?.current;
@@ -243,7 +243,16 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.push(world, at);
     projectiles.push(world, at);
     hazards.push(world, at);
-    playerShots.push(world, at);
+    // La onda no dice de quién es: lleva la naturaleza del jugador más cercano (su dueño, que la acaba de lanzar).
+    playerShots.push(world, at, (x, z) => {
+      let best: PlayerSnapshot | undefined;
+      let bestD2 = Infinity;
+      for (const p of lastPlayers.values()) {
+        const d2 = (p.x - x) ** 2 + (p.z - z) ** 2;
+        if (d2 < bestD2) [best, bestD2] = [p, d2];
+      }
+      return best?.weaponNature ?? "none";
+    });
   });
 
   // La cuenta sin pausa es local, en tiempo real (el juego sigue).
@@ -332,6 +341,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         dead: mine?.dead ?? false,
         weaponId: mine?.weaponId ?? STARTING_WEAPON,
         weaponTier: mine?.weaponTier ?? 1,
+        weaponNature: mine?.weaponNature ?? "none",
         blocking: ability.isBlocking,
         attackSpeedMult: mine?.attackSpeedMult ?? 1,
         ability: heroAbility,
@@ -366,6 +376,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     );
     orbs.render(dt, now);
     abilityFx.setPaused(paused);
+    views.setPaused(paused);
+    enemies.setPaused(paused);
+    floorWeapons.setPaused(paused);
     projectiles.setPaused(paused);
     hazards.setPaused(paused);
     abilityFx.update(now);

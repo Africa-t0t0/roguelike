@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Scene } from "@babylonjs/core/scene";
 import { ABILITIES, SLAM_IMPACT_S } from "@roguelike/shared";
-import { AbilityFx, abilityFxDurationMs } from "../src/render/abilityFx";
+import { AbilityFx, abilityFxDurationMs, abilityTimeline } from "../src/render/abilityFx";
+import { NATURE_COLORS } from "../src/render/natureLooks";
 
 // En node no hay canvas: DynamicTexture pide un OffscreenCanvas. Uno falso con un contexto 2D que no dibuja.
 const noop = () => undefined;
@@ -135,5 +136,33 @@ describe("efectos de habilidades", () => {
     fx.play("block", AT, 1, 0);
     fx.play("cleave", AT, 1, 0);
     expect(scene.meshes.length).toBe(before);
+  });
+
+  it("el Torbellino usa el color de la naturaleza del arma y, sin ella, el de siempre", () => {
+    const ring = (n?: "fire" | "ice" | "lightning" | "none") => {
+      const step = abilityTimeline("whirlwind", 1, n).find((s) => s.kind === "ring");
+      return step?.kind === "ring" ? step.color : undefined;
+    };
+    expect(ring("fire")).toBe(NATURE_COLORS.fire);
+    expect(ring("ice")).toBe(NATURE_COLORS.ice);
+    expect(ring("lightning")).toBe(NATURE_COLORS.lightning);
+    expect(ring()!.asArray()).toEqual([1, 0.45, 0.1]);
+    expect(ring("none")!.asArray()).toEqual([1, 0.45, 0.1]);
+  });
+
+  it("todas las habilidades con naturaleza terminan sin mallas, partículas ni texturas huérfanas", () => {
+    const { scene, fx, meshes0 } = setup();
+    for (const nature of ["fire", "ice", "lightning"] as const) {
+      for (const id of ["whirlwind", "kick", "warcry", "slam", "thrust"] as const) {
+        fx.play(id, AT, 3, 0, nature);
+        for (let t = 0; t <= abilityFxDurationMs(id, 3); t += 50) fx.update(t);
+        fx.update(abilityFxDurationMs(id, 3) + 100);
+      }
+    }
+    expect(scene.meshes.length).toBe(meshes0);
+    expect(scene.particleSystems.length).toBe(0);
+    const textures = scene.textures.length;
+    fx.dispose();
+    expect(scene.textures.length).toBeLessThan(textures);
   });
 });

@@ -15,6 +15,10 @@ describe("aspecto de los hechiceros", () => {
     expect(CASTER_COLORS.pyromancer.r).toBe(1);
   });
 
+  it("el invocador usa el color del rayo", () => {
+    expect(CASTER_COLORS.stormcaller.asArray()).toEqual([1, 0.92, 0.4]);
+  });
+
   it("casterTint usa el color del tipo con fuerza 0,6", () => {
     expect(casterTint("stormcaller")).toEqual({ color: CASTER_COLORS.stormcaller, strength: 0.6 });
   });
