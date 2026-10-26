@@ -60,10 +60,10 @@ export function enemyScale(floorTime: number, partyLevel: number): { hpMult: num
   };
 }
 
-/** Probabilidad de que un enemigo nuevo sea élite: 0 antes de 180 s, 5% al llegar y +1% por minuto, tope 15%. */
+/** Probabilidad de que un enemigo nuevo sea élite: 0 antes de 180 s, 5% al llegar y +1% por minuto entero, tope 15%. */
 export function eliteChance(floorTime: number): number {
   if (floorTime < 180) return 0;
-  return Math.min(0.15, 0.05 + 0.01 * ((floorTime - 180) / 60));
+  return Math.min(0.15, 0.05 + 0.01 * Math.floor(floorTime / 60 - 3));
 }
 
 /** Segundos que dura un arma tirada en el suelo (tiempo simulado) y cuántos finales parpadea. */

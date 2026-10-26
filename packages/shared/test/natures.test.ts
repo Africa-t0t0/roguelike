@@ -27,6 +27,7 @@ describe("eliteChance", () => {
   it("curva por tiempo de piso", () => {
     expect(eliteChance(179)).toBe(0);
     expect(eliteChance(180)).toBeCloseTo(0.05);
+    expect(eliteChance(270)).toBeCloseTo(0.06);
     expect(eliteChance(300)).toBeCloseTo(0.07);
     expect(eliteChance(3000)).toBeCloseTo(0.15);
   });
