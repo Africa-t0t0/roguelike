@@ -72,11 +72,15 @@
       .hud-heart { color: #f0b27a; font-size: 1.05rem; }
       .hud-xp .hud-text { font: 600 0.9rem/1.15rem var(--serif); }
       /* Equipo y reliquia: 5 iconos con el borde del tier; el tooltip sale al pasar el mouse o con Tab mantenido. */
-      .hud-equip { position: relative; display: flex; gap: 0.35rem; margin-top: 0.1rem; }
-      .hud-gear { position: relative; width: 1.9rem; height: 1.9rem; display: grid; place-items: center; pointer-events: auto;
-        background: rgba(9, 8, 7, 0.85); border: 2px solid var(--gold-dim); }
-      .hud-gear-glyph { font: 700 0.95rem var(--caps); color: #f3e6c8; text-shadow: 0 1px 2px #000; }
-      .hud-gear-empty { opacity: 0.35; border-color: var(--gold-dim); }
+      .hud-equip { position: relative; display: flex; flex-wrap: wrap; gap: 0.1rem; margin-top: 0.1rem; margin-left: -0.3rem; }
+      .hud-gear { --gz: 3.4rem; position: relative; width: var(--gz); height: var(--gz); flex: none; pointer-events: auto; }
+      .hud-gear::before { content: ""; position: absolute; inset: calc(var(--gz) * 0.147); transform: rotate(45deg);
+        background: var(--gear-bg, #15110c); border: 2px solid var(--gold); box-shadow: 0 0 0 2px rgba(9, 8, 7, 0.85),
+        0 0 0 3px var(--gear-edge, var(--gold-dim)), 0 0.2rem 0.6rem rgba(0, 0, 0, 0.7); }
+      .hud-gear-glyph { position: absolute; inset: calc(var(--gz) * 0.1); display: block; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8)); }
+      .hud-gear-svg { display: block; width: 100%; height: 100%; }
+      .hud-gear-empty .hud-gear-glyph { opacity: 0.2; filter: grayscale(1) brightness(0.8); }
+      .hud-gear-empty::before { border-color: var(--gold-dim); box-shadow: 0 0 0 2px rgba(9, 8, 7, 0.85), 0 0 0 3px #3a3224; }
       .hud-tip { display: none; position: absolute; left: 0; bottom: calc(100% + 0.45rem); z-index: 3; min-width: 13rem; max-width: 18rem;
         padding: 0.4rem 0.6rem; background: rgba(9, 8, 7, 0.95); border: 1px solid var(--gold-dim); font: 500 0.85rem var(--serif);
         color: #d9cba8; text-align: left; pointer-events: none; }
@@ -132,6 +136,7 @@
       .ab-passive .ab-pips { bottom: -0.95rem; }
       @media (max-width: 62rem) {
         .ability-bar { bottom: 11rem; }
+        .hud-gear { --gz: 3rem; }
       }
 
       /* Brújula arriba al centro, con el reloj del piso debajo. */
@@ -219,6 +224,7 @@
       .choice-status { font: italic 500 1.15rem var(--serif); color: rgba(233, 220, 192, 0.75); text-shadow: 0 1px 3px #000; }
       .choice-group { font: 600 1.05rem var(--serif); letter-spacing: 0.03em; color: #e9dcc0; text-shadow: 0 1px 3px #000; }
       @media (max-width: 44rem) {
+        .hud-gear { --gz: 2.4rem; }
         .choice-cards { grid-template-columns: 1fr; }
         .choice-card { min-height: 0; }
       }

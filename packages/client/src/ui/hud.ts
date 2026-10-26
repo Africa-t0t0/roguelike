@@ -17,6 +17,7 @@ import {
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
+import { gearIconSvg, gearTileBackground } from "./gearIcons";
 import type { EquippedGear, FloorItem } from "../net/connection";
 
 /** "96/120" (la vida se muestra entera, redondeando hacia arriba, nunca negativa). */
@@ -168,9 +169,6 @@ function clamp01(v: number): number {
   return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
 }
 
-/** Letra de cada ranura en su icono (el borde lleva el color del tier). */
-const GEAR_GLYPH: Record<GearSlot, string> = { helmet: "Y", chest: "P", gloves: "G", boots: "B" };
-const RELIC_GLYPH = "✦";
 const TIP_KEY = "Tab";
 
 /**
@@ -301,17 +299,19 @@ export class Hud {
       const icon = this.gearIcons[slot];
       icon.replaceChildren();
       icon.classList.toggle("hud-gear-empty", !item);
-      icon.style.borderColor = item ? tierColor(item.tier) : "";
-      icon.append(this.glyph(GEAR_GLYPH[slot]));
+      icon.style.setProperty("--gear-bg", gearTileBackground(item ? item.tier : null));
+      icon.style.setProperty("--gear-edge", item ? tierColor(item.tier) : "");
+      icon.append(this.gearSvg(gearIconSvg(slot)));
       if (!item) continue;
       const t = gearTooltip(item, abilities);
       const lines = [...t.stats.map((text) => ({ text, cls: "hud-tip-stat" })), ...(t.effect ? [{ text: t.effect.text, cls: t.effect.inactive ? "hud-tip-fx hud-tip-inactive" : "hud-tip-fx" }] : [])];
       if (t.needs) lines.push({ text: `Inactivo: te falta ${t.needs}`, cls: "hud-tip-inactive" });
       icon.append(this.tip(t.name, t.color, lines));
     }
-    this.relicIcon.replaceChildren(this.glyph(RELIC_GLYPH));
+    this.relicIcon.replaceChildren(this.gearSvg(gearIconSvg("relic")));
     this.relicIcon.classList.toggle("hud-gear-empty", !relic);
-    this.relicIcon.style.borderColor = relic ? relicTooltip(relic).color : "";
+    this.relicIcon.style.setProperty("--gear-bg", gearTileBackground(relic ? "relic" : null));
+    this.relicIcon.style.setProperty("--gear-edge", relic ? relicTooltip(relic).color : "");
     if (relic) {
       const r = relicTooltip(relic);
       this.relicIcon.append(this.tip(r.name, r.color, [{ text: r.text, cls: r.tradeoff ? "hud-tip-tradeoff" : "hud-tip-fx" }]));
@@ -330,10 +330,11 @@ export class Hud {
     this.tipBox.hidden = this.tipBox.childElementCount === 0;
   }
 
-  private glyph(text: string): HTMLSpanElement {
+  /** Icono vectorial (constante del código, sin datos de red) dentro de un contenedor propio. */
+  private gearSvg(markup: string): HTMLSpanElement {
     const g = document.createElement("span");
     g.className = "hud-gear-glyph";
-    g.textContent = text;
+    g.innerHTML = markup;
     return g;
   }
 
