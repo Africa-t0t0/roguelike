@@ -152,4 +152,50 @@ describe("LocalAbility: aturdimiento", () => {
     expect(a.locked()).toBe(true);
     expect(a.heroAbility(TICK_MS)).not.toBeNull();
   });
+
+  describe("cargas (Torbellino con whirlCharges)", () => {
+    const WHIRL_TICKS = Math.ceil(ABILITIES.whirlwind.animS / SIM_DT) + 2;
+
+    function charged(): LocalAbility {
+      const a = new LocalAbility();
+      a.setLegendaries(["whirlCharges"]);
+      a.setServer([{ id: "whirlwind", cooldown: 0, charges: 2 }], 0);
+      return a;
+    }
+
+    it("dos lanzamientos seguidos arrancan y el tercero no; tras el enfriamiento, uno más", () => {
+      const a = charged();
+      expect(a.chargesOf("whirlwind", 0)).toEqual({ charges: 2, max: 2 });
+      let t = 0;
+      expect(a.tick(1, free, t)).toBe("whirlwind");
+      expect(a.chargesOf("whirlwind", t)).toEqual({ charges: 1, max: 2 });
+      // espera la animación (suelta la tecla)
+      for (let i = 0; i < WHIRL_TICKS; i++) a.tick(0, free, (t += TICK_MS));
+      expect(a.tick(1, free, (t += TICK_MS))).toBe("whirlwind");
+      expect(a.chargesOf("whirlwind", t).charges).toBe(0);
+      for (let i = 0; i < WHIRL_TICKS; i++) a.tick(0, free, (t += TICK_MS));
+      expect(a.tick(1, free, (t += TICK_MS))).toBeUndefined(); // sin cargas
+      // pasa el enfriamiento de la primera: vuelve 1 carga
+      const cycleTicks = Math.ceil(ABILITIES.whirlwind.cooldownS / SIM_DT);
+      for (let i = 0; i < cycleTicks; i++) a.tick(0, free, (t += TICK_MS));
+      expect(a.chargesOf("whirlwind", t).charges).toBe(1);
+      expect(a.tick(1, free, (t += TICK_MS))).toBe("whirlwind");
+    });
+
+    it("sin whirlCharges el máximo es 1 y se comporta como siempre", () => {
+      const a = new LocalAbility();
+      a.setServer([{ id: "whirlwind", cooldown: 0, charges: 1 }], 0);
+      expect(a.chargesOf("whirlwind", 0)).toEqual({ charges: 1, max: 1 });
+    });
+
+    it("toma las cargas del servidor y las recarga con el reloj", () => {
+      const a = new LocalAbility();
+      a.setLegendaries(["whirlCharges"]);
+      a.setServer([{ id: "whirlwind", cooldown: 3, charges: 0 }], 1000);
+      expect(a.chargesOf("whirlwind", 1000)).toEqual({ charges: 0, max: 2 });
+      expect(a.cooldownLeft("whirlwind", 1000)).toBeCloseTo(3);
+      expect(a.chargesOf("whirlwind", 4100)).toEqual({ charges: 1, max: 2 });
+      expect(a.cooldownLeft("whirlwind", 4100)).toBeCloseTo(ABILITIES.whirlwind.cooldownS - 0.1);
+    });
+  });
 });

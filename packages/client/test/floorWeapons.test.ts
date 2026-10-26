@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PICKUP_RANGE } from "@roguelike/shared";
-import { parseFloorTimeStart, parseFloorWeapons, parseSandbox } from "../src/net/connection";
+import { parseFloorItem, parseFloorTimeStart, parseFloorWeapons, parseSandbox } from "../src/net/connection";
 import { floorWeaponBlink, nearestClosedChest, nearestPickup, pickupPrompt } from "../src/render/floorWeaponViews";
 
 describe("armas del suelo", () => {
@@ -17,8 +17,8 @@ describe("armas del suelo", () => {
         ],
       }),
     ).toEqual([
-      { weaponId: "great-sword", tier: 3, x: 1, z: 2, ttl: 12.5, nature: "fire" },
-      { weaponId: "guard-sword", tier: 1, x: 3, z: -4, ttl: 40, nature: "none" }, // sin tier: 1; sin ttl: 40
+      { kind: "weapon", weaponId: "great-sword", tier: 3, x: 1, z: 2, ttl: 12.5, nature: "fire" },
+      { kind: "weapon", weaponId: "guard-sword", tier: 1, x: 3, z: -4, ttl: 40, nature: "none" }, // sin kind: arma; sin tier: 1; sin ttl: 40
     ]);
     expect(parseFloorWeapons(null)).toEqual([]);
     expect(parseFloorWeapons({ items: "x" })).toEqual([]);
@@ -78,5 +78,17 @@ describe("parseSandbox", () => {
     expect(parseSandbox("?lag=100&sandbox=1")).toBe(true);
     expect(parseSandbox("?sandbox=0")).toBe(false);
     expect(parseSandbox("")).toBe(false);
+  });
+
+  it("parseFloorItem: reliquia y equipo válidos; kind desconocido, reliquia o pieza inválidas dan null", () => {
+    expect(parseFloorItem({ kind: "relic", id: "oakHeart", x: 1, z: 2, ttl: 9 })).toEqual({ kind: "relic", id: "oakHeart", x: 1, z: 2, ttl: 9 });
+    const item = { slot: "boots", tier: 2, stats: [{ stat: "moveSpeed", value: 0.075 }], legendary: null };
+    expect(parseFloorItem({ kind: "gear", item, x: 0, z: 0, ttl: 5 })).toEqual({ kind: "gear", item, x: 0, z: 0, ttl: 5 });
+    expect(parseFloorItem({ kind: "banana", x: 0, z: 0 })).toBeNull();
+    expect(parseFloorItem({ kind: "relic", id: "nope", x: 0, z: 0 })).toBeNull();
+    expect(parseFloorItem({ kind: "gear", item: { ...item, slot: "knees" }, x: 0, z: 0 })).toBeNull();
+    expect(parseFloorItem({ kind: "gear", item: { ...item, stats: [{ stat: "luck", value: 1 }] }, x: 0, z: 0 })).toBeNull();
+    expect(parseFloorItem({ kind: "gear", item: { ...item, legendary: "wat" }, x: 0, z: 0 })).toBeNull();
+    expect(parseFloorItem({ kind: "relic", id: "oakHeart", x: Number.NaN, z: 0 })).toBeNull();
   });
 });

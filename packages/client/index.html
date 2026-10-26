@@ -71,6 +71,22 @@
         text-shadow: 0 1px 2px #000; display: flex; align-items: center; gap: 0.4rem; font-variant-numeric: tabular-nums; }
       .hud-heart { color: #f0b27a; font-size: 1.05rem; }
       .hud-xp .hud-text { font: 600 0.9rem/1.15rem var(--serif); }
+      /* Equipo y reliquia: 5 iconos con el borde del tier; el tooltip sale al pasar el mouse o con Tab mantenido. */
+      .hud-equip { position: relative; display: flex; gap: 0.35rem; margin-top: 0.1rem; }
+      .hud-gear { position: relative; width: 1.9rem; height: 1.9rem; display: grid; place-items: center; pointer-events: auto;
+        background: rgba(9, 8, 7, 0.85); border: 2px solid var(--gold-dim); }
+      .hud-gear-glyph { font: 700 0.95rem var(--caps); color: #f3e6c8; text-shadow: 0 1px 2px #000; }
+      .hud-gear-empty { opacity: 0.35; border-color: var(--gold-dim); }
+      .hud-tip { display: none; position: absolute; left: 0; bottom: calc(100% + 0.45rem); z-index: 3; min-width: 13rem; max-width: 18rem;
+        padding: 0.4rem 0.6rem; background: rgba(9, 8, 7, 0.95); border: 1px solid var(--gold-dim); font: 500 0.85rem var(--serif);
+        color: #d9cba8; text-align: left; pointer-events: none; }
+      .hud-gear:hover .hud-tip { display: block; }
+      .hud-tipbox { position: absolute; left: 0; bottom: calc(100% + 0.45rem); z-index: 3; display: flex; flex-direction: column; gap: 0.3rem; }
+      .hud-tipbox .hud-tip { display: block; position: static; }
+      .hud-tip-name { font: 700 0.95rem var(--serif); margin-bottom: 0.15rem; }
+      .hud-tip-fx { margin-top: 0.2rem; color: var(--gold-hi); }
+      .hud-tip-tradeoff { margin-top: 0.2rem; color: #e8896f; }
+      .hud-tip-inactive { color: #8a8478; font-style: italic; }
       .hud-banner { position: absolute; left: 0; right: 0; top: 20%; text-align: center; font: 700 2.8rem var(--caps);
         letter-spacing: 0.08em; color: var(--gold-hi); text-shadow: 0 2px 10px #000, 0 0 24px rgba(201, 163, 92, 0.45); }
       .hud-death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -98,6 +114,8 @@
         text-shadow: 0 1px 3px #000, 0 0 6px #000; font-variant-numeric: tabular-nums; }
       .ab-key { position: absolute; left: -0.5rem; top: -0.5rem; width: 1.25rem; height: 1.25rem; display: grid; place-items: center;
         font: 700 0.75rem/1 var(--caps); color: #f6ead2; background: #120f0b; border: 1px solid var(--gold-hi); }
+      .ab-charges { position: absolute; right: 0.15rem; top: 0.1rem; font: 700 0.95rem/1 var(--caps); color: var(--gold-hi);
+        text-shadow: 0 1px 3px #000, 0 0 5px #000; font-variant-numeric: tabular-nums; }
       .ab-pips { position: absolute; left: 0; right: 0; bottom: 0.15rem; text-align: center; font-size: 0.55rem; line-height: 1;
         letter-spacing: 0.14em; color: var(--gold); text-shadow: 0 1px 2px #000; }
       .ab-cooling .ab-glyph { color: rgba(236, 208, 143, 0.45); }
@@ -156,6 +174,10 @@
       .pickup-key { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border: 1px solid var(--gold-hi);
         background: #120f0b; font: 700 0.95rem var(--caps); color: #f6ead2; }
       .pickup-name { font-weight: 700; }
+      .pickup-hint:has(.pickup-line) { flex-wrap: wrap; row-gap: 0.1rem; }
+      .pickup-lines { flex-basis: 100%; padding-left: 2.1rem; font: 500 0.85rem var(--serif); color: #d9cba8; }
+      .pickup-lines:empty { display: none; }
+      .pickup-inactive { color: #8a8478; font-style: italic; }
       /* Panel de cartas al subir de nivel: en la pausa, un velo que apaga la escena congelada. */
       .choice-veil { position: absolute; inset: 0; z-index: 4; backdrop-filter: saturate(0.35) brightness(0.8);
         background: radial-gradient(ellipse at center, rgba(9, 8, 7, 0.35), rgba(5, 4, 3, 0.85)); }

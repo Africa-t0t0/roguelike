@@ -42,17 +42,25 @@ export type AbilitySlotModel =
       sweep: number;
       /** el Bloqueo mantenido */
       active: boolean;
+      /** cargas disponibles y máximas (máximo 1: sin cargas); se pueden lanzar con `charges` ≥ 1 */
+      charges: number;
+      maxCharges: number;
+      /** sin cargas para lanzarla: la casilla se atenúa */
+      cooling: boolean;
     };
 
 /**
  * Las 4 casillas de la barra (lógica pura): las habilidades en orden de casilla y el resto vacías.
- * `cooldownOf`: enfriamiento que queda (s); `blocking`: el Bloqueo está activo; `cooldownMult`: el de Celeridad (denominador del barrido).
+ * `cooldownOf`: enfriamiento que queda (s; con cargas, el del ciclo de recarga en curso, 0 con el máximo); `blocking`: el Bloqueo está
+ * activo; `cooldownMult`: el de Celeridad (denominador del barrido); `chargesOf`: cargas de cada habilidad (sin él, 1 de 1).
+ * El barrido solo se dibuja mientras recarga (cargas < máximo); el número de segundos, solo sin cargas.
  */
 export function abilityBarModel(
   slots: readonly { id: AbilityId; rank: number }[],
   cooldownOf: (id: AbilityId) => number,
   blocking: boolean,
   cooldownMult = 1,
+  chargesOf: (id: AbilityId) => { charges: number; max: number } = () => ({ charges: 1, max: 1 }),
 ): AbilitySlotModel[] {
   const out: AbilitySlotModel[] = [];
   for (let i = 0; i < MAX_ACTIVE_ABILITIES; i++) {
@@ -64,6 +72,10 @@ export function abilityBarModel(
     }
     const def = ABILITIES[s.id];
     const cd = def.cooldownS > 0 ? Math.max(0, cooldownOf(s.id)) : 0;
+    const have = chargesOf(s.id);
+    const maxCharges = Math.max(1, have.max);
+    // Sin cargas (máximo 1) manda el enfriamiento: lista cuando no queda nada por esperar.
+    const charges = maxCharges > 1 ? Math.max(0, Math.min(maxCharges, have.charges)) : cd > 0 ? 0 : 1;
     out.push({
       key,
       empty: false,
@@ -71,9 +83,12 @@ export function abilityBarModel(
       glyph: ABILITY_GLYPHS[s.id],
       name: def.name,
       pips: rankPips(s.rank),
-      cooldownText: formatCooldown(cd),
+      cooldownText: charges < 1 ? formatCooldown(cd) : "",
       sweep: def.cooldownS > 0 ? Math.min(1, cd / (def.cooldownS * cooldownMult)) : 0,
       active: def.kind === "held" && blocking,
+      charges,
+      maxCharges,
+      cooling: charges < 1,
     });
   }
   return out;
@@ -95,6 +110,7 @@ interface SlotEls {
   glyph: HTMLElement;
   sweep: HTMLElement;
   cd: HTMLElement;
+  charges: HTMLElement;
   pips: HTMLElement;
 }
 
@@ -121,9 +137,10 @@ export class AbilityBar {
       const glyph = el("ab-glyph", root);
       const sweep = el("ab-sweep", root);
       const cd = el("ab-cd", root);
+      const charges = el("ab-charges", root);
       el("ab-key", root).textContent = String(i + 1);
       const pips = el("ab-pips", root);
-      this.slots.push({ root, glyph, sweep, cd, pips });
+      this.slots.push({ root, glyph, sweep, cd, charges, pips });
     }
     parent.append(this.root);
   }
@@ -137,6 +154,7 @@ export class AbilityBar {
       if (m.empty) {
         setText(s.glyph, "");
         setText(s.cd, "");
+        setText(s.charges, "");
         setText(s.pips, "");
         s.root.title = "";
         s.root.classList.remove("ab-cooling", "ab-active");
@@ -145,9 +163,10 @@ export class AbilityBar {
       }
       setText(s.glyph, m.glyph);
       setText(s.cd, m.cooldownText);
+      setText(s.charges, m.maxCharges > 1 ? String(m.charges) : "");
       setText(s.pips, m.pips);
       s.root.title = m.name;
-      s.root.classList.toggle("ab-cooling", m.sweep > 0);
+      s.root.classList.toggle("ab-cooling", m.cooling);
       s.root.classList.toggle("ab-active", m.active);
       s.sweep.style.setProperty("--cd", m.sweep.toFixed(3));
     });

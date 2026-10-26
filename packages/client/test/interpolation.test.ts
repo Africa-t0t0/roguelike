@@ -42,4 +42,25 @@ describe("CorrectionSmoother", () => {
     s.correct({ x: 2.5, z: 0 }, { x: 0, z: 0 });
     expect(s.x).toBe(2.5);
   });
+
+  it("un impulso propio (glide) de ~3 m se absorbe en ~0,15 s, linealmente, sin saltar", () => {
+    const s = new CorrectionSmoother();
+    s.correct({ x: 0, z: 0 }, { x: 3, z: 0 }, true);
+    expect(s.x).toBe(-3);
+    s.decay(0.075);
+    expect(s.x).toBeCloseTo(-1.5);
+    s.decay(0.075);
+    expect(s.x).toBeCloseTo(0);
+  });
+
+  it("glide no aplica a saltos enormes (reaparición) ni a correcciones chicas", () => {
+    const s = new CorrectionSmoother();
+    s.correct({ x: 0, z: 0 }, { x: 9, z: 0 }, true);
+    expect(s.x).toBe(0);
+    s.correct({ x: 0, z: 0 }, { x: 0.5, z: 0 }, true);
+    expect(s.x).toBe(-0.5);
+    s.decay(1 / 60); // sigue el decaimiento normal, no el lineal
+    expect(s.x).toBeGreaterThan(-0.5);
+    expect(s.x).toBeLessThan(-0.2);
+  });
 });

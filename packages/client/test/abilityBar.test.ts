@@ -106,3 +106,18 @@ describe("LocalAbility.cooldownLeft", () => {
     expect(a.cooldownLeft("slam", 9000)).toBe(0);
   });
 });
+
+describe("abilityBarModel con cargas", () => {
+  const slots = [{ id: "whirlwind" as const, rank: 1 }];
+  const model = (cd: number, charges: number) => abilityBarModel(slots, () => cd, false, 1, () => ({ charges, max: 2 }))[0]!;
+
+  it("con 1 de 2 cargas se puede lanzar: barrido de la recarga, sin número de segundos ni atenuar", () => {
+    expect(model(4, 1)).toMatchObject({ charges: 1, maxCharges: 2, cooldownText: "", cooling: false });
+    expect((model(4, 1) as { sweep: number }).sweep).toBeCloseTo(4 / ABILITIES.whirlwind.cooldownS);
+  });
+
+  it("sin cargas muestra los segundos y atenúa; con el máximo no hay barrido", () => {
+    expect(model(4, 0)).toMatchObject({ charges: 0, cooldownText: "4", cooling: true });
+    expect(model(0, 2)).toMatchObject({ charges: 2, sweep: 0, cooling: false });
+  });
+});

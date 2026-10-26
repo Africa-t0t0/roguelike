@@ -1,5 +1,7 @@
 import {
   ABILITIES,
+  GEAR_SLOTS,
+  RELICS,
   STAT_CARDS,
   WEAPONS,
   weaponDisplayName,
@@ -7,7 +9,9 @@ import {
   type CardOffer,
   type DevCommand,
   type EnemyKind,
+  type GearSlot,
   type Nature,
+  type RelicId,
   type StatCardId,
   type WeaponId,
   type CasterTier,
@@ -29,6 +33,18 @@ export function devCardOptions(): { label: string; card: CardOffer }[] {
     })),
   );
   return [...abilities, ...stats];
+}
+
+const GEAR_SLOT_LABELS: Record<GearSlot, string> = { helmet: "Yelmo", chest: "Pechera", gloves: "Guanteletes", boots: "Botas" };
+
+/** Comando de la sección Equipo: ranura (índice de `GEAR_SLOTS`), tier (índice 0-3 = tier 1-4) y acción. */
+export function devGearCommand(slotIndex: number, tierIndex: number, action: "equip" | "drop"): DevCommand {
+  return { cmd: "gear", slot: GEAR_SLOTS[slotIndex]!, tier: (tierIndex + 1) as WeaponTier, action };
+}
+
+/** Reliquias del selector del panel, con su nombre. */
+export function devRelicOptions(): { id: RelicId; label: string }[] {
+  return (Object.keys(RELICS) as RelicId[]).map((id) => ({ id, label: RELICS[id].name }));
 }
 
 const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo" };
@@ -142,6 +158,15 @@ export class DevPanel {
       const w = weapons[weaponSel.selectedIndex]!;
       return { cmd: "weapon", weaponId: w.id, tier: w.tier, nature: NATURES[weaponNatureSel.selectedIndex]! };
     });
+
+    const gear = this.section("Equipo");
+    const slotSel = this.select(gear, GEAR_SLOTS.map((s) => GEAR_SLOT_LABELS[s]));
+    const gearTierSel = this.select(gear, ["Tier 1", "Tier 2", "Tier 3", "Tier 4"]);
+    this.button(gear, "Equipar", () => devGearCommand(slotSel.selectedIndex, gearTierSel.selectedIndex, "equip"));
+    this.button(gear, "Soltar delante", () => devGearCommand(slotSel.selectedIndex, gearTierSel.selectedIndex, "drop"));
+    const relics = devRelicOptions();
+    const relicSel = this.select(gear, relics.map((r) => r.label));
+    this.button(gear, "Equipar reliquia", () => ({ cmd: "relic", id: relics[relicSel.selectedIndex]!.id }));
 
     const chest = this.section("Cofres");
     this.button(chest, "Cofre delante", () => ({ cmd: "chest" }));

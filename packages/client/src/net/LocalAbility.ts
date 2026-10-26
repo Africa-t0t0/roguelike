@@ -1,4 +1,4 @@
-import { ABILITIES, SIM_DT, type AbilityId } from "@roguelike/shared";
+import { ABILITIES, SIM_DT, type AbilityId, type LegendaryId } from "@roguelike/shared";
 
 /** Lo mismo que el `countDown` del servidor: por debajo de esto cuenta como 0. */
 const EPS = 1e-9;
@@ -10,10 +10,41 @@ const countDown = (v: number, dt: number): number => (v - dt > EPS ? v - dt : 0)
  */
 const ECHO_WINDOW_MS = 1000;
 
-/** Una casilla como la informa el servidor: habilidad y enfriamiento que le queda (s). */
+/** Cargas máximas del Torbellino con `whirlCharges` (el servidor no sincroniza el máximo). */
+const WHIRL_CHARGES = 2;
+
+/** Una casilla como la informa el servidor: habilidad, enfriamiento que le queda (s) y cargas (1 si la habilidad no tiene). */
 export interface AbilitySlotView {
   id: AbilityId;
+  /** segundos que le quedan al ciclo de recarga en curso; 0 solo con las cargas al máximo */
   cooldown: number;
+  charges?: number;
+}
+
+/** Estado de una habilidad con cargas: cargas disponibles y segundos que le quedan al ciclo de recarga (0 con el máximo). */
+interface ChargeState {
+  charges: number;
+  cd: number;
+}
+
+/**
+ * Avanza `dt` s un estado con cargas, como `AbilitySystem.step` del servidor: al terminar un ciclo vuelve 1 carga y,
+ * si faltan más, empieza otro de `cycle` s.
+ */
+function advanceCharges(st: ChargeState, dt: number, max: number, cycle: number): ChargeState {
+  let { charges, cd } = st;
+  let left = dt;
+  while (cd > 0 && left > 0) {
+    if (left < cd - EPS) {
+      cd -= left;
+      left = 0;
+      break;
+    }
+    left -= cd;
+    charges = Math.min(max, charges + 1);
+    cd = charges < max ? cycle : 0;
+  }
+  return { charges, cd };
 }
 
 export function isAbilityId(id: unknown): id is AbilityId {
@@ -30,6 +61,11 @@ export class LocalAbility {
   private slots: AbilitySlotView[] = [];
   /** enfriamiento del servidor y cuándo llegó (reloj de `tick`), por habilidad */
   private server = new Map<AbilityId, { cd: number; atMs: number }>();
+  /** cargas y recarga de las habilidades con cargas lanzadas localmente, por input (solo con máximo > 1) */
+  private localCharges = new Map<AbilityId, ChargeState>();
+  /** cargas y ciclo de recarga del servidor y cuándo llegaron, por habilidad */
+  private serverCharges = new Map<AbilityId, ChargeState & { atMs: number }>();
+  private legendaries: readonly LegendaryId[] = [];
   /** enfriamientos que corren por las habilidades lanzadas localmente, por input */
   private localCd = new Map<AbilityId, number>();
   private lastCastMs = new Map<AbilityId, number>();
@@ -46,8 +82,23 @@ export class LocalAbility {
     this.cooldownMult = Number.isFinite(m) && m > 0 ? m : 1;
   }
 
+  /** Efectos legendarios del equipo puesto (el máximo de cargas sale de `whirlCharges`). */
+  setLegendaries(l: readonly LegendaryId[]): void {
+    this.legendaries = l;
+  }
+
+  /** Cargas máximas de la habilidad: 2 el Torbellino con `whirlCharges`, 1 las demás (lo mismo que el servidor). */
+  maxCharges(id: AbilityId): number {
+    return id === "whirlwind" && this.legendaries.includes("whirlCharges") ? WHIRL_CHARGES : 1;
+  }
+
+  private cycle(id: AbilityId): number {
+    return ABILITIES[id].cooldownS * this.cooldownMult;
+  }
+
   /** Panel de pruebas: el servidor puso los enfriamientos a cero; aquí se olvidan los predichos. */
   resetCooldowns(): void {
+    this.localCharges.clear();
     this.localCd.clear();
     this.lastCastMs.clear();
   }
@@ -55,7 +106,10 @@ export class LocalAbility {
   /** Casillas y enfriamientos del último estado propio del servidor (en orden de casilla, sin la pasiva). */
   setServer(slots: AbilitySlotView[], nowMs: number): void {
     this.slots = slots.map((s) => ({ ...s }));
-    for (const s of slots) this.server.set(s.id, { cd: s.cooldown, atMs: nowMs });
+    for (const s of slots) {
+      this.server.set(s.id, { cd: s.cooldown, atMs: nowMs });
+      this.serverCharges.set(s.id, { charges: s.charges ?? 1, cd: s.cooldown, atMs: nowMs });
+    }
   }
 
   /**
@@ -66,6 +120,7 @@ export class LocalAbility {
    */
   tick(mask: number, ctx: { dead: boolean; swingTimer: number; stunned?: boolean }, nowMs: number): AbilityId | undefined {
     for (const [id, cd] of this.localCd) this.localCd.set(id, countDown(cd, SIM_DT));
+    for (const [id, st] of this.localCharges) this.localCharges.set(id, advanceCharges(st, SIM_DT, this.maxCharges(id), this.cycle(id)));
     const pressed = mask & ~this.heldMask;
     this.heldMask = mask;
     if (ctx.dead) {
@@ -85,7 +140,7 @@ export class LocalAbility {
       const { id } = this.slots[i]!;
       const def = ABILITIES[id];
       if (def.kind !== "active" || ctx.stunned || !this.ready(id, nowMs) || ctx.swingTimer > 0 || this.anim) continue;
-      this.localCd.set(id, def.cooldownS * this.cooldownMult);
+      this.spend(id, nowMs);
       this.lastCastMs.set(id, nowMs);
       this.anim = { id, left: def.animS };
       this.shown = { id, startMs: nowMs };
@@ -119,7 +174,7 @@ export class LocalAbility {
    */
   fromServer(id: AbilityId, nowMs: number): void {
     const last = this.lastCastMs.get(id);
-    if (last !== undefined && nowMs < last + ABILITIES[id].cooldownS * this.cooldownMult * 1000 + ECHO_WINDOW_MS) return;
+    if (last !== undefined && nowMs < last + this.echoMs(id)) return;
     this.shown = { id, startMs: nowMs };
   }
 
@@ -140,6 +195,7 @@ export class LocalAbility {
    * tecla) y el del servidor, que sigue corriendo desde que llegó. Con el reloj de juego, quieto en la pausa.
    */
   cooldownLeft(id: AbilityId, nowMs: number): number {
+    if (this.maxCharges(id) > 1) return this.chargeState(id, nowMs).cd;
     const s = this.server.get(id);
     const server = s ? s.cd - (nowMs - s.atMs) / 1000 : 0;
     const left = Math.max(this.localCd.get(id) ?? 0, server);
@@ -151,10 +207,46 @@ export class LocalAbility {
    * la retendría de más); si no, el que informa el servidor, que sigue corriendo desde que llegó.
    */
   private ready(id: AbilityId, nowMs: number): boolean {
+    if (this.maxCharges(id) > 1) return this.chargeState(id, nowMs).charges >= 1;
     if ((this.localCd.get(id) ?? 0) > 0) return false;
     const last = this.lastCastMs.get(id);
-    if (last !== undefined && nowMs < last + ABILITIES[id].cooldownS * this.cooldownMult * 1000 + ECHO_WINDOW_MS) return true;
+    if (last !== undefined && nowMs < last + this.echoMs(id)) return true;
     const s = this.server.get(id);
     return !s || s.cd - (nowMs - s.atMs) / 1000 <= EPS;
+  }
+
+  /** Cargas que tiene `id` y su máximo, para la barra (sin cargas: 1 de 1 lista, 0 de 1 en enfriamiento). */
+  chargesOf(id: AbilityId, nowMs: number): { charges: number; max: number } {
+    const max = this.maxCharges(id);
+    if (max === 1) return { charges: this.cooldownLeft(id, nowMs) > 0 ? 0 : 1, max };
+    return { charges: this.chargeState(id, nowMs).charges, max };
+  }
+
+  /** Cuánto después de lanzarla lo que diga el servidor se toma como eco atrasado: toda la recarga (todas las cargas) más la ventana. */
+  private echoMs(id: AbilityId): number {
+    return this.cycle(id) * this.maxCharges(id) * 1000 + ECHO_WINDOW_MS;
+  }
+
+  /** Gasta lo que cuesta lanzarla: con cargas, una (empezando el ciclo si estaba lleno); sin ellas, el enfriamiento entero. */
+  private spend(id: AbilityId, nowMs: number): void {
+    const max = this.maxCharges(id);
+    if (max === 1) {
+      this.localCd.set(id, this.cycle(id));
+      return;
+    }
+    const st = this.chargeState(id, nowMs);
+    this.localCharges.set(id, st.cd > 0 ? { charges: st.charges - 1, cd: st.cd } : { charges: max - 1, cd: this.cycle(id) });
+  }
+
+  /** Estado de cargas de una habilidad con máximo > 1: el predicho tras lanzarla (hasta que el eco del servidor ya no atrase), si no, el del servidor corrido hasta ahora. */
+  private chargeState(id: AbilityId, nowMs: number): ChargeState {
+    const max = this.maxCharges(id);
+    const last = this.lastCastMs.get(id);
+    const local = this.localCharges.get(id);
+    if (local && last !== undefined && nowMs < last + this.echoMs(id)) return local;
+    const s = this.serverCharges.get(id);
+    if (!s) return { charges: max, cd: 0 };
+    const base = { charges: Math.min(max, s.charges), cd: s.cd };
+    return advanceCharges(base, Math.max(0, (nowMs - s.atMs) / 1000), max, this.cycle(id));
   }
 }

@@ -5,9 +5,9 @@ import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
-import type { FloorWeapon } from "../net/connection";
-import { formatWeapon, tierColor } from "../ui/hud";
+import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, type AbilityId, type GearItem, type GearSlot, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import type { FloorItem, FloorWeapon } from "../net/connection";
+import { formatWeapon, pickupInfo, tierColor, type PickupInfo } from "../ui/hud";
 import type { Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
 import { attachNatureFx, NATURE_COLORS, type NatureFx } from "./natureLooks";
@@ -45,9 +45,9 @@ export function pickupPrompt(weaponId: WeaponId, tier: WeaponTier, nature: Natur
   return `Recoger ${formatWeapon(weaponId, tier, nature)}`;
 }
 
-/** El arma del suelo más cercana a ≤ PICKUP_RANGE de (x, z), como la elige el servidor; o undefined. */
-export function nearestPickup(items: readonly FloorWeapon[], x: number, z: number): FloorWeapon | undefined {
-  let best: FloorWeapon | undefined;
+/** El ítem del suelo más cercano a ≤ PICKUP_RANGE de (x, z), como lo elige el servidor; o undefined. */
+export function nearestPickup<T extends { x: number; z: number }>(items: readonly T[], x: number, z: number): T | undefined {
+  let best: T | undefined;
   let bestD2 = Infinity;
   for (const f of items) {
     const d2 = (f.x - x) ** 2 + (f.z - z) ** 2;
@@ -68,21 +68,24 @@ export function nearestClosedChest<T extends { x: number; z: number; open: boole
 }
 
 /**
- * Armas del suelo del propio jugador (las manda solo a él el servidor): de pie (punta clavada en el suelo, algo inclinadas), girando
+ * Ítems del suelo del propio jugador (las manda solo a él el servidor). Las armas: de pie (punta clavada en el suelo, algo inclinadas), girando
  * despacio y oscilando sobre un disco que brilla. Desde tier 2, el disco y el arma brillan con el color del tier. Cerca de una se
  * muestra "E: tomar <nombre>" (DOM, con textContent). Cada arma vence: su `ttl` baja con el reloj de juego
- * (se congela en la pausa) y con ≤ 5 s parpadea.
+ * (se congela en la pausa) y con ≤ 5 s parpadea. El equipo y las reliquias comparten lista y aviso (con comparación o texto);
+ * su dibujo es de otra parte: aquí solo llevan un pivote vacío.
  */
 export class FloorWeaponViews {
-  private items: FloorWeapon[] = [];
+  private items: FloorItem[] = [];
   private nodes: FloorNode[] = [];
   private ttls: number[] = []; // ttl de cada arma al llegar la lista
   private paused = false;
+  private shownKey = ""; // aviso mostrado ahora (para no reescribir el DOM)
   private setAtMs = 0; // instante de juego (ms) en que llegó la lista
   private readonly glows = new Map<string, StandardMaterial>(); // material del velo y del aro por tier
   private readonly hint = document.createElement("div");
   private readonly hintName = document.createElement("span");
   private readonly hintVerb = document.createElement("span");
+  private readonly hintLines = document.createElement("div");
   private readonly world = new Vector3();
 
   constructor(
@@ -98,12 +101,13 @@ export class FloorWeaponViews {
     this.hintVerb.className = "pickup-verb";
     this.hintVerb.textContent = "Recoger";
     this.hintName.className = "pickup-name";
-    this.hint.append(key, this.hintVerb, this.hintName);
+    this.hintLines.className = "pickup-lines";
+    this.hint.append(key, this.hintVerb, this.hintName, this.hintLines);
     parent.append(this.hint);
   }
 
   /** Reemplaza todas las armas del suelo (el servidor siempre manda la lista completa). */
-  set(items: readonly FloorWeapon[], nowMs: number): void {
+  set(items: readonly FloorItem[], nowMs: number): void {
     this.clear();
     this.setAtMs = nowMs;
     this.items = items.map((f) => ({ ...f }));
@@ -120,7 +124,7 @@ export class FloorWeaponViews {
    */
   render(
     dt: number,
-    me: { x: number; z: number; canPickUp: boolean } | undefined,
+    me: { x: number; z: number; canPickUp: boolean; gear?: Partial<Record<GearSlot, GearItem>>; abilities?: readonly AbilityId[] } | undefined,
     nowMs: number,
     chests: Iterable<{ x: number; z: number; open: boolean }> = [],
   ): void {
@@ -138,23 +142,39 @@ export class FloorWeaponViews {
       if (!cat) return;
       this.hintVerb.textContent = OPEN_CHEST_PROMPT;
       this.hintName.textContent = "";
+      this.hintLines.replaceChildren();
+      this.shownKey = "";
       this.hint.setAttribute("aria-label", OPEN_CHEST_PROMPT);
       this.hint.style.transform = `translate(${cat.x}px, ${cat.y}px)`;
       return;
     }
-    this.hintVerb.textContent = "Recoger";
     const near = me?.canPickUp ? nearestPickup(this.items, me.x, me.z) : undefined;
     const at = near && this.project(near.x, near.z);
     this.hint.hidden = !at;
     if (!near || !at) return;
-    const name = formatWeapon(near.weaponId, near.tier, near.nature);
-    if (this.hintName.textContent !== name) {
-      this.hintName.textContent = name;
-      this.hintName.style.color = tierColor(near.tier);
-      this.hint.setAttribute("aria-label", pickupPrompt(near.weaponId, near.tier, near.nature));
-    }
+    const info = pickupInfo(near, me?.gear ?? {}, me?.abilities ?? []);
+    this.showInfo(info);
     // Anclado sobre el arma: la línea guía (CSS) baja desde la esquina inferior izquierda del aviso.
     this.hint.style.transform = `translate(${at.x}px, ${at.y}px)`;
+  }
+
+  /** Texto del aviso (solo se reescribe el DOM cuando cambia). */
+  private showInfo(info: PickupInfo): void {
+    const key = JSON.stringify(info);
+    if (key === this.shownKey) return;
+    this.shownKey = key;
+    this.hintVerb.textContent = info.verb;
+    this.hintName.textContent = info.name;
+    this.hintName.style.color = info.color;
+    this.hint.setAttribute("aria-label", `${info.verb} ${info.name}`);
+    this.hintLines.replaceChildren(
+      ...info.lines.map((l) => {
+        const line = document.createElement("div");
+        line.className = l.inactive ? "pickup-line pickup-inactive" : "pickup-line";
+        line.textContent = l.text;
+        return line;
+      }),
+    );
   }
 
   /** Congela (o reanuda) las partículas de las armas con naturaleza: avanzan con los cuadros, no con el reloj de juego. */
@@ -209,9 +229,21 @@ export class FloorWeaponViews {
     return m;
   }
 
-  private build(f: FloorWeapon, i: number): FloorNode {
+  private build(item: FloorItem, i: number): FloorNode {
     const pivot = new TransformNode(`floor-weapon-${i}`, this.scene);
-    pivot.position.set(f.x, 0, f.z);
+    pivot.position.set(item.x, 0, item.z);
+    // Equipo y reliquias: pivote vacío (su dibujo es de otra parte).
+    if (item.kind !== "weapon") {
+      const weapon = new TransformNode(`floor-item-bob-${i}`, this.scene);
+      weapon.parent = pivot;
+      const spin = new TransformNode(`floor-item-spin-${i}`, this.scene);
+      spin.parent = weapon;
+      return { pivot, weapon, spin };
+    }
+    return this.buildWeapon(item, pivot, i);
+  }
+
+  private buildWeapon(f: FloorWeapon, pivot: TransformNode, i: number): FloorNode {
     // Jerarquía: pivote → arma (oscila) → eje (gira) → inclinación (~10°) → tilt (punta abajo, escala).
     const weapon = new TransformNode(`floor-weapon-bob-${i}`, this.scene);
     weapon.parent = pivot;

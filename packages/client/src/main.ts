@@ -1,6 +1,7 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import type { Scene } from "@babylonjs/core/scene";
 import {
+  ABILITIES,
   BLOCK_MOVE_MULT,
   generateDungeon,
   INTERP_DELAY_MS,
@@ -9,6 +10,9 @@ import {
   sanitizeInput,
   startSeals,
   STARTING_WEAPON,
+  type AbilityId,
+  type GearItem,
+  type GearSlot,
   type KinematicState,
 } from "@roguelike/shared";
 import { InputState, withoutActions } from "./input/InputState";
@@ -185,6 +189,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   let mine: PlayerSnapshot | undefined; // último estado del servidor para el propio jugador
   let predictor: Predictor | undefined;
   let prev: KinematicState | undefined; // estado antes del último paso, para dibujar entre pasos
+  // Margen tras la animación del Tajo frontal para que el impulso del servidor llegue (ida y vuelta) y se reconcilie.
+  const DASH_WINDOW_MS = 600;
+  let myGear: Partial<Record<GearSlot, GearItem>> = {}; // lo puesto y las habilidades propias, para el aviso de E
+  let myAbilityIds: AbilityId[] = [];
+  let lastThrustMs = -Infinity; // reloj de juego en que arrancó el último Tajo frontal propio
   let seq = 0;
   let lastFrame = performance.now();
   let frameNow = clock.now(lastFrame); // reloj de juego del cuadro en curso
@@ -217,7 +226,10 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         continue;
       }
       mine = p;
+      myGear = Object.fromEntries(Object.entries(p.gear).map(([slot, g]) => [slot, g.item]));
+      myAbilityIds = p.abilities.map((a) => a.id);
       hud.setPlayer(p);
+      ability.setLegendaries(Object.values(p.gear).flatMap((g) => (g.item.legendary ? [g.item.legendary] : [])));
       ability.setServer(p.abilities, clock.now(performance.now()));
       if (!predictor || !prev) {
         predictor = new Predictor(p, dungeon);
@@ -226,7 +238,10 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       } else {
         const before = predictor.current;
         const after = predictor.reconcile(p, p.lastSeq);
-        smoother.correct(before, after);
+        // Tajo frontal con `thrustDash`: el servidor mueve ~3 m y el cliente no lo predice; si fue una habilidad propia
+        // reciente, esa corrección se desliza (~0,15 s) en vez de teletransportar.
+        const dashing = clock.now(performance.now()) - lastThrustMs < ABILITIES.thrust.animS * 1000 + DASH_WINDOW_MS;
+        smoother.correct(before, after, dashing);
         prev = { ...prev, x: prev.x + after.x - before.x, z: prev.z + after.z - before.z };
       }
     }
@@ -327,7 +342,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
         combo.advance(weaponId);
         ability.setCooldownMult(mine?.cooldownMult ?? 1);
-        ability.tick(sampled.abilities, { dead, stunned, swingTimer: combo.state().swingTimer }, now);
+        if (ability.tick(sampled.abilities, { dead, stunned, swingTimer: combo.state().swingTimer }, now) === "thrust") lastThrustMs = now;
         combo.attack(sampled.attack, { dead: dead || stunned, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
       }
@@ -357,7 +372,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
       const canPickUp = !(mine?.dead ?? true) && swing.swingTimer <= 0 && !heroAbility;
-      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp }, now, chestList);
+      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp, gear: myGear, abilities: myAbilityIds }, now, chestList);
     }
 
     const renderAt = now - INTERP_DELAY_MS;
@@ -379,7 +394,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     playerShots.render(renderAt);
     // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
     abilityBar.render(
-      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), ability.isBlocking, mine?.cooldownMult ?? 1),
+      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), ability.isBlocking, mine?.cooldownMult ?? 1, (id) => ability.chargesOf(id, now)),
       mine?.passiveRank ?? 0,
     );
     orbs.render(dt, now);

@@ -5,6 +5,10 @@ import {
   STAT_CARDS,
   PROTOCOL_VERSION,
   ELEMENTS,
+  GEAR_BASE,
+  GEAR_SLOTS,
+  LEGENDARY_TEXT,
+  RELICS,
   STARTING_WEAPON,
   TAKEOVER_CLOSE_CODE,
   isWeaponId,
@@ -14,10 +18,14 @@ import {
   type CombatEvent,
   type DevCommand,
   type EnemyKind,
+  type GearItem,
+  type GearSlot,
+  type GearStatKey,
   type JoinOptions,
   type KinematicState,
   type Nature,
   type PlayerInput,
+  type RelicId,
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
@@ -44,8 +52,12 @@ export type PlayerSnapshot = KinematicState & {
   stunLeft: number;
   /** multiplicador de movimiento de los estados (0.7 ralentizado, 0 aturdido); sin el del Bloqueo */
   statusSpeedMult: number;
-  /** casillas en orden (la tecla i+1 usa la i-ésima), sin la pasiva; `cooldown` en s */
+  /** casillas en orden (la tecla i+1 usa la i-ésima), sin la pasiva; `cooldown` en s; `charges` ≥ 1 (1 si no tiene cargas) */
   abilities: (AbilitySlotView & { rank: number })[];
+  /** equipo puesto por ranura (el `item` es el JSON validado de `data`) */
+  gear: Partial<Record<GearSlot, EquippedGear>>;
+  /** reliquia puesta; null si no tiene */
+  relic: RelicId | null;
   /** rango de la Onda de corte; 0 si no la tiene */
   passiveRank: number;
   blocking: boolean;
@@ -59,6 +71,13 @@ export type PlayerSnapshot = KinematicState & {
   /** tiene una elección de carta abierta */
   choosing: boolean;
 };
+export interface EquippedGear {
+  tier: WeaponTier;
+  legendary: boolean;
+  /** resistencia más alta de la pieza ("fire", "ice", "lightning" o "none"), color del brillo */
+  glow: string;
+  item: GearItem;
+}
 export type PlayerSnapshots = Map<string, PlayerSnapshot>;
 
 export interface EnemySnapshot {
@@ -121,6 +140,25 @@ export function parseHazard(raw: unknown): HazardSnapshot | null {
     total: h.total as number,
     phase: h.phase,
   };
+}
+
+/** Grieta en el suelo que dejó un Golpe sísmico propio o de un aliado: círculo que ralentiza, con `left` de `total` s. */
+export interface ZoneSnapshot {
+  x: number;
+  z: number;
+  radius: number;
+  left: number;
+  total: number;
+}
+
+const ZONE_NUMBERS = ["x", "z", "radius", "left", "total"] as const;
+
+/** Valida una grieta cruda del estado: null si algún número no es finito. */
+export function parseZone(raw: unknown): ZoneSnapshot | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const z = raw as Record<string, unknown>;
+  for (const k of ZONE_NUMBERS) if (typeof z[k] !== "number" || !Number.isFinite(z[k])) return null;
+  return { x: z.x as number, z: z.z as number, radius: z.radius as number, left: z.left as number, total: z.total as number };
 }
 
 /** Cofre del piso: abierto o por abrir. */
@@ -195,6 +233,8 @@ export interface WorldSnapshot {
   orbs: Map<string, OrbSnapshot>;
   playerShots: Map<string, PlayerShotSnapshot>;
   hazards: Map<string, HazardSnapshot>;
+  /** grietas del Golpe sísmico (`slamCracks`) */
+  zones: Map<string, ZoneSnapshot>;
   /** el grupo está eligiendo cartas: la simulación no avanza */
   paused: boolean;
   /** la partida ya empezó (alguien cruzó los sellos de la sala inicial) */
@@ -205,31 +245,87 @@ export interface WorldSnapshot {
 
 export type { CombatEvent };
 
-/** Arma tirada en el suelo, propia de este jugador. */
+/** Lo que hay tirado en el suelo, propio de este jugador. `ttl`: segundos que le quedaban al llegar el mensaje (el cliente los baja con el reloj del juego). */
+export type FloorItem = FloorWeapon | FloorGear | FloorRelic;
 export interface FloorWeapon {
+  kind: "weapon";
   weaponId: WeaponId;
   tier: WeaponTier;
   x: number;
   z: number;
-  /** segundos que le quedaban al llegar el mensaje (el cliente los baja con el reloj del juego) */
   ttl: number;
   nature: Nature;
 }
+export interface FloorGear {
+  kind: "gear";
+  item: GearItem;
+  x: number;
+  z: number;
+  ttl: number;
+}
+export interface FloorRelic {
+  kind: "relic";
+  id: RelicId;
+  x: number;
+  z: number;
+  ttl: number;
+}
+
+const isRelicId = (id: unknown): id is RelicId => typeof id === "string" && Object.hasOwn(RELICS, id);
+
+/** Valida un `GearItem` crudo (del mensaje o del JSON del estado): null si algo no encaja (las vistas indexan tablas con él). */
+export function parseGearItem(raw: unknown): GearItem | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const g = raw as { slot?: unknown; tier?: unknown; stats?: unknown; legendary?: unknown };
+  if (!GEAR_SLOTS.includes(g.slot as GearSlot) || !isWeaponTier(g.tier) || !Array.isArray(g.stats)) return null;
+  const stats: GearItem["stats"] = [];
+  for (const e of g.stats as { stat?: unknown; value?: unknown }[]) {
+    if (!e || typeof e.stat !== "string" || !(Object.hasOwn(GEAR_BASE, e.stat) || e.stat === "allRes")) return null;
+    if (typeof e.value !== "number" || !Number.isFinite(e.value)) return null;
+    stats.push({ stat: e.stat as GearStatKey, value: e.value });
+  }
+  let legendary: GearItem["legendary"] = null;
+  if (g.legendary !== null && g.legendary !== undefined) {
+    if (typeof g.legendary !== "string" || !Object.hasOwn(LEGENDARY_TEXT, g.legendary)) return null;
+    legendary = g.legendary as GearItem["legendary"];
+  }
+  return { slot: g.slot as GearSlot, tier: g.tier, stats, legendary };
+}
 
 /**
- * Valida el mensaje `floorWeapons` (`{ items: { weaponId, tier, x, z, ttl, nature }[] }`); descarta lo que no encaje.
- * Sin `tier` vale 1; con un tier inválido el ítem se descarta. Sin `ttl` (o inválido) vale FLOOR_WEAPON_TTL_S; una naturaleza desconocida vale "none".
+ * Valida un ítem del mensaje `floorWeapons`; null si no encaja. Sin `kind` vale "weapon" (compatibilidad); un `kind`
+ * desconocido, una reliquia o pieza inválidas o una posición no finita lo descartan. Armas: sin `tier` vale 1 (inválido
+ * lo descarta); naturaleza desconocida vale "none". Sin `ttl` (o inválido) vale FLOOR_WEAPON_TTL_S.
  */
-export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
+export function parseFloorItem(raw: unknown): FloorItem | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const it = raw as { kind?: unknown; weaponId?: unknown; tier?: unknown; item?: unknown; id?: unknown; x?: unknown; z?: unknown; ttl?: unknown; nature?: unknown };
+  if (!Number.isFinite(it.x) || !Number.isFinite(it.z)) return null;
+  const x = it.x as number;
+  const z = it.z as number;
+  const ttl = typeof it.ttl === "number" && Number.isFinite(it.ttl) ? it.ttl : FLOOR_WEAPON_TTL_S;
+  const kind = it.kind ?? "weapon";
+  if (kind === "weapon") {
+    const tier = it.tier === undefined ? 1 : it.tier;
+    if (!isWeaponId(it.weaponId) || !isWeaponTier(tier)) return null;
+    return { kind, weaponId: it.weaponId, tier, x, z, ttl, nature: toNature(it.nature) };
+  }
+  if (kind === "gear") {
+    const item = parseGearItem(it.item);
+    return item ? { kind, item, x, z, ttl } : null;
+  }
+  if (kind === "relic") return isRelicId(it.id) ? { kind, id: it.id, x, z, ttl } : null;
+  return null;
+}
+
+/** Valida el mensaje `floorWeapons` (`{ items: [...] }`, ver `parseFloorItem`); descarta lo que no encaje. */
+export function parseFloorWeapons(msg: unknown): FloorItem[] {
   const items = (msg as { items?: unknown } | null)?.items;
   if (!Array.isArray(items)) return [];
-  const out: FloorWeapon[] = [];
-  for (const it of items as { weaponId?: unknown; tier?: unknown; x?: unknown; z?: unknown; ttl?: unknown; nature?: unknown }[]) {
-    if (!it || !isWeaponId(it.weaponId) || !Number.isFinite(it.x) || !Number.isFinite(it.z)) continue;
-    const tier = it.tier === undefined ? 1 : it.tier;
-    if (!isWeaponTier(tier)) continue;
-    const ttl = typeof it.ttl === "number" && Number.isFinite(it.ttl) ? it.ttl : FLOOR_WEAPON_TTL_S;
-    out.push({ weaponId: it.weaponId, tier, x: it.x as number, z: it.z as number, ttl, nature: toNature(it.nature) });
+  const out: FloorItem[] = [];
+  for (const raw of items) {
+    const it = parseFloorItem(raw);
+    if (it) out.push(it);
   }
   return out;
 }
@@ -292,8 +388,8 @@ export interface GameConnection {
   onPlayers(cb: (players: PlayerSnapshots, receivedAtMs: number) => void): void;
   onWorld(cb: (world: WorldSnapshot, receivedAtMs: number) => void): void;
   onCombat(cb: (event: CombatEvent) => void): void;
-  /** Armas del suelo propias; se entrega enseguida la última lista recibida, si ya llegó. */
-  onFloorWeapons(cb: (items: FloorWeapon[]) => void): void;
+  /** Ítems del suelo propios (armas, equipo, reliquias); se entrega enseguida la última lista recibida, si ya llegó. */
+  onFloorWeapons(cb: (items: FloorItem[]) => void): void;
   /**
    * Elección de carta abierta para este jugador (pausa del grupo, sin pausa, o reenviada tras un takeover). Si
    * llegó antes de registrar el manejador se entrega enseguida (si no venció), con `deadlineS` descontando lo
@@ -335,20 +431,36 @@ function browserToken(): string {
   }
 }
 
+/** JSON.parse que no lanza: undefined si el texto no es JSON. */
+function safeJson(text: unknown): unknown {
+  try {
+    return typeof text === "string" ? JSON.parse(text) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
-  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier" | "weaponNature" | "abilities"> & {
+  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier" | "weaponNature" | "abilities" | "gear" | "relic"> & {
     weaponId: string;
     weaponTier: number;
     weaponNature: string;
-    abilities: { forEach(cb: (s: { id: string; rank: number; cooldown: number }) => void): void };
+    abilities: { forEach(cb: (s: { id: string; rank: number; cooldown: number; charges?: number }) => void): void };
+    gear?: { forEach(cb: (g: { tier: number; legendary: boolean; glow: string; data: string }, slot: string) => void): void };
+    relic?: string;
   };
   room.state.players.forEach((p: RawPlayer, key: string) => {
     const abilities: PlayerSnapshot["abilities"] = [];
     // Con la misma PROTOCOL_VERSION toda id es conocida; una que no lo sea (no debería pasar) se descarta.
     p.abilities?.forEach((s) => {
-      if (isAbilityId(s.id)) abilities.push({ id: s.id as AbilityId, rank: s.rank, cooldown: s.cooldown });
+      if (isAbilityId(s.id)) abilities.push({ id: s.id as AbilityId, rank: s.rank, cooldown: s.cooldown, charges: finiteOr(s.charges, 1) });
+    });
+    const gear: PlayerSnapshot["gear"] = {};
+    p.gear?.forEach((g) => {
+      const item = parseGearItem(safeJson(g.data));
+      if (item) gear[item.slot] = { tier: item.tier, legendary: g.legendary ?? item.legendary !== null, glow: g.glow, item };
     });
     out.set(key, {
       name: p.name,
@@ -372,6 +484,8 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       stunLeft: finiteOr(p.stunLeft, 0),
       statusSpeedMult: finiteOr(p.statusSpeedMult, 1),
       abilities,
+      gear,
+      relic: isRelicId(p.relic) ? p.relic : null,
       passiveRank: p.passiveRank ?? 0,
       blocking: p.blocking ?? false,
       buffDamage: p.buffDamage ?? 0,
@@ -433,6 +547,11 @@ function snapshotWorld(room: Room): WorldSnapshot {
     const h = parseHazard(raw);
     if (h) hazards.set(id, h);
   });
+  const zones = new Map<string, ZoneSnapshot>();
+  room.state.playerZones?.forEach((raw: unknown, id: string) => {
+    const z = parseZone(raw);
+    if (z) zones.set(id, z);
+  });
   const chests = new Map<string, ChestSnapshot>();
   room.state.chests?.forEach((raw: unknown, id: string) => {
     const c = parseChest(raw);
@@ -451,6 +570,7 @@ function snapshotWorld(room: Room): WorldSnapshot {
     orbs,
     playerShots,
     hazards,
+    zones,
     paused: st.paused ?? false,
     started: st.started ?? false,
     pauseLeft: st.pauseLeft ?? 0,
@@ -499,8 +619,8 @@ export async function connect(opts: {
   let playersCb: ((players: PlayerSnapshots, receivedAtMs: number) => void) | undefined;
   let worldCb: ((world: WorldSnapshot, receivedAtMs: number) => void) | undefined;
   let combatCb: ((event: CombatEvent) => void) | undefined;
-  let floorCb: ((items: FloorWeapon[]) => void) | undefined;
-  let lastFloor: FloorWeapon[] | undefined; // llega justo tras `welcome`, antes de que haya manejador
+  let floorCb: ((items: FloorItem[]) => void) | undefined;
+  let lastFloor: FloorItem[] | undefined; // llega justo tras `welcome`, antes de que haya manejador
   let disconnectCb: ((reason: DisconnectReason) => void) | undefined;
   let choiceCb: ((choice: LevelChoice) => void) | undefined;
   // La elección sin pausa de quien vuelve llega justo tras `welcome`, mientras se cargan los modelos.
