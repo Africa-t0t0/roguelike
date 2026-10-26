@@ -37,6 +37,7 @@ import { allClipIds } from "./render/looks";
 import { OrbViews } from "./render/orbViews";
 import { PlayerShotViews } from "./render/playerShotViews";
 import { PlayerViews } from "./render/playerViews";
+import { HazardViews } from "./render/hazardViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
 import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
@@ -137,6 +138,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const views = new PlayerViews(scene, assets, anims);
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
+  const hazards = new HazardViews(scene);
   const playerShots = new PlayerShotViews(scene);
   const floorWeapons = new FloorWeaponViews(scene, assets);
   const orbs = new OrbViews(scene);
@@ -240,6 +242,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     tickClock.push(at, world.tick);
     enemies.push(world, at);
     projectiles.push(world, at);
+    hazards.push(world, at);
     playerShots.push(world, at);
   });
 
@@ -351,6 +354,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     if (predictor) minimap.render(predictor.current, camera.yaw, allies);
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
+    hazards.render(renderAt);
     playerShots.render(renderAt);
     // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
     abilityBar.render(
@@ -360,6 +364,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     orbs.render(dt, now);
     abilityFx.setPaused(paused);
     projectiles.setPaused(paused);
+    hazards.setPaused(paused);
     abilityFx.update(now);
     scene.render();
     damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame
@@ -381,6 +386,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     views.dispose();
     enemies.dispose();
     projectiles.dispose();
+    hazards.dispose();
     playerShots.dispose();
     floorWeapons.dispose();
     orbs.dispose();
