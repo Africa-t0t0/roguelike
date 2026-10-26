@@ -1,44 +1,40 @@
 import type { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreatePolyhedron } from "@babylonjs/core/Meshes/Builders/polyhedronBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
-import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
-import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
 import { RELICS, TIERS, type GearItem, type GearSlot, type Nature, type RelicId, type WeaponTier } from "@roguelike/shared";
 import type { EquippedGear } from "../net/connection";
-import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
-import { NATURE_COLORS } from "./natureLooks";
+import { createFlameEmitter, disposeFlameEmitter, type FlameEmitter } from "./bodyAura";
+import { flameTexture, PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 
-/** Brillo de una pieza de equipo (partículas pegadas al hueso). */
+/** Llamas de una pieza de equipo (mismo aspecto que el aura de los enemigos). */
 export interface GearGlow {
   color: Color3;
-  /** partículas por segundo y emisor */
+  /** llamas por segundo en un emisor de peso 1 */
   rate: number;
-  /** tamaño máximo de la partícula (m) */
+  /** tamaño medio de la llama (m), en un personaje de 1,8 m */
   size: number;
-  /** tier 3+: se suman partículas grandes y tenues, a modo de halo */
-  halo: boolean;
+  /** opacidad máxima del núcleo de la llama */
+  alpha: number;
 }
 
 /** Dorado de la legendaria y de la reliquia. */
 export const GOLD = new Color3(1, 0.8, 0.3);
 const RELIC_RED = new Color3(0.9, 0.12, 0.1);
 
-/** Tier 1 no brilla; 2 azul y suave, 3 violeta, denso y con halo, 4 dorado y más vistoso. Con elemento, el color es el del elemento. */
-export function gearGlow(tier: WeaponTier, glow: string): GearGlow | null {
+/** Solo por rareza: tier 1 no arde; 2 azul y sutil, 3 violeta y claro, 4 dorado y lo más fuerte. */
+export function gearGlow(tier: WeaponTier): GearGlow | null {
   if (tier === 1) return null;
   const t = TIERS[tier].glow!;
-  const element = glow === "fire" || glow === "ice" || glow === "lightning" ? NATURE_COLORS[glow] : undefined;
-  const color = element ?? new Color3(t[0], t[1], t[2]);
+  const color = new Color3(t[0], t[1], t[2]);
   switch (tier) {
-    case 2: return { color, rate: 6, size: 0.05, halo: false };
-    case 3: return { color, rate: 12, size: 0.07, halo: true };
-    default: return { color, rate: 18, size: 0.09, halo: true };
+    case 2: return { color, rate: 3.5, size: 0.17, alpha: 0.3 };
+    case 3: return { color, rate: 6, size: 0.22, alpha: 0.5 };
+    default: return { color, rate: 9, size: 0.27, alpha: 0.7 };
   }
 }
 
@@ -56,12 +52,21 @@ export function itemGlow(item: GearItem): Nature {
   return best;
 }
 
-/** Huesos (claves de `boneKey`) donde se pega cada ranura. */
-export const GEAR_BONES: Record<GearSlot, readonly string[]> = {
-  helmet: ["head"],
-  chest: ["spine2"],
-  gloves: ["lefthand", "righthand"],
-  boots: ["leftfoot", "rightfoot"],
+/** Huesos (claves de `boneKey`) de cada ranura, con peso de ritmo y de tamaño; como mucho 2 por ranura. */
+export const GEAR_BONES: Record<GearSlot, readonly { bone: string; rate: number; size: number }[]> = {
+  helmet: [{ bone: "head", rate: 1.2, size: 1 }],
+  chest: [
+    { bone: "spine2", rate: 1.3, size: 1.25 }, // pecho y espalda
+    { bone: "hips", rate: 0.8, size: 1.05 },
+  ],
+  gloves: [
+    { bone: "lefthand", rate: 0.8, size: 0.7 },
+    { bone: "righthand", rate: 0.8, size: 0.7 },
+  ],
+  boots: [
+    { bone: "leftfoot", rate: 0.8, size: 0.75 },
+    { bone: "rightfoot", rate: 0.8, size: 0.75 },
+  ],
 };
 
 const SPARKLE_PERIOD_MS = 1500;
@@ -71,16 +76,19 @@ const ORBIT_RADIUS_M = 0.5;
 const ORBIT_HEIGHT = 0.6; // fracción de la altura del personaje (el pecho)
 const GEM_SIZE_M = 0.07;
 const HALO_SIZE_M = 0.3;
+const REF_HEIGHT = 1.8;
 
 /** Texturas y materiales compartidos por todos los jugadores de una escena; se liberan con `dispose`. */
 export class GearFxShared {
   readonly spark: DynamicTexture;
+  readonly flame: DynamicTexture;
   readonly gemGold: StandardMaterial;
   readonly gemRed: StandardMaterial;
   readonly haloGold: StandardMaterial;
 
   constructor(scene: Scene) {
     this.spark = sparkTexture(scene, "gear-spark");
+    this.flame = flameTexture(scene, "gear-flame");
     const emissive = (name: string, c: Color3, alpha = 1) => {
       const m = new StandardMaterial(name, scene);
       m.diffuseColor = Color3.Black();
@@ -102,6 +110,7 @@ export class GearFxShared {
   dispose(): void {
     for (const m of [this.gemGold, this.gemRed, this.haloGold]) m.dispose();
     this.spark.dispose();
+    this.flame.dispose();
   }
 }
 
@@ -112,17 +121,10 @@ export interface BoneSource {
   readonly height: number;
 }
 
-interface Emitter {
-  node: Mesh;
-  ps: ParticleSystem;
-  /** colores del brillo, para volver a ellos tras un destello */
-  base?: { c1: Color4; c2: Color4 };
-}
-
 interface Piece {
   key: string;
   legendary: boolean;
-  emitters: Emitter[];
+  emitters: FlameEmitter[];
   /** instante (reloj de juego) del próximo destello; negativo = sin programar (−1 − índice de la ranura) */
   nextSparkMs: number;
   /** hay un destello pendiente de nacer: tras él se restauran los colores */
@@ -137,8 +139,8 @@ interface RelicFx {
 }
 
 /**
- * Brillo del equipo y reliquia de UN personaje: como mucho un emisor por hueso (casco 1, pechera 1, guantes 2,
- * botas 2 = 6), con la textura compartida; las legendarias lanzan un destello dorado cada ~1,5 s del reloj de juego.
+ * Brillo del equipo y reliquia de UN personaje: llamas como las del aura de los enemigos solo sobre la parte del cuerpo de cada
+ * ranura y en el color de su rareza (casco 1 emisor, pechera 2, guantes 2, botas 2 = 7), con la textura compartida; las legendarias lanzan una ráfaga dorada cada ~1,5 s del reloj de juego.
  * La reliquia es una gema con halo que orbita el pecho (dorada, o roja con halo dorado si es de trade-off).
  */
 export class GearLooks {
@@ -161,7 +163,8 @@ export class GearLooks {
       if (cur?.key === key) continue;
       if (cur) this.disposePiece(cur);
       this.pieces.delete(slot);
-      if (g && (g.tier > 1 || g.legendary)) this.pieces.set(slot, this.buildPiece(slot, key, g));
+      const piece = g ? this.buildPiece(slot, key, g) : undefined;
+      if (piece) this.pieces.set(slot, piece);
     }
     if (this.relicFx?.id !== relic) {
       this.disposeRelic();
@@ -173,9 +176,9 @@ export class GearLooks {
   render(nowMs: number): void {
     for (const p of this.pieces.values()) {
       if (p.sparkling) {
-        // Las partículas del destello ya nacieron con el color dorado: se vuelve al brillo normal.
+        // Las llamas del destello ya nacieron: se vuelve a la emisión continua.
         if (p.emitters.every((e) => e.ps.manualEmitCount <= 0)) {
-          for (const e of p.emitters) this.restore(e);
+          for (const e of p.emitters) e.ps.manualEmitCount = -1; // Babylon lo deja en 0 tras el destello: -1 devuelve la emisión continua
           p.sparkling = false;
         }
       } else if (p.nextSparkMs < 0) {
@@ -183,11 +186,7 @@ export class GearLooks {
       } else if (p.legendary && nowMs >= p.nextSparkMs) {
         p.nextSparkMs = nowMs + SPARKLE_PERIOD_MS;
         p.sparkling = true;
-        for (const e of p.emitters) {
-          e.ps.color1 = new Color4(GOLD.r, GOLD.g, GOLD.b, 1);
-          e.ps.color2 = new Color4(1, 1, 0.8, 0.9);
-          e.ps.manualEmitCount = SPARKLE_COUNT;
-        }
+        for (const e of p.emitters) e.ps.manualEmitCount = SPARKLE_COUNT; // ráfaga de llamas doradas
       }
     }
     const r = this.relicFx;
@@ -209,52 +208,20 @@ export class GearLooks {
     this.disposeRelic();
   }
 
-  private buildPiece(slot: GearSlot, key: string, g: Pick<EquippedGear, "tier" | "legendary" | "glow">): Piece {
-    const glow = gearGlow(g.tier, g.glow);
-    const emitters: Emitter[] = [];
-    for (const bone of GEAR_BONES[slot]) {
-      const mount = this.character.boneMount(bone);
-      if (mount) emitters.push(this.buildEmitter(slot, bone, mount, glow));
+  private buildPiece(slot: GearSlot, key: string, g: Pick<EquippedGear, "tier" | "legendary" | "glow">): Piece | undefined {
+    const glow = gearGlow(g.tier);
+    if (!glow) return undefined;
+    const k = Math.min(1.5, Math.max(0.8, this.character.height / REF_HEIGHT));
+    const emitters: FlameEmitter[] = [];
+    for (const spec of GEAR_BONES[slot]) {
+      const mount = this.character.boneMount(spec.bone);
+      if (!mount) continue;
+      const e = createFlameEmitter(this.scene, this.shared.flame, mount, `gear-${slot}-${spec.bone}`, glow.color, glow.rate * spec.rate, glow.size * spec.size * k, glow.alpha, k);
+      e.ps.updateSpeed = this.paused ? 0 : PARTICLE_SPEED;
+      emitters.push(e);
     }
     // nextSparkMs < 0: el primer destello se programa en `render`, escalonado por ranura para que no destellen todas a la vez.
     return { key, legendary: g.legendary, emitters, nextSparkMs: -1 - Object.keys(GEAR_BONES).indexOf(slot), sparkling: false };
-  }
-
-  private buildEmitter(slot: GearSlot, bone: string, mount: { node: TransformNode; perMeter: number }, glow: GearGlow | null): Emitter {
-    const node = new Mesh(`gear-emitter-${slot}-${bone}`, this.scene);
-    node.parent = mount.node;
-    node.scaling.setAll(mount.perMeter); // el hueso está escalado: tamaños y velocidades quedan en metros
-    node.isPickable = false;
-    const c = glow?.color ?? GOLD;
-    const c1 = new Color4(c.r, c.g, c.b, 0.9);
-    const c2 = new Color4(Math.min(1, c.r + 0.3), Math.min(1, c.g + 0.3), Math.min(1, c.b + 0.3), 0.7);
-    const ps = new ParticleSystem(`gear-${slot}-${bone}`, 40, this.scene);
-    ps.particleTexture = this.shared.spark;
-    ps.emitter = node;
-    ps.createSphereEmitter(0.08, 0.5);
-    ps.color1 = c1;
-    ps.color2 = c2;
-    ps.colorDead = new Color4(c.r, c.g, c.b, 0);
-    const size = glow?.size ?? 0.05;
-    ps.minSize = size * 0.5;
-    ps.maxSize = glow?.halo ? size * 2.2 : size; // el halo: algunas partículas grandes y tenues
-    ps.minLifeTime = 0.5;
-    ps.maxLifeTime = 0.9;
-    ps.emitRate = glow?.rate ?? 0; // legendaria sin brillo: solo destellos
-    ps.minEmitPower = 0.1;
-    ps.maxEmitPower = 0.35;
-    ps.gravity = new Vector3(0, 0.6, 0);
-    ps.blendMode = ParticleSystem.BLENDMODE_ADD;
-    ps.updateSpeed = this.paused ? 0 : PARTICLE_SPEED;
-    ps.start();
-    return { node, ps, base: { c1, c2 } };
-  }
-
-  private restore(e: Emitter): void {
-    if (!e.base) return;
-    e.ps.color1 = e.base.c1;
-    e.ps.color2 = e.base.c2;
-    e.ps.manualEmitCount = -1; // Babylon lo deja en 0 tras el destello: -1 devuelve la emisión continua
   }
 
   private buildRelic(id: RelicId): RelicFx {
@@ -277,10 +244,7 @@ export class GearLooks {
 
   // Sin materiales ni textura: son compartidos.
   private disposePiece(p: Piece): void {
-    for (const e of p.emitters) {
-      e.ps.dispose(false);
-      e.node.dispose();
-    }
+    for (const e of p.emitters) disposeFlameEmitter(e);
   }
 
   private disposeRelic(): void {

@@ -4,6 +4,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import "@babylonjs/core/Particles/particleSystemComponent";
+import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import type { CasterKind, Nature } from "@roguelike/shared";
 import { PARTICLE_SPEED } from "./fxTextures";
@@ -56,10 +57,66 @@ const LIFE_MIN = 0.7;
 const LIFE_MAX = 1.2;
 const RISE = 1.1; // m/s²: la llama sube
 
-interface Emitter {
+/** Un emisor de llamas pegado a un hueso. */
+export interface FlameEmitter {
   node: Mesh;
   ps: ParticleSystem;
+  /** llamas por segundo con la emisión activa */
   rate: number;
+}
+
+/**
+ * Un emisor de llamas aditivas sobre un hueso (compartido por el aura de los enemigos y el brillo del equipo):
+ * nacen en una esfera pequeña, suben y se estrechan al apagarse. `size` es el tamaño medio de la llama (m) y `k`
+ * escala radio de nacimiento y tamaño según la altura del personaje.
+ */
+export function createFlameEmitter(
+  scene: Scene,
+  flame: DynamicTexture,
+  mount: { node: TransformNode; perMeter: number },
+  name: string,
+  color: Color3,
+  rate: number,
+  size: number,
+  alpha: number,
+  k = 1,
+): FlameEmitter {
+  const c = color;
+  const node = new Mesh(`${name}-emitter`, scene);
+  node.parent = mount.node;
+  node.scaling.setAll(mount.perMeter); // el hueso está escalado: radios y velocidades quedan en metros
+  node.isPickable = false;
+  node.metadata = { noTint: true }; // no es cuerpo: ni contorno ni capa de color
+  const ps = new ParticleSystem(name, Math.ceil(rate * LIFE_MAX) + 4, scene);
+  ps.particleTexture = flame;
+  ps.emitter = node;
+  ps.createSphereEmitter(0.1 * k, 1);
+  ps.addColorGradient(0, new Color4(c.r + (1 - c.r) * 0.55, c.g + (1 - c.g) * 0.55, c.b + (1 - c.b) * 0.55, alpha));
+  ps.addColorGradient(0.45, new Color4(c.r, c.g, c.b, alpha * 0.7));
+  ps.addColorGradient(1, new Color4(c.r * 0.7, c.g * 0.7, c.b * 0.7, 0));
+  ps.addSizeGradient(0, 0.8);
+  ps.addSizeGradient(0.4, 1);
+  ps.addSizeGradient(1, 0.35); // la llama se estrecha al subir
+  ps.minSize = size * 0.7;
+  ps.maxSize = size * 1.3;
+  ps.minLifeTime = LIFE_MIN;
+  ps.maxLifeTime = LIFE_MAX;
+  ps.emitRate = rate;
+  ps.minEmitPower = 0.05;
+  ps.maxEmitPower = 0.25;
+  ps.gravity = new Vector3(0, RISE, 0);
+  ps.minAngularSpeed = -0.5;
+  ps.maxAngularSpeed = 0.5;
+  ps.blendMode = ParticleSystem.BLENDMODE_ADD;
+  ps.updateSpeed = PARTICLE_SPEED;
+  ps.start();
+  return { node, ps, rate };
+}
+
+/** Libera el sistema y su nodo (la textura es compartida). */
+export function disposeFlameEmitter(e: FlameEmitter): void {
+  e.ps.dispose(false);
+  e.node.dispose();
 }
 
 /**
@@ -68,50 +125,18 @@ interface Emitter {
  * (`setPaused`) y `setActive(false)` deja de emitir y las llamas vivas se apagan solas.
  */
 export class BodyAura {
-  private readonly emitters: Emitter[] = [];
+  private readonly emitters: FlameEmitter[] = [];
   private paused = false;
   private active = true;
 
   constructor(scene: Scene, flame: DynamicTexture, character: BoneSource, params: AuraParams, height = REF_HEIGHT) {
     const k = Math.min(1.5, Math.max(0.8, height / REF_HEIGHT));
-    const c = params.color;
-    const core = new Color4(c.r + (1 - c.r) * 0.55, c.g + (1 - c.g) * 0.55, c.b + (1 - c.b) * 0.55, params.alpha);
-    const mid = new Color4(c.r, c.g, c.b, params.alpha * 0.7);
-    const tail = new Color4(c.r * 0.7, c.g * 0.7, c.b * 0.7, 0);
     for (const spec of AURA_BONES) {
       const mount = character.boneMount(spec.bone);
       if (!mount) continue;
-      const node = new Mesh(`aura-emitter-${spec.bone}`, scene);
-      node.parent = mount.node;
-      node.scaling.setAll(mount.perMeter); // el hueso está escalado: radios y velocidades quedan en metros
-      node.isPickable = false;
-      node.metadata = { noTint: true }; // no es cuerpo: ni contorno ni capa de color
-      const rate = params.rate * spec.rate;
-      const size = params.size * spec.size * k;
-      const ps = new ParticleSystem(`aura-${spec.bone}`, Math.ceil(rate * LIFE_MAX) + 4, scene);
-      ps.particleTexture = flame;
-      ps.emitter = node;
-      ps.createSphereEmitter(0.1 * k, 1);
-      ps.addColorGradient(0, core);
-      ps.addColorGradient(0.45, mid);
-      ps.addColorGradient(1, tail);
-      ps.addSizeGradient(0, 0.8);
-      ps.addSizeGradient(0.4, 1);
-      ps.addSizeGradient(1, 0.35); // la llama se estrecha al subir
-      ps.minSize = size * 0.7;
-      ps.maxSize = size * 1.3;
-      ps.minLifeTime = LIFE_MIN;
-      ps.maxLifeTime = LIFE_MAX;
-      ps.emitRate = rate;
-      ps.minEmitPower = 0.05;
-      ps.maxEmitPower = 0.25;
-      ps.gravity = new Vector3(0, RISE, 0);
-      ps.minAngularSpeed = -0.5;
-      ps.maxAngularSpeed = 0.5;
-      ps.blendMode = ParticleSystem.BLENDMODE_ADD;
-      ps.updateSpeed = PARTICLE_SPEED;
-      ps.start();
-      this.emitters.push({ node, ps, rate });
+      this.emitters.push(
+        createFlameEmitter(scene, flame, mount, `aura-${spec.bone}`, params.color, params.rate * spec.rate, params.size * spec.size * k, params.alpha, k),
+      );
     }
   }
 
@@ -138,10 +163,7 @@ export class BodyAura {
 
   /** Sin textura: es compartida. */
   dispose(): void {
-    for (const e of this.emitters) {
-      e.ps.dispose(false);
-      e.node.dispose();
-    }
+    for (const e of this.emitters) disposeFlameEmitter(e);
     this.emitters.length = 0;
   }
 }

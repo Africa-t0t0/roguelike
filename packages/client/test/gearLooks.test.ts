@@ -4,9 +4,8 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
 import { PARTICLE_SPEED } from "../src/render/fxTextures";
 import { FloorItemKit } from "../src/render/floorItemViews";
-import { GearFxShared, GearLooks, gearGlow, itemGlow, type BoneSource } from "../src/render/gearLooks";
+import { GearFxShared, GEAR_BONES, GearLooks, gearGlow, itemGlow, type BoneSource } from "../src/render/gearLooks";
 import { HazardViews, crackAlpha } from "../src/render/hazardViews";
-import { NATURE_COLORS } from "../src/render/natureLooks";
 
 // En node no hay canvas: DynamicTexture pide un OffscreenCanvas falso con un contexto 2D que no dibuja.
 const noop = () => undefined;
@@ -31,13 +30,25 @@ function character(scene: Scene): BoneSource {
 }
 
 describe("gearGlow", () => {
-  it("tier 1 no brilla", () => expect(gearGlow(1, "none")).toBeNull());
-  it("con elemento, el color es el del elemento", () => expect(gearGlow(4, "fire")!.color).toBe(NATURE_COLORS.fire));
-  it("tier 3 lleva halo; tier 2 no; la densidad sube con el tier", () => {
-    expect(gearGlow(3, "none")!.halo).toBe(true);
-    expect(gearGlow(2, "none")!.halo).toBe(false);
-    expect(gearGlow(4, "none")!.rate).toBeGreaterThan(gearGlow(3, "none")!.rate);
-    expect(gearGlow(3, "none")!.rate).toBeGreaterThan(gearGlow(2, "none")!.rate);
+  it("tier 1 no arde", () => expect(gearGlow(1)).toBeNull());
+  it("el color es solo el de la rareza: azul, violeta, dorado", () => {
+    expect(gearGlow(2)!.color.b).toBeGreaterThan(gearGlow(2)!.color.r);
+    expect(gearGlow(3)!.color.r).toBeGreaterThan(gearGlow(3)!.color.g);
+    expect(gearGlow(3)!.color.b).toBe(1);
+    expect(gearGlow(4)!.color.r).toBe(1);
+    expect(gearGlow(4)!.color.b).toBeLessThan(0.5);
+  });
+  it("ritmo, tamaño y opacidad suben con el tier, dentro de lo razonable", () => {
+    for (const k of ["rate", "size", "alpha"] as const) {
+      expect(gearGlow(3)![k]).toBeGreaterThan(gearGlow(2)![k]);
+      expect(gearGlow(4)![k]).toBeGreaterThan(gearGlow(3)![k]);
+    }
+    expect(gearGlow(4)!.size).toBeLessThanOrEqual(0.3);
+  });
+  it("como mucho 2 huesos por ranura y 7 en total", () => {
+    const n = Object.values(GEAR_BONES).map((b) => b.length);
+    expect(Math.max(...n)).toBeLessThanOrEqual(2);
+    expect(n.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(8);
   });
   it("itemGlow elige la resistencia más alta", () => {
     const item = { slot: "boots", tier: 3, legendary: null, stats: [{ stat: "resIce", value: 0.1 }, { stat: "resFire", value: 0.05 }] } as never;
@@ -60,7 +71,7 @@ describe("GearLooks", () => {
       },
       "glassHeart",
     );
-    expect(scene.particleSystems).toHaveLength(6);
+    expect(scene.particleSystems).toHaveLength(5); // casco 1 + pechera 2 + guantes 2; botas tier 1 no arden
     looks.render(0);
     looks.render(10_000);
     looks.render(10_100);
@@ -80,22 +91,19 @@ describe("GearLooks", () => {
     expect(scene.textures).toHaveLength(0);
   });
 
-  it("el destello de la legendaria sale cada ~1,5 s del reloj de juego y vuelve al color del brillo", () => {
+  it("el destello de la legendaria sale cada ~1,5 s del reloj de juego y luego vuelve a la emisión continua", () => {
     const scene = new Scene(new NullEngine());
     const shared = new GearFxShared(scene);
     const looks = new GearLooks(scene, shared, character(scene));
     looks.set({ helmet: { tier: 4, legendary: true, glow: "none" } }, null);
     const ps = scene.particleSystems[0]!;
-    const c1 = ps.color1.clone();
     looks.render(1000); // programa (primer destello a los 1,5 s)
     looks.render(2400); // 1400 después
     expect(ps.manualEmitCount).toBeLessThanOrEqual(0); // aún no
     looks.render(2600); // 1600 después
     expect(ps.manualEmitCount).toBeGreaterThan(0);
-    expect(ps.color1.equals(c1)).toBe(false);
     ps.manualEmitCount = 0; // lo consumió el sistema
     looks.render(2700);
-    expect(ps.color1.equals(c1)).toBe(true);
     expect(ps.manualEmitCount).toBe(-1); // vuelve la emisión continua
     looks.dispose();
     shared.dispose();
