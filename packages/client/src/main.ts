@@ -359,6 +359,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     );
     orbs.render(dt, now);
     abilityFx.setPaused(paused);
+    projectiles.setPaused(paused);
     abilityFx.update(now);
     scene.render();
     damageNumbers.render(now); // tras render: usa las matrices de cámara de este frame

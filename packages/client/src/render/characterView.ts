@@ -181,6 +181,17 @@ export class CharacterView {
     this.current = { clip: choice.clip, group };
   }
 
+  /**
+   * Hueso de la mano derecha y cuánto vale 1 m en su espacio local (el esqueleto está escalado): para
+   * colgarle cosas de tamaño en metros con `scaling = perMeter × metros`.
+   */
+  handMount(): { node: TransformNode; perMeter: number } | undefined {
+    const node = this.nodes.get("righthand");
+    if (!node) return undefined;
+    const s = worldScale(node);
+    return { node, perMeter: s > 1e-9 ? 1 / s : 1 };
+  }
+
   dispose(): void {
     this.scene.onBeforeRenderObservable.remove(this.observer);
     for (const g of this.groups.values()) g?.dispose();

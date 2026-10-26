@@ -43,6 +43,12 @@ export interface EnemyLook {
   gripScale?: number;
 }
 
+const MAGE_LOOK: EnemyLook = {
+  asset: "mage",
+  height: 2.2,
+  clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
+};
+
 export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
   brute: {
     asset: "brute",
@@ -57,22 +63,10 @@ export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
     runSpeed: 1.3,
     gripScale: 0.94,
   },
-  mage: {
-    asset: "mage",
-    height: 2.2,
-    clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
-  },
-  // Provisional: copian al mago hasta que lleguen sus modelos propios.
-  pyromancer: {
-    asset: "mage",
-    height: 2.2,
-    clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
-  },
-  stormcaller: {
-    asset: "mage",
-    height: 2.2,
-    clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
-  },
+  mage: MAGE_LOOK,
+  // Sin modelos propios: los tres hechiceros comparten el del mago (se distinguen por tinte y aura).
+  pyromancer: MAGE_LOOK,
+  stormcaller: MAGE_LOOK,
 };
 
 /**

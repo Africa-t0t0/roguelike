@@ -3,16 +3,18 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreatePolyhedron } from "@babylonjs/core/Meshes/Builders/polyhedronBuilder";
+import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ENEMY_DEFS, enemyAttack, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { casterTelegraphS, ENEMY_DEFS, enemyAttack, isCaster, TIERS, type CasterKind, type EnemyKind, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { EnemySnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseEnemyAnim, SpeedMeter, type ClipLengths } from "./animState";
 import type { Assets } from "./assets";
+import { applyCasterTint, CASTER_COLORS, chargeScale } from "./casterLooks";
 import { CharacterView } from "./characterView";
 import { lerpAngle } from "./interpolation";
 import { ENEMY_LOOKS } from "./looks";
@@ -29,6 +31,12 @@ const STUN_STARS = 5;
 const STUN_RADIUS = 0.38; // m
 const STUN_ABOVE_HEAD = 0.08; // m: bajo la barra de vida
 const STUN_SPIN = 3.2; // rad/s, con el reloj de juego (quieto en la pausa)
+/** Hechiceros: aura bajo los pies (alfa fijo), anillo de tier y esfera de carga en la mano. */
+const AURA_ALPHA = 0.35;
+const AURA_EXTRA_RADIUS = 0.5; // m sobre el radio del enemigo
+const AURA_Y = 0.02; // m: bajo el anillo de tier
+const AURA_RING_Y = 0.03;
+const CHARGE_DIAMETER = 0.35; // m, a carga completa
 
 function lerpEnemy(a: EnemySnapshot, b: EnemySnapshot, t: number): EnemySnapshot {
   return {
@@ -61,8 +69,15 @@ interface EnemyView {
   speed: SpeedMeter;
   bar: TransformNode;
   barFill: Mesh;
-  ring: TransformNode;
-  ringFill: Mesh;
+  /** aro rojo de telegrafía; los hechiceros no lo llevan (tienen su esfera de carga) */
+  ring?: TransformNode;
+  ringFill?: Mesh;
+  /** tier del hechizo con el que se creó la vista (0 si no es hechicero) */
+  spellTier: number;
+  /** esfera de carga en la mano de un hechicero, si el modelo tiene ese hueso */
+  charge?: Mesh;
+  /** unidades locales de la mano por metro, para escalar la esfera */
+  chargePerMeter: number;
   stars: TransformNode;
   /** Instante (reloj de recepción) en que dejó de estar en el estado; se borra al dibujarlo. */
   goneAtMs?: number;
@@ -72,6 +87,8 @@ interface EnemyView {
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
   private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star", StandardMaterial>;
+  /** Materiales de los hechiceros, uno por tipo o tier (nunca por instancia). */
+  private readonly casterMats = new Map<string, StandardMaterial>();
   private readonly clipLengths: ClipLengths;
 
   constructor(
@@ -89,10 +106,16 @@ export class EnemyViews {
     };
   }
 
+  private casterMat(key: string, color: Color3, alpha = 1): StandardMaterial {
+    let m = this.casterMats.get(key);
+    if (!m) this.casterMats.set(key, (m = flatMaterial(this.scene, `caster-${key}`, color, alpha)));
+    return m;
+  }
+
   push(world: WorldSnapshot, receivedAtMs: number): void {
     for (const [id, e] of world.enemies) {
       let view = this.views.get(id);
-      if (!view || view.kind !== e.kind || view.weaponId !== e.weaponId) {
+      if (!view || view.kind !== e.kind || view.weaponId !== e.weaponId || (isCaster(e.kind) && view.spellTier !== e.spellTier)) {
         view?.character.dispose();
         view = this.create(id, e);
         this.views.set(id, view);
@@ -142,10 +165,17 @@ export class EnemyViews {
       view.barFill.scaling.x = Math.max(0.001, hpFrac);
       view.barFill.position.x = (-(1 - hpFrac) * BAR_W) / 2;
 
-      const telegraphS = ENEMY_DEFS[e.kind].telegraphS;
-      const fill = e.ai === "telegraph" ? Math.min(1, e.aiTime / telegraphS) : 0;
-      view.ring.setEnabled(e.ai === "telegraph");
-      view.ringFill.scaling.setAll(Math.max(0.001, fill));
+      if (view.ring && view.ringFill) {
+        const telegraphS = ENEMY_DEFS[e.kind].telegraphS;
+        const fill = e.ai === "telegraph" ? Math.min(1, e.aiTime / telegraphS) : 0;
+        view.ring.setEnabled(e.ai === "telegraph");
+        view.ringFill.scaling.setAll(Math.max(0.001, fill));
+      }
+      if (view.charge && isCaster(e.kind)) {
+        const charging = e.ai === "telegraph";
+        view.charge.setEnabled(charging);
+        if (charging) view.charge.scaling.setAll(view.chargePerMeter * CHARGE_DIAMETER * chargeScale(e.aiTime, casterTelegraphS(e.kind, e.spellTier)));
+      }
 
       const stunned = e.stunned > 0 && e.ai !== "dead";
       view.stars.setEnabled(stunned);
@@ -157,6 +187,29 @@ export class EnemyViews {
     for (const view of this.views.values()) view.character.dispose();
     this.views.clear();
     for (const m of Object.values(this.mats)) m.dispose();
+    for (const m of this.casterMats.values()) m.dispose();
+    this.casterMats.clear();
+  }
+
+  /** Tinte del cuerpo y aura bajo los pies (disco del color del tipo y, en tier 2 y 3, un anillo del brillo del tier). */
+  private decorateCaster(id: string, kind: CasterKind, spellTier: number, character: CharacterView): void {
+    const scene = this.scene;
+    applyCasterTint(character.root, kind);
+    const radius = ENEMY_DEFS[kind].radius + AURA_EXTRA_RADIUS;
+    const aura = CreateDisc(`casterAura-${id}`, { radius, tessellation: 32 }, scene);
+    aura.material = this.casterMat(`aura-${kind}`, CASTER_COLORS[kind], AURA_ALPHA);
+    aura.parent = character.root;
+    aura.position.y = AURA_Y;
+    aura.rotation.x = Math.PI / 2;
+    aura.isPickable = false;
+    const glow = spellTier >= 2 ? TIERS[Math.min(3, spellTier) as WeaponTier].glow : null;
+    if (glow) {
+      const edge = CreateTorus(`casterAuraRing-${id}`, { diameter: radius * 2, thickness: 0.05, tessellation: 32 }, scene);
+      edge.material = this.casterMat(`ring-t${Math.min(3, spellTier)}`, new Color3(glow[0], glow[1], glow[2]));
+      edge.parent = character.root;
+      edge.position.y = AURA_RING_Y;
+      edge.isPickable = false;
+    }
   }
 
   private create(id: string, e: EnemySnapshot): EnemyView {
@@ -179,23 +232,45 @@ export class EnemyViews {
     barFill.position.z = -0.01; // delante del fondo
     bar.setEnabled(false);
 
-    // Aro de telegrafía en el suelo: borde fijo y disco que crece hasta llenarlo. Armado, el alcance
-    // es el de su arma.
-    const def = ENEMY_DEFS[kind];
-    const { attackRange } = enemyAttack(kind, weaponId ? { weaponId, tier: e.weaponTier ?? 1 } : null);
-    const radius = Math.max(RING_MIN_RADIUS, def.radius + attackRange);
-    const ring = new TransformNode(`telegraph-${id}`, scene);
-    ring.parent = character.root;
-    ring.position.y = RING_Y;
-    const edge = CreateTorus(`telegraphEdge-${id}`, { diameter: radius * 2, thickness: 0.1, tessellation: 48 }, scene);
-    edge.material = this.mats.ringEdge;
-    edge.parent = ring;
-    const ringFill = CreateDisc(`telegraphFill-${id}`, { radius, tessellation: 48 }, scene);
-    ringFill.material = this.mats.ringFill;
-    ringFill.parent = ring;
-    ringFill.rotation.x = Math.PI / 2; // el disco se crea vertical, mirando a −Z
-    ring.setEnabled(false);
-    for (const m of [back, barFill, edge, ringFill]) m.isPickable = false;
+    let ring: TransformNode | undefined;
+    let ringFill: Mesh | undefined;
+    if (!isCaster(kind)) {
+      // Aro de telegrafía en el suelo: borde fijo y disco que crece hasta llenarlo. Armado, el alcance
+      // es el de su arma.
+      const def = ENEMY_DEFS[kind];
+      const { attackRange } = enemyAttack(kind, weaponId ? { weaponId, tier: e.weaponTier ?? 1 } : null);
+      const radius = Math.max(RING_MIN_RADIUS, def.radius + attackRange);
+      ring = new TransformNode(`telegraph-${id}`, scene);
+      ring.parent = character.root;
+      ring.position.y = RING_Y;
+      const edge = CreateTorus(`telegraphEdge-${id}`, { diameter: radius * 2, thickness: 0.1, tessellation: 48 }, scene);
+      edge.material = this.mats.ringEdge;
+      edge.parent = ring;
+      ringFill = CreateDisc(`telegraphFill-${id}`, { radius, tessellation: 48 }, scene);
+      ringFill.material = this.mats.ringFill;
+      ringFill.parent = ring;
+      ringFill.rotation.x = Math.PI / 2; // el disco se crea vertical, mirando a −Z
+      ring.setEnabled(false);
+      edge.isPickable = false;
+      ringFill.isPickable = false;
+    }
+    for (const m of [back, barFill]) m.isPickable = false;
+
+    // Hechiceros: tinte del cuerpo, aura bajo los pies y esfera de carga en la mano.
+    let charge: Mesh | undefined;
+    let chargePerMeter = 1;
+    if (isCaster(kind)) {
+      this.decorateCaster(id, kind, e.spellTier, character);
+      const hand = character.handMount();
+      if (hand) {
+        charge = CreateSphere(`casterCharge-${id}`, { diameter: 1, segments: 8 }, scene);
+        charge.material = this.casterMat(`charge-${kind}`, CASTER_COLORS[kind]);
+        charge.parent = hand.node;
+        charge.isPickable = false;
+        charge.setEnabled(false);
+        chargePerMeter = hand.perMeter;
+      }
+    }
 
     // Estrellas del aturdido: octaedros pequeños en círculo; el nodo gira.
     const stars = new TransformNode(`stunStars-${id}`, scene);
@@ -214,6 +289,9 @@ export class EnemyViews {
     return {
       kind,
       weaponId,
+      spellTier: e.spellTier,
+      charge,
+      chargePerMeter,
       buffer: new SnapshotBuffer(lerpEnemy),
       character,
       speed: new SpeedMeter(),

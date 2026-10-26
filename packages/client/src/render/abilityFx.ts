@@ -1,6 +1,6 @@
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { Material } from "@babylonjs/core/Materials/material";
-import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
+import type { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -20,6 +20,7 @@ import {
   THRUST_WIDTH,
   type AbilityId,
 } from "@roguelike/shared";
+import { generated, PARTICLE_SPEED, radial, sparkTexture } from "./fxTextures";
 
 /** Temblor de cámara del Golpe sísmico, si el jugador propio está a menos de `rangeM`. */
 export const SLAM_SHAKE = { durationS: 0.25, intensity: 0.08, rangeM: 8 } as const;
@@ -44,9 +45,6 @@ const FLOOR_Y = 0.04; // m: sobre el suelo, sin pelear con él por la profundida
 const SPARK_LIFE_MAX_S = 0.5;
 const DUST_EMIT_S = 0.12;
 const DUST_LIFE_MAX_S = 1.2;
-/** Con `updateSpeed` = 1/60 las vidas y los ritmos de emisión de Babylon quedan en segundos reales. */
-const PARTICLE_SPEED = 1 / 60;
-
 type Pose = { x: number; z: number; facing: number };
 
 /** Un paso del efecto: qué se dibuja, cuándo empieza (s desde el inicio de la habilidad) y cuánto dura. */
@@ -107,25 +105,6 @@ interface Piece {
   apply?(t: number): void;
 }
 
-/** Textura cuadrada generada en un canvas, una sola vez. */
-function generated(scene: Scene, name: string, size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void) {
-  const tex = new DynamicTexture(name, { width: size, height: size }, scene, true);
-  tex.hasAlpha = true;
-  const ctx = tex.getContext() as CanvasRenderingContext2D;
-  ctx.clearRect(0, 0, size, size);
-  draw(ctx, size);
-  tex.update();
-  return tex;
-}
-
-/** Gradiente radial con estas paradas (posición en [0, 1] → color CSS). */
-function radial(ctx: CanvasRenderingContext2D, s: number, stops: [number, string][]): void {
-  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  for (const [at, color] of stops) g.addColorStop(at, color);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, s, s);
-}
-
 /** Grietas desde el centro: líneas oscuras con borde naranja. Pseudoaleatorias con semilla (siempre iguales). */
 function drawCracks(ctx: CanvasRenderingContext2D, s: number): void {
   let seed = 7;
@@ -184,13 +163,7 @@ export class AbilityFx {
   private seq = 0;
 
   constructor(private readonly scene: Scene) {
-    this.spark = generated(scene, "fx-spark", 64, (ctx, s) =>
-      radial(ctx, s, [
-        [0, "rgba(255, 255, 255, 1)"],
-        [0.35, "rgba(255, 255, 255, 0.6)"],
-        [1, "rgba(255, 255, 255, 0)"],
-      ]),
-    );
+    this.spark = sparkTexture(scene);
     this.ringTex = generated(scene, "fx-ring", 128, (ctx, s) =>
       radial(ctx, s, [
         [0, "rgba(255, 255, 255, 0)"],
