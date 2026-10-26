@@ -91,6 +91,13 @@ describe("chooseHeroAnim", () => {
     }
   });
 
+  it("el invocador ajusta la telegrafía a su tier", () => {
+    const lengths = new Map([[ENEMY_LOOKS.stormcaller.clips.attack, 1]]);
+    const c1 = chooseEnemyAnim(enemy({ kind: "stormcaller", ai: "telegraph", spellTier: 1 }), lengths);
+    const c2 = chooseEnemyAnim(enemy({ kind: "stormcaller", ai: "telegraph", spellTier: 2 }), lengths);
+    expect(lengths.get(c1.clip)! / c1.speed).toBeCloseTo(1.1);
+    expect(lengths.get(c2.clip)! / c2.speed).toBeCloseTo(0.9);
+  });
   it("un swing en el aire muestra el ataque", () => {
     expect(chooseHeroAnim(hero({ airborne: true, comboStep: 1, swingTimer: 0.2 })).clip).toBe("ss_slash");
   });

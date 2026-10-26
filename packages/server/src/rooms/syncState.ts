@@ -137,14 +137,15 @@ export function syncWorld(
     if (!hs) {
       hs = new HazardState();
       hs.kind = h.kind;
-      hs.x = h.x;
-      hs.z = h.z;
-      hs.dirX = h.dirX;
-      hs.dirZ = h.dirZ;
-      hs.length = h.length;
-      hs.size = h.size;
       state.hazards.set(h.id, hs);
     }
+    // El rayo se re-apunta cada tick durante el aviso: la geometría se escribe siempre (Colyseus solo envía lo que cambia).
+    hs.x = h.x;
+    hs.z = h.z;
+    hs.dirX = h.dirX;
+    hs.dirZ = h.dirZ;
+    hs.length = h.length;
+    hs.size = h.size;
     hs.left = h.left;
     hs.total = h.total;
     hs.phase = h.phase;

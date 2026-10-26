@@ -155,6 +155,7 @@ export class EnemyViews {
             hurtRecently: hurt(id),
             weaponId: e.weaponId,
             stunned: e.stunned,
+            spellTier: e.spellTier,
           },
           this.clipLengths,
         ),

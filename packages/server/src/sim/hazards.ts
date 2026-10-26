@@ -37,7 +37,9 @@ export function beamLength(dungeon: Dungeon, x: number, z: number, dirX: number,
 export function inBeam(h: Hazard, px: number, pz: number, pr: number): boolean {
   const rx = px - h.x;
   const rz = pz - h.z;
-  const t = Math.min(h.length, Math.max(0, rx * h.dirX + rz * h.dirZ));
+  const proj = rx * h.dirX + rz * h.dirZ;
+  if (proj < 0) return false; // detrás del invocador: el rayo no sale hacia ahí
+  const t = Math.min(h.length, proj);
   return Math.hypot(rx - h.dirX * t, rz - h.dirZ * t) <= h.size / 2 + pr;
 }
 

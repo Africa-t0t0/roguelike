@@ -11,7 +11,7 @@ export const CASTER_COLORS: Record<CasterKind, Color3> = {
   stormcaller: new Color3(0.45, 0.8, 1),
 };
 
-const TINT_STRENGTH = 0.35;
+const TINT_STRENGTH = 0.6;
 
 /** Tinte emisivo suave del cuerpo del hechicero: color de su tipo y la fracción que va al emisivo. */
 export function casterTint(kind: CasterKind): { color: Color3; strength: number } {

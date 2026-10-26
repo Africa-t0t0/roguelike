@@ -160,6 +160,8 @@ export class ProjectileViews {
   private burst(at: Vector3, nowMs: number): void {
     const ps = emitter(`projectileBurst-${this.bursts.length}`, this.spark, this.scene);
     ps.emitter = at.clone();
+    ps.minEmitBox = Vector3.Zero();
+    ps.maxEmitBox = Vector3.Zero();
     ps.minSize = 0.1;
     ps.maxSize = 0.25;
     ps.minLifeTime = BURST_S * 0.6;

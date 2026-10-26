@@ -2,6 +2,7 @@ import type { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicT
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
@@ -9,16 +10,18 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
-import { SPELLS } from "@roguelike/shared";
+import { INTERP_DELAY_MS, SPELLS } from "@roguelike/shared";
 import type { HazardSnapshot, WorldSnapshot } from "../net/connection";
 import { CASTER_COLORS } from "./casterLooks";
 import { generated, PARTICLE_SPEED, radial, sparkTexture } from "./fxTextures";
 
 const FLOOR_Y = 0.04; // m: a ras del suelo, sin pelear con él por la profundidad
 const BEAM_Y = 1; // m: altura del rayo
-const BEAM_WARN_WIDTH = 0.08;
+const BEAM_WARN_WIDTH = 0.12; // m: grosor del cilindro del aviso (con el ojo a ~3 m, menos no se lee)
+const BEAM_STRIP_Y = 0.05; // m: franja del suelo que marca la zona que dañará
+const BEAM_STRIP_ALPHA = 0.18;
 const BEAM_FLICKER_HZ = 8;
-const TRACK_ALPHA = 0.25;
+const TRACK_ALPHA = 0.4;
 const ZONE_RING_THICKNESS = 0.08;
 const ZONE_DISC_ALPHA = 0.4;
 const SCORCH_FADE_S = 1.5;
@@ -34,7 +37,7 @@ export function zoneFill(left: number, total: number): number {
 }
 
 /**
- * Opacidad del aviso del rayo: 0,25 mientras sigue al objetivo; desde que se fija (a `trackFrac` del aviso)
+ * Opacidad del aviso del rayo: 0,4 mientras sigue al objetivo; desde que se fija (a `trackFrac` del aviso)
  * sube de 0,5 a 1. El parpadeo se aplica aparte, con el reloj.
  */
 export function beamWarnAlpha(left: number, total: number, trackFrac: number): number {
@@ -47,9 +50,13 @@ export function beamWarnAlpha(left: number, total: number, trackFrac: number): n
 interface HazardView {
   data: HazardSnapshot;
   meshes: Mesh[];
-  /** disco que crece (zona) o plano del rayo: el que se anima por fase */
+  /** disco que crece (zona) o cilindro del rayo: el que se anima por fase */
   main: Mesh;
+  /** franja del suelo bajo el rayo en aviso */
+  strip?: Mesh;
   sparks?: ParticleSystem;
+  /** punto del extremo del rayo para las chispas (se reutiliza cada frame) */
+  sparkAt?: Vector3;
   goneAtMs?: number;
 }
 
@@ -73,6 +80,7 @@ export class HazardViews {
   private readonly discMat: StandardMaterial;
   private readonly beamWarnMat: StandardMaterial;
   private readonly beamFireMat: StandardMaterial;
+  private readonly beamStripMat: StandardMaterial;
   private readonly scorchMat: StandardMaterial;
   private readonly spark: DynamicTexture;
   private readonly scorchTex: DynamicTexture;
@@ -93,6 +101,7 @@ export class HazardViews {
     this.discMat = emissive("hazardDisc", CASTER_COLORS.pyromancer);
     this.beamWarnMat = emissive("hazardBeamWarn", CASTER_COLORS.stormcaller);
     this.beamFireMat = emissive("hazardBeamFire", new Color3(0.85, 0.95, 1));
+    this.beamStripMat = emissive("hazardBeamStrip", CASTER_COLORS.stormcaller);
     this.spark = sparkTexture(scene, "hazard-spark");
     this.scorchTex = generated(scene, "hazard-scorch", 128, (ctx, s) =>
       radial(ctx, s, [
@@ -122,10 +131,11 @@ export class HazardViews {
         this.views.set(id, view);
       }
       view.goneAtMs = undefined;
-      view.data = h; // los peligros no se mueven (salvo el rayo al apuntar): vale el último snapshot
+      view.data = h; // las zonas no se mueven; el rayo se re-apunta y animate() usa siempre el último snapshot
     }
     for (const [id, view] of this.views) {
-      if (!world.hazards.has(id)) view.goneAtMs ??= receivedAtMs;
+      // La zona es estática: explota al recibir la desaparición, sin esperar la demora de interpolación.
+      if (!world.hazards.has(id)) view.goneAtMs ??= view.data.kind === "zone" ? receivedAtMs - INTERP_DELAY_MS : receivedAtMs;
     }
   }
 
@@ -171,7 +181,7 @@ export class HazardViews {
     this.scorches.length = 0;
     for (const b of this.bursts) b.ps.dispose(false);
     this.bursts.length = 0;
-    for (const m of [this.ringMat, this.discMat, this.beamWarnMat, this.beamFireMat, this.scorchMat]) m.dispose();
+    for (const m of [this.ringMat, this.discMat, this.beamWarnMat, this.beamFireMat, this.beamStripMat, this.scorchMat]) m.dispose();
     this.spark.dispose();
     this.scorchTex.dispose();
   }
@@ -189,10 +199,20 @@ export class HazardViews {
       return { data: h, meshes: [ring, disc], main: disc };
     }
     const fire = h.phase === "fire";
-    const plane = CreateGround("hazardBeam", { width: fire ? h.size : BEAM_WARN_WIDTH, height: h.length }, this.scene);
-    plane.material = fire ? this.beamFireMat : this.beamWarnMat;
-    plane.isPickable = false;
-    const view: HazardView = { data: h, meshes: [plane], main: plane };
+    // Cilindro de largo y diámetro 1 sobre +Z; animate() lo escala (largo, grosor) y lo gira hacia el rayo.
+    const bar = CreateCylinder("hazardBeam", { height: 1, diameter: 1, tessellation: 12 }, this.scene);
+    bar.material = fire ? this.beamFireMat : this.beamWarnMat;
+    bar.rotation.x = Math.PI / 2;
+    bar.isPickable = false;
+    const view: HazardView = { data: h, meshes: [bar], main: bar };
+    if (!fire) {
+      const strip = CreateGround("hazardBeamStrip", { width: 1, height: 1 }, this.scene);
+      strip.material = this.beamStripMat;
+      strip.isPickable = false;
+      strip.visibility = BEAM_STRIP_ALPHA;
+      view.meshes.push(strip);
+      view.strip = strip;
+    }
     if (fire) {
       const ps = new ParticleSystem("hazardBeamSparks", 80, this.scene);
       ps.particleTexture = this.spark;
@@ -200,7 +220,8 @@ export class HazardViews {
       ps.color2 = new Color4(CASTER_COLORS.stormcaller.r, CASTER_COLORS.stormcaller.g, CASTER_COLORS.stormcaller.b, 1);
       ps.colorDead = new Color4(0.2, 0.4, 0.8, 0);
       ps.blendMode = ParticleSystem.BLENDMODE_ADD;
-      ps.emitter = new Vector3(h.x + h.dirX * h.length, BEAM_Y, h.z + h.dirZ * h.length);
+      view.sparkAt = new Vector3(h.x + h.dirX * h.length, BEAM_Y, h.z + h.dirZ * h.length);
+      ps.emitter = view.sparkAt;
       ps.minSize = 0.08;
       ps.maxSize = 0.2;
       ps.minLifeTime = 0.1;
@@ -226,15 +247,25 @@ export class HazardViews {
       view.main.visibility = ZONE_DISC_ALPHA;
       return;
     }
-    const plane = view.main;
-    plane.position.set(h.x + (h.dirX * h.length) / 2, BEAM_Y, h.z + (h.dirZ * h.length) / 2);
-    plane.rotation.y = Math.atan2(h.dirX, h.dirZ);
-    if (h.phase === "warn") {
+    // El rayo se re-apunta durante el aviso: posición, giro y largo salen del último snapshot.
+    const bar = view.main;
+    const fire = h.phase === "fire";
+    const thick = fire ? h.size : BEAM_WARN_WIDTH;
+    const yaw = Math.atan2(h.dirX, h.dirZ);
+    bar.position.set(h.x + (h.dirX * h.length) / 2, BEAM_Y, h.z + (h.dirZ * h.length) / 2);
+    bar.rotation.y = yaw;
+    bar.scaling.set(thick, Math.max(0.001, h.length), thick);
+    if (view.strip) {
+      view.strip.position.set(bar.position.x, BEAM_STRIP_Y, bar.position.z);
+      view.strip.rotation.y = yaw;
+      view.strip.scaling.set(h.size, 1, Math.max(0.001, h.length));
+    }
+    if (!fire) {
       const flicker = 0.75 + 0.25 * Math.sin((nowMs / 1000) * BEAM_FLICKER_HZ * Math.PI * 2);
-      plane.visibility = beamWarnAlpha(h.left, h.total, SPELLS.stormcaller.trackFrac) * flicker;
+      bar.visibility = beamWarnAlpha(h.left, h.total, SPELLS.stormcaller.trackFrac) * flicker;
     } else {
-      plane.visibility = Math.min(1, Math.max(0, h.left / SPELLS.stormcaller.fireS));
-      if (view.sparks) view.sparks.emitter = new Vector3(h.x + h.dirX * h.length, BEAM_Y, h.z + h.dirZ * h.length);
+      bar.visibility = Math.min(1, Math.max(0, h.left / SPELLS.stormcaller.fireS));
+      view.sparkAt?.copyFromFloats(h.x + h.dirX * h.length, BEAM_Y, h.z + h.dirZ * h.length);
     }
   }
 

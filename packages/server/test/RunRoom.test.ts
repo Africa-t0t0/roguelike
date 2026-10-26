@@ -1414,6 +1414,29 @@ describe("RunRoom: sandbox", () => {
     expect(es.spellTier).toBe(2);
   });
 
+  it("el rayo del invocador sincroniza su dirección al cliente mientras sigue al objetivo", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "god", on: true });
+    dev(ana.client, { cmd: "freeze", on: true });
+    dev(ana.client, { cmd: "spawn", kind: "stormcaller", count: 1, tier: 1 });
+    await ticksUntil(() => room["enemySystem"].enemies.length === 1, 10);
+    dev(ana.client, { cmd: "castNow" });
+    await ticksUntil(() => ana.client.state.hazards.size === 1, 10);
+    const h = [...ana.client.state.hazards.values()][0]!;
+    expect(h.kind).toBe("beam");
+    const d0 = { x: h.dirX, z: h.dirZ };
+    // El jugador se mueve en perpendicular al rayo mientras este lo sigue.
+    const perp = Math.abs(d0.x) < Math.abs(d0.z) ? { moveX: 1, moveZ: 0 } : { moveX: 0, moveZ: 1 };
+    let seq = 1;
+    for (let i = 0; i < 10; i++) {
+      ana.client.send(MSG.input, { seq: seq++, ...perp, facing: 0 });
+      await room.waitForNextTimestep();
+    }
+    await settle();
+    expect(room.state.hazards.get([...room.state.hazards.keys()][0]!)!.phase).toBe("warn");
+    expect(Math.hypot(h.dirX - d0.x, h.dirZ - d0.z)).toBeGreaterThan(0.01);
+  });
+
   it("pausa: una zona en aviso no avanza con la elección abierta y explota en el tiempo que le quedaba", async () => {
     const { ana } = await sandboxRoom();
     dev(ana.client, { cmd: "god", on: true });

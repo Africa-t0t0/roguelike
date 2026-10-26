@@ -14,7 +14,7 @@ describe("zoneFill", () => {
 });
 
 describe("beamWarnAlpha", () => {
-  it("0,25 mientras sigue al objetivo", () => expect(beamWarnAlpha(1.0, 1.1, 0.6)).toBeCloseTo(0.25));
+  it("0,4 mientras sigue al objetivo", () => expect(beamWarnAlpha(1.0, 1.1, 0.6)).toBeCloseTo(0.4));
   it("0,5 recién fijado", () => expect(beamWarnAlpha(0.44, 1.1, 0.6)).toBeCloseTo(0.5));
   it("1 al disparar", () => expect(beamWarnAlpha(0, 1.1, 0.6)).toBeCloseTo(1));
 });

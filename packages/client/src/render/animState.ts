@@ -1,4 +1,4 @@
-import { ABILITIES, ENEMY_DEFS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ABILITIES, casterTelegraphS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import { ENEMY_LOOKS, HERO_STRIDE_MPS } from "./looks";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
@@ -42,6 +42,8 @@ export interface EnemyAnimInput {
   weaponId: WeaponId | null;
   /** segundos que le quedan aturdido (0 o sin dato: no lo está) */
   stunned?: number;
+  /** tier del hechizo (hechiceros): el invocador telegrafía distinto según el tier */
+  spellTier?: number;
 }
 
 const MOVING_SPEED = 0.2; // m/s
@@ -131,7 +133,7 @@ export function chooseEnemyAnim(e: EnemyAnimInput, clipLengths?: ClipLengths): A
   if ((e.stunned ?? 0) > 0) return looped(clips.hit, STUN_ANIM_SPEED);
   if (e.ai === "telegraph") {
     const attack = e.weaponId ? strikeOf(e.weaponId, 1).clip : clips.attack;
-    return once(attack, fitTo(attack, ENEMY_DEFS[e.kind].telegraphS, clipLengths));
+    return once(attack, fitTo(attack, casterTelegraphS(e.kind, e.spellTier ?? 1), clipLengths));
   }
   if (e.hurtRecently) return once(clips.hit);
   if (e.speed > MOVING_SPEED) return looped(clips.run, look.runSpeed ?? 1);

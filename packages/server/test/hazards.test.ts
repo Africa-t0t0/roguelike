@@ -32,6 +32,11 @@ describe("inBeam / inZone", () => {
     expect(inBeam(b, 11, 0, 0)).toBe(false);
     expect(inBeam(b, 5, 0.5, 0.2)).toBe(true);
   });
+  it("detrás del origen no golpea", () => {
+    const b = beam(0.8, 10);
+    expect(inBeam(b, -0.3, 0, 0)).toBe(false);
+    expect(inBeam(b, 0.1, 0, 0)).toBe(true);
+  });
   it("la zona usa radio + radio del jugador", () => {
     const z: Hazard = { ...beam(2.5, 0), kind: "zone", dirX: 0 };
     expect(inZone(z, 2.5, 0, 0)).toBe(true);
