@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MOVESETS,
+  ELITE,
   ENEMY_DEFS,
   REWIND_MAX_TICKS,
   SIM_DT,
@@ -18,7 +19,7 @@ import {
 } from "@roguelike/shared";
 import { EnemySystem, type SimPlayer } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
-import { CombatSystem, newCombatState, type CombatState } from "../src/sim/CombatSystem";
+import { CombatSystem, moveSpeedMult, newCombatState, statusSpeedMult, type CombatState } from "../src/sim/CombatSystem";
 
 function arena(): Dungeon {
   const width = 30;
@@ -685,5 +686,76 @@ describe("mejoras de stat", () => {
     c.dead = true;
     cs.heal(c, 20);
     expect(c.hp).toBe(0);
+  });
+});
+
+describe("estados que dejan los élites", () => {
+  const queue = (cs: CombatSystem, c: CombatState, nature: "fire" | "ice" | "lightning", extra = {}) => {
+    cs.queueEnemyHits(new Map([["a", c]]), [{ targetKey: "a", damage: 5, sourceId: "e1", sourceX: 1, sourceZ: 0, nature, ...extra }], 10);
+    return cs.step(new Map([["a", c]]), 10 + 30, SIM_DT, new Map([["a", kin()]]));
+  };
+  const ticks = (cs: CombatSystem, c: CombatState, n: number) => {
+    for (let i = 0; i < n; i++) cs.step(new Map([["a", c]]), 100 + i, SIM_DT);
+  };
+
+  it("hielo: slowLeft 2 y velocidad x0,7, que vence a los 2 s", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    queue(cs, c, "ice");
+    expect(c.slowLeft).toBeCloseTo(ELITE.playerSlowS, 9);
+    expect(statusSpeedMult(c)).toBeCloseTo(0.7, 12);
+    expect(moveSpeedMult(c)).toBeCloseTo(0.7, 12);
+    ticks(cs, c, 61);
+    expect(c.slowLeft).toBe(0);
+    expect(statusSpeedMult(c)).toBe(1);
+  });
+
+  it("rayo: 0,3 s sin moverse y sin atacar", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    queue(cs, c, "lightning");
+    expect(statusSpeedMult(c)).toBe(0);
+    expect(cs.attack(c, input())).toEqual({ swung: false, step: 0 });
+    ticks(cs, c, 8);
+    expect(statusSpeedMult(c)).toBe(0);
+    ticks(cs, c, 2);
+    expect(statusSpeedMult(c)).toBe(1);
+    expect(cs.attack(c, input()).swung).toBe(true);
+  });
+
+  it("fuego: quema 12 (+-0,5) en 3 s, aunque la vida regenere", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    queue(cs, c, "fire");
+    const hp0 = c.hp;
+    ticks(cs, c, 95);
+    const lost = hp0 - c.hp + BASE_REGEN * 3;
+    expect(c.burnLeft).toBe(0);
+    expect(lost).toBeGreaterThan(12 - 0.5);
+    expect(lost).toBeLessThan(12 + 0.5);
+  });
+
+  it("la quemadura puede matar", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    queue(cs, c, "fire", { burnDps: 100 });
+    c.hp = 5;
+    let died = false;
+    for (let i = 0; i < 20 && !died; i++) died = cs.step(new Map([["a", c]]), 100 + i, SIM_DT).died.length > 0;
+    expect(died).toBe(true);
+    expect(c.dead).toBe(true);
+    expect(c.burnLeft).toBe(0);
+  });
+
+  it("sin daño no hay estado: con Invulnerable o con daño recibido 0 (god) no se aplica", () => {
+    const cs = new CombatSystem();
+    const god = newCombatState("warrior", 1);
+    god.mods = { ...god.mods, damageTakenMult: 0 };
+    queue(cs, god, "lightning");
+    expect(god.stunLeft + god.slowLeft + god.burnLeft).toBe(0);
+    const inv = newCombatState("warrior", 1);
+    inv.invulnFor = 1;
+    queue(cs, inv, "ice");
+    expect(inv.slowLeft).toBe(0);
   });
 });

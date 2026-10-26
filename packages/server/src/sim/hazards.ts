@@ -1,4 +1,4 @@
-import { TILE_SIZE, isWalkableTile, type Dungeon } from "@roguelike/shared";
+import { TILE_SIZE, isWalkableTile, type Dungeon, type Nature } from "@roguelike/shared";
 
 /** Peligro de un hechicero: zona del pirómano o rayo del tormentoso. */
 export interface Hazard {
@@ -21,6 +21,9 @@ export interface Hazard {
   /** duración de la fase actual */
   total: number;
   phase: "warn" | "fire";
+  /** naturaleza del hechicero élite que lo creó y daño por segundo de la quemadura que deja */
+  nature?: Nature;
+  burnDps?: number;
 }
 
 const BEAM_SAMPLE_M = TILE_SIZE / 8;

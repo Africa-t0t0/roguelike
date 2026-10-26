@@ -62,3 +62,22 @@ describe("parseDevCommand", () => {
     for (const c of bad) expect(parseDevCommand(c)).toBeNull();
   });
 });
+
+describe("parseDevCommand: élites y estados", () => {
+  it("spawn acepta elite y nature opcionales y rechaza valores inválidos", () => {
+    expect(parseDevCommand({ cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: true, nature: "ice" })).toEqual({
+      cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: true, nature: "ice",
+    });
+    expect(parseDevCommand({ cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: true })).toEqual({
+      cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: true,
+    });
+    expect(parseDevCommand({ cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: "si" })).toBeNull();
+    expect(parseDevCommand({ cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: true, nature: "water" })).toBeNull();
+  });
+
+  it("status acepta burn, slow y stun", () => {
+    for (const kind of ["burn", "slow", "stun"]) expect(parseDevCommand({ cmd: "status", kind })).toEqual({ cmd: "status", kind });
+    expect(parseDevCommand({ cmd: "status", kind: "poison" })).toBeNull();
+    expect(parseDevCommand({ cmd: "status" })).toBeNull();
+  });
+});

@@ -1,6 +1,6 @@
 import { xpToNext } from "@roguelike/shared";
 import { abilitySlots, type PlayerShot } from "../sim/AbilitySystem";
-import { abilityRank, type CombatSystem } from "../sim/CombatSystem";
+import { abilityRank, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
 import type { Hazard } from "../sim/hazards";
 import type { Orb } from "../sim/OrbSystem";
@@ -41,6 +41,10 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.passiveRank = abilityRank(c, "cleave");
   ps.blocking = c.blocking;
   ps.buffDamage = c.buffDamage;
+  ps.statusSpeedMult = statusSpeedMult(c);
+  ps.burnLeft = c.burnLeft;
+  ps.slowLeft = c.slowLeft;
+  ps.stunLeft = c.stunLeft;
 
   // Casillas en su sitio: solo se agregan o quitan entradas si cambia la cantidad.
   const slots = abilitySlots(c);
@@ -75,6 +79,8 @@ export function syncWorld(
       es.weaponId = e.loadout?.weaponId ?? "";
       es.weaponTier = e.loadout?.tier ?? 0;
       es.weaponNature = e.loadout?.nature ?? "none";
+      es.elite = e.elite;
+      es.nature = e.nature;
       state.enemies.set(e.id, es);
     }
     es.x = e.x;

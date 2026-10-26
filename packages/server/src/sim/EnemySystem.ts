@@ -1,5 +1,7 @@
 import {
   ARMED_CHANCE,
+  ELEMENTS,
+  ELITE,
   ORB,
   SPELLS,
   ENEMY_DEFS,
@@ -9,9 +11,11 @@ import {
   PLAYER_RADIUS,
   TIERS,
   TILE_SIZE,
+  WEAPONS,
   casterKinds,
   casterTelegraphS,
   circlesOverlap,
+  eliteChance,
   enemiesForRoom,
   enemyAttack,
   enemyScale,
@@ -28,6 +32,8 @@ import {
   type EnemyLoadout,
   type Nature,
   type Rng,
+  type WeaponId,
+  type WeaponTier,
   type CasterTier,
 } from "@roguelike/shared";
 import { beamLength, inBeam, inZone, type Hazard } from "./hazards";
@@ -58,8 +64,14 @@ export interface Enemy {
   frozen: number;
   /** segundos de inmunidad a volver a congelarse tras descongelarse */
   freezeImmune: number;
-  /** élite: no se congela (Task 4 lo asigna) */
+  /** élite: más vida y daño, siempre armado, inmune a aturdir y congelar, y sus golpes llevan su naturaleza */
   elite: boolean;
+  /** naturaleza del élite; "none" en los demás */
+  nature: Nature;
+  /** hechizos lanzados; el hechicero élite alterna el tipo de su ataque con ellos */
+  casts: number;
+  /** tipo del hechizo que prepara o lanzó por última vez (su propio `kind` salvo en el hechicero élite) */
+  spell: EnemyKind;
   /** quemadura (fuego): daño por segundo, segundos restantes y quién la prendió */
   burn: { left: number; dps: number; ownerKey: string } | null;
   /** ralentización (hielo): fracción de velocidad que pierde y segundos restantes */
@@ -81,6 +93,9 @@ export interface Projectile {
   damage: number;
   life: number;
   sourceId: string;
+  /** naturaleza del élite que lo lanzó */
+  nature?: Nature;
+  burnDps?: number;
 }
 
 /** Solo jugadores conectados. */
@@ -122,6 +137,18 @@ export interface EnemyHit {
   /** posición de la fuente al golpear (el enemigo o su proyectil); el Bloqueo mira desde dónde llega */
   sourceX: number;
   sourceZ: number;
+  /** naturaleza del élite que golpea; ausente en los demás */
+  nature?: Nature;
+  /** daño por segundo de la quemadura que deja un élite de fuego (4 × su `damageMult`) */
+  burnDps?: number;
+}
+
+/** Siguiente tipo de hechizo del hechicero élite al alternar: mage → pyromancer → stormcaller → mage. */
+const NEXT_SPELL: Partial<Record<EnemyKind, EnemyKind>> = { mage: "pyromancer", pyromancer: "stormcaller", stormcaller: "mage" };
+
+/** Campos de naturaleza que un proyectil o peligro de élite pasa a sus golpes (nada si no es de élite). */
+function hazardNature(h: { nature?: Nature; burnDps?: number }): Pick<EnemyHit, "nature" | "burnDps"> {
+  return h.nature === undefined ? {} : { nature: h.nature, burnDps: h.burnDps };
 }
 
 const MELEE_TOLERANCE = 0.3;
@@ -197,9 +224,10 @@ export class EnemySystem {
   /**
    * Solo sandbox: un enemigo persiguiendo, sin sala, con el tier pedido en vez de sortearlo. Minion y brute:
    * 0 = desarmado, 1..3 = su arma de `ARMED_CHANCE` con ese tier. Hechicero: ese tier de hechizo (0 cuenta como 1).
+   * Con `elite` lo es (naturaleza sorteada si no se da) y, si puede llevar arma, la lleva siempre (tier mínimo 1).
    */
-  spawnAt(kind: EnemyKind, x: number, z: number, tier: 0 | CasterTier): Enemy {
-    return this.createEnemy(kind, -1, x, z, tier);
+  spawnAt(kind: EnemyKind, x: number, z: number, tier: 0 | CasterTier, elite?: { nature?: Nature }): Enemy {
+    return this.createEnemy(kind, -1, x, z, tier, elite);
   }
 
   /** Cada "mage" pedido se cambia por un hechicero de `casterKinds`; sin RNG si solo hay uno. */
@@ -224,22 +252,33 @@ export class EnemySystem {
     x: number,
     z: number,
     tier?: 0 | CasterTier,
+    forceElite?: { nature?: Nature },
   ): Enemy {
     const caster = isCaster(kind);
     const armed = ARMED_CHANCE[kind];
     // Con tier pedido (sandbox) no se sortea nada; si no, se sortea el arma o el tier de hechizo.
-    const loadout: EnemyLoadout | null =
+    let loadout: EnemyLoadout | null =
       tier === undefined ? this.rollLoadout(kind) : armed && tier !== 0 ? { weaponId: armed.weaponId, tier, nature: "none" } : null;
     const spellTier: 0 | CasterTier = !caster
       ? 0
       : tier === undefined ? rollTier(this.rng, this.floorTime, this.floor) : tier === 0 ? 1 : tier;
+    // El sorteo de élite consume RNG solo cuando hay probabilidad (desde el minuto 3), para no mover las
+    // secuencias sembradas anteriores. Los de sandbox (tier pedido) solo lo son si se pide.
+    const chance = eliteChance(this.floorTime);
+    const isElite = forceElite !== undefined || (tier === undefined && chance > 0 && this.rng.next() < chance);
+    const nature: Nature = isElite ? (forceElite?.nature ?? this.rng.pick(ELEMENTS)) : "none";
+    if (isElite && armed) {
+      const t = loadout?.tier ?? (tier === undefined ? rollTier(this.rng, this.floorTime, this.floor) : 1);
+      loadout = { weaponId: armed.weaponId, tier: t, nature };
+    }
     const def = ENEMY_DEFS[kind];
-    const { hpMult, damageMult } = enemyScale(this.floorTime, this.partyLevel);
-    const hp = Math.round(def.hp * hpMult);
+    const scale = enemyScale(this.floorTime, this.partyLevel);
+    const damageMult = scale.damageMult * (isElite ? ELITE.damageMult : 1);
+    const hp = Math.round(def.hp * scale.hpMult) * (isElite ? ELITE.hpMult : 1);
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout, spellTier, stunned: 0, frozen: 0, freezeImmune: 0, elite: false, burn: null, slow: null, iceHits: [],
+      loadout, spellTier, stunned: 0, frozen: 0, freezeImmune: 0, elite: isElite, nature, casts: 0, spell: kind, burn: null, slow: null, iceHits: [],
       damageMult,
     };
     this.list.push(e);
@@ -397,9 +436,22 @@ export class EnemySystem {
     }
   }
 
+  /** Golpe de `e` contra `target`, con la naturaleza y la quemadura de un élite. */
+  private hitFrom(e: Enemy, targetKey: string, damage: number, sourceX: number, sourceZ: number): EnemyHit {
+    const hit: EnemyHit = { targetKey, damage, sourceId: e.id, sourceX, sourceZ };
+    if (e.nature !== "none") {
+      hit.nature = e.nature;
+      hit.burnDps = ELITE.playerBurnDps * e.damageMult;
+    }
+    return hit;
+  }
+
   /** Entra en telegrafía; los hechiceros de zona y rayo crean aquí su peligro en aviso. */
   private startTelegraph(e: Enemy, target: SimPlayer): void {
     this.setAi(e, "telegraph");
+    // El hechicero élite alterna entre su hechizo y el siguiente; el daño y el tier son siempre los suyos.
+    e.spell = e.elite && e.casts % 2 === 1 ? (NEXT_SPELL[e.kind] ?? e.kind) : e.kind;
+    e.casts++;
     const damage = Math.round(ENEMY_DEFS[e.kind].damage * e.damageMult);
     const tier = Math.max(1, e.spellTier) as CasterTier;
     const dx = target.x - e.x;
@@ -407,7 +459,7 @@ export class EnemySystem {
     const d = Math.hypot(dx, dz);
     const dirX = d > 0 ? dx / d : Math.sin(e.facing);
     const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
-    if (e.kind === "pyromancer") {
+    if (e.spell === "pyromancer") {
       const spell = SPELLS.pyromancer.tiers[tier];
       // Una zona en el objetivo; con tres, otras dos a los lados (perpendicular a mago→objetivo).
       const offsets = spell.count === 3 ? [0, -SPELLS.pyromancer.sideOffsetM, SPELLS.pyromancer.sideOffsetM] : [0];
@@ -415,17 +467,22 @@ export class EnemySystem {
         this.hazardList.push({
           id: `h${this.nextHazard++}`, kind: "zone", sourceId: e.id,
           x: target.x + dirZ * off, z: target.z - dirX * off, dirX: 0, dirZ: 0, length: 0, size: spell.radius,
-          damage, left: SPELLS.pyromancer.fuseS, total: SPELLS.pyromancer.fuseS, phase: "warn",
+          damage, left: SPELLS.pyromancer.fuseS, total: SPELLS.pyromancer.fuseS, phase: "warn", ...this.hazardFx(e),
         });
       }
-    } else if (e.kind === "stormcaller") {
-      const total = casterTelegraphS(e.kind, e.spellTier);
+    } else if (e.spell === "stormcaller") {
+      const total = casterTelegraphS(e.spell, e.spellTier);
       this.hazardList.push({
         id: `h${this.nextHazard++}`, kind: "beam", sourceId: e.id, x: e.x, z: e.z, dirX, dirZ,
         length: beamLength(this.dungeon, e.x, e.z, dirX, dirZ, SPELLS.stormcaller.length),
-        size: SPELLS.stormcaller.tiers[tier].width, damage, left: total, total, phase: "warn",
+        size: SPELLS.stormcaller.tiers[tier].width, damage, left: total, total, phase: "warn", ...this.hazardFx(e),
       });
     }
+  }
+
+  /** Naturaleza y quemadura que un peligro hereda de su lanzador élite. */
+  private hazardFx(e: Enemy): Pick<Hazard, "nature" | "burnDps"> {
+    return e.nature === "none" ? {} : { nature: e.nature, burnDps: ELITE.playerBurnDps * e.damageMult };
   }
 
   /** El rayo en aviso del tormentoso pasa a disparo (queda fijo) y golpea una vez a cada jugador en la línea. */
@@ -435,7 +492,7 @@ export class EnemySystem {
     h.phase = "fire";
     h.left = h.total = SPELLS.stormcaller.fireS;
     for (const p of alive) {
-      if (inBeam(h, p.x, p.z, PLAYER_RADIUS)) hits.push({ targetKey: p.key, damage: h.damage, sourceId: e.id, sourceX: h.x, sourceZ: h.z });
+      if (inBeam(h, p.x, p.z, PLAYER_RADIUS)) hits.push({ targetKey: p.key, damage: h.damage, sourceId: e.id, sourceX: h.x, sourceZ: h.z, ...hazardNature(h) });
     }
   }
 
@@ -466,7 +523,9 @@ export class EnemySystem {
       }
       if (h.kind === "zone") {
         for (const p of alive) {
-          if (inZone(h, p.x, p.z, PLAYER_RADIUS)) hits.push({ targetKey: p.key, damage: h.damage, sourceId: h.sourceId, sourceX: h.x, sourceZ: h.z });
+          if (inZone(h, p.x, p.z, PLAYER_RADIUS)) {
+            hits.push({ targetKey: p.key, damage: h.damage, sourceId: h.sourceId, sourceX: h.x, sourceZ: h.z, ...hazardNature(h) });
+          }
         }
       }
     }
@@ -499,8 +558,8 @@ export class EnemySystem {
     }
 
     if (e.ai === "telegraph") {
-      if (e.aiTime < casterTelegraphS(e.kind, e.spellTier)) return;
-      if (e.kind === "mage") {
+      if (e.aiTime < casterTelegraphS(e.spell, e.spellTier)) return;
+      if (e.spell === "mage") {
         const dirX = d > 0 ? dx / d : Math.sin(e.facing);
         const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
         const spell = SPELLS.mage.tiers[Math.max(1, e.spellTier) as CasterTier];
@@ -511,16 +570,16 @@ export class EnemySystem {
           this.shots.push({
             id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX: dirX * cos + dirZ * sin, dirZ: dirZ * cos - dirX * sin,
             speed: spell.speed, radius: ORB.radius, damage: Math.round(def.damage * e.damageMult),
-            life: ORB.lifetimeS, sourceId: e.id,
+            life: ORB.lifetimeS, sourceId: e.id, ...(e.nature === "none" ? {} : { nature: e.nature, burnDps: ELITE.playerBurnDps * e.damageMult }),
           });
         }
-      } else if (e.kind === "stormcaller") {
+      } else if (e.spell === "stormcaller") {
         // Sin proyectil: el rayo en preparación pasa a disparo y daña ya a quien está en la línea.
         this.fireBeam(e, alive, hits);
       } else if (def.ranged) {
         // Pirómano: sus zonas se crearon al entrar en la telegrafía y explotan solas.
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
-        hits.push({ targetKey: target.key, damage: Math.round(atk.damage * e.damageMult), sourceId: e.id, sourceX: e.x, sourceZ: e.z });
+        hits.push(this.hitFrom(e, target.key, Math.round(atk.damage * e.damageMult), e.x, e.z));
       }
       e.cooldown = def.cooldownS;
       this.setAi(e, "recover");
@@ -637,7 +696,7 @@ export class EnemySystem {
       if (!isWalkableTile(this.dungeon, tileOf(p.x), tileOf(p.z))) continue;
       const victim = alive.find((pl) => circlesOverlap(p, { x: pl.x, z: pl.z, radius: PLAYER_RADIUS }));
       if (victim) {
-        hits.push({ targetKey: victim.key, damage: p.damage, sourceId: p.sourceId, sourceX: p.x, sourceZ: p.z });
+        hits.push({ targetKey: victim.key, damage: p.damage, sourceId: p.sourceId, sourceX: p.x, sourceZ: p.z, ...hazardNature(p) });
         continue;
       }
       if (p.life > 0) keep.push(p);
@@ -646,12 +705,12 @@ export class EnemySystem {
   }
 
   /**
-   * Aturde `s` segundos (se queda el mayor si ya lo estaba) y cancela su telegrafía. Los muertos y los
+   * Aturde `s` segundos (se queda el mayor si ya lo estaba) y cancela su telegrafía. Los muertos, los élites y los
    * `stunImmune` no se aturden.
    */
   stun(enemyId: string, s: number): void {
     const e = this.list.find((x) => x.id === enemyId);
-    if (!e || e.ai === "dead" || ENEMY_DEFS[e.kind].stunImmune) return;
+    if (!e || e.ai === "dead" || e.elite || ENEMY_DEFS[e.kind].stunImmune) return;
     e.stunned = Math.max(e.stunned, s);
     if (e.ai === "telegraph") this.setAi(e, "chase");
   }
@@ -738,8 +797,18 @@ export class EnemySystem {
     if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null };
     this.setAi(e, "dead");
     e.burn = null;
-    // solo los armados sortean soltar su arma
-    const drop = e.loadout && this.rng.next() < TIERS[e.loadout.tier].dropChance ? { ...e.loadout } : null;
-    return { killed: true, xp: ENEMY_DEFS[e.kind].xp, x: e.x, z: e.z, drop };
+    return { killed: true, xp: ENEMY_DEFS[e.kind].xp * (e.elite ? ELITE.xpMult : 1), x: e.x, z: e.z, drop: this.rollDrop(e) };
+  }
+
+  /**
+   * Arma que suelta al morir. El élite la suelta con `ELITE.dropChance`, un tier más (hasta 4) y su naturaleza;
+   * el hechicero, que no lleva arma, trae una al azar. Los demás armados, con `TIERS[tier].dropChance`.
+   */
+  private rollDrop(e: Enemy): EnemyLoadout | null {
+    if (!e.elite) return e.loadout && this.rng.next() < TIERS[e.loadout.tier].dropChance ? { ...e.loadout } : null;
+    if (this.rng.next() >= ELITE.dropChance) return null;
+    const weaponId = e.loadout?.weaponId ?? this.rng.pick(Object.keys(WEAPONS) as WeaponId[]);
+    const tier = Math.min(4, (e.loadout?.tier ?? e.spellTier) + 1) as WeaponTier;
+    return { weaponId, tier, nature: e.nature };
   }
 }

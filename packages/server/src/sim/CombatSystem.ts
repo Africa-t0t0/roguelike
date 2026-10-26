@@ -4,6 +4,7 @@ import {
   BASE_REGEN,
   BLOCK_HALF_ARC_DEG,
   BLOCK_MOVE_MULT,
+  ELITE,
   STARTING_WEAPON,
   newComboTimers,
   strikeOf,
@@ -41,6 +42,10 @@ export interface PendingHit {
   /** posición de la fuente al golpear, para el Bloqueo */
   sourceX: number;
   sourceZ: number;
+  /** naturaleza del élite que golpea; si el golpe hace daño, deja su estado */
+  nature?: Nature;
+  /** daño por segundo de la quemadura que deja un golpe de fuego */
+  burnDps?: number;
 }
 
 /** Animación de una habilidad activa en curso; avanza por input procesado, como el combo. */
@@ -87,16 +92,38 @@ export interface CombatState extends ComboTimers {
   /** el mayor Grito activo sobre este jugador (0 si ninguno) y los segundos que le quedan */
   buffDamage: number;
   buffLeft: number;
+  /** estados que dejan los élites: segundos que quedan de quemadura (con su daño por segundo), ralentización y aturdimiento */
+  burnLeft: number;
+  burnDps: number;
+  slowLeft: number;
+  stunLeft: number;
 }
+
+/** Estados que el panel de pruebas aplica a mano; cada uno es el de una naturaleza de élite. */
+export type PlayerStatus = "burn" | "slow" | "stun";
 
 /** Rango (1..3) de esa habilidad, o 0 si no la tiene. */
 export function abilityRank(c: CombatState, id: AbilityId): number {
   return c.abilities.find((a) => a.id === id)?.rank ?? 0;
 }
 
-/** Velocidad de movimiento efectiva: la de sus cartas, a la mitad mientras bloquea. */
+/** Efecto de sus estados en la velocidad: 0,7 ralentizado, 0 aturdido. */
+export function statusSpeedMult(c: CombatState): number {
+  return (c.slowLeft > 0 ? 1 - ELITE.playerSlowFrac : 1) * (c.stunLeft > 0 ? 0 : 1);
+}
+
+/** Velocidad de movimiento efectiva: la de sus cartas, a la mitad mientras bloquea, más sus estados. */
 export function moveSpeedMult(c: CombatState): number {
-  return c.mods.moveSpeedMult * (c.blocking ? BLOCK_MOVE_MULT : 1);
+  return c.mods.moveSpeedMult * (c.blocking ? BLOCK_MOVE_MULT : 1) * statusSpeedMult(c);
+}
+
+/** Aplica un estado con los números de `ELITE` (la quemadura, con `burnDps` si se da). */
+export function applyStatus(c: CombatState, kind: PlayerStatus, burnDps: number = ELITE.playerBurnDps): void {
+  if (kind === "burn") {
+    c.burnLeft = ELITE.playerBurnS;
+    c.burnDps = burnDps;
+  } else if (kind === "slow") c.slowLeft = ELITE.playerSlowS;
+  else c.stunLeft = ELITE.playerStunS;
 }
 
 /** Tick al que se rebobina un impacto: el que veía el cliente, acotado a REWIND_MAX_TICKS. */
@@ -132,6 +159,10 @@ export function newCombatState(
     blocking: false,
     buffDamage: 0,
     buffLeft: 0,
+    burnLeft: 0,
+    burnDps: 0,
+    slowLeft: 0,
+    stunLeft: 0,
   };
 }
 
@@ -195,7 +226,7 @@ export class CombatSystem {
    */
   attack(c: CombatState, input: PlayerInput): AttackResult {
     const none: AttackResult = { swung: false, step: 0 };
-    if (!input.attack || c.dead || c.blocking || c.abilityAnim) return none;
+    if (!input.attack || c.dead || c.blocking || c.abilityAnim || c.stunLeft > 0) return none;
     const step = tryStartSwing(c, c.weaponId, c.mods.attackSpeedMult);
     if (step === 0) return none;
     c.swingFacing = input.facing;
@@ -246,6 +277,7 @@ export class CombatSystem {
       // Piel de hierro: se aplica al encolar, sin redondear (la vida es decimal).
       c.pendingHits.push({
         damage: h.damage * c.mods.damageTakenMult, resolveTick: nowTick, sourceX: h.sourceX, sourceZ: h.sourceZ,
+        nature: h.nature, burnDps: h.burnDps,
       });
     }
   }
@@ -281,10 +313,20 @@ export class CombatSystem {
       }
 
       this.heal(c, (BASE_REGEN + c.mods.regen) * dt);
+      const burned = this.tickStatus(c, dt);
 
       if (c.invulnFor > 0) {
         c.pendingHits = [];
         continue;
+      }
+      // La quemadura mata con la misma muerte que un golpe.
+      if (burned > 0) {
+        c.hp = Math.max(0, c.hp - burned);
+        if (c.hp === 0) {
+          this.die(c);
+          died.push(key);
+          continue;
+        }
       }
       // Sin un input que lo resuelva antes (jugador callado o con mucho lag), se aplica al vencer el plazo.
       const r = this.applyDue(c, kin.get(key), (h) => nowTick >= h.resolveTick + REWIND_MAX_TICKS);
@@ -292,6 +334,15 @@ export class CombatSystem {
       if (r.died) died.push(key);
     }
     return { damaged, died, respawned };
+  }
+
+  /** Avanza los estados un tick y devuelve el daño de la quemadura de ese tick (sin tocar la vida). */
+  private tickStatus(c: CombatState, dt: number): number {
+    const burn = c.burnLeft > 0 ? c.burnDps * Math.min(dt, c.burnLeft) : 0;
+    c.burnLeft = c.burnLeft - dt > EPS ? c.burnLeft - dt : 0;
+    c.slowLeft = c.slowLeft - dt > EPS ? c.slowLeft - dt : 0;
+    c.stunLeft = c.stunLeft - dt > EPS ? c.stunLeft - dt : 0;
+    return burn;
   }
 
   /**
@@ -330,19 +381,31 @@ export class CombatSystem {
       const front =
         reduction > 0 &&
         inArc({ x: k!.x, z: k!.z, facing: k!.facing }, { x: h.sourceX, z: h.sourceZ, radius: 0 }, Infinity, 2 * BLOCK_HALF_ARC_DEG);
-      damage += front ? h.damage * (1 - reduction) : h.damage;
+      const dealt = front ? h.damage * (1 - reduction) : h.damage;
+      damage += dealt;
+      // El estado de un élite solo queda si el golpe hizo daño (con Invulnerable o god no hay).
+      if (dealt > 0 && h.nature && h.nature !== "none") {
+        applyStatus(c, h.nature === "fire" ? "burn" : h.nature === "ice" ? "slow" : "stun", h.burnDps);
+        // Piel de hierro también atenúa la quemadura.
+        if (h.nature === "fire") c.burnDps *= c.mods.damageTakenMult;
+      }
     }
     c.pendingHits = keep;
     if (damage === 0) return { damage: 0, died: false };
     c.hp = Math.max(0, c.hp - damage);
     if (c.hp > 0) return { damage, died: false };
+    this.die(c);
+    return { damage, died: true };
+  }
+
+  private die(c: CombatState): void {
     c.dead = true;
     c.respawnIn = RESPAWN_S;
     c.pendingHits = [];
     cancelImpact(c);
     c.abilityAnim = null;
     c.blocking = false;
-    return { damage, died: true };
+    c.burnLeft = c.slowLeft = c.stunLeft = 0;
   }
 
   grantXp(states: Map<string, CombatState>, xp: number): number[] {

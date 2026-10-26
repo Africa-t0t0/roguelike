@@ -50,6 +50,12 @@ export const PlayerState = schema(
     blocking: t.boolean(),
     /** el mayor Grito activo sobre él (0 si ninguno) */
     buffDamage: t.number(),
+    /** efecto de sus estados en la velocidad (0,7 ralentizado, 0 aturdido; la predicción del cliente lo usa) */
+    statusSpeedMult: t.number(),
+    /** segundos que le quedan de quemadura, ralentización y aturdimiento */
+    burnLeft: t.number(),
+    slowLeft: t.number(),
+    stunLeft: t.number(),
   },
   "PlayerState",
 );
@@ -79,6 +85,9 @@ export const EnemyState = schema(
     frozen: t.boolean(),
     /** tier de sus hechizos (1..3); 0 si no es hechicero */
     spellTier: t.number(),
+    /** élite, con su naturaleza ("none" si no lo es) */
+    elite: t.boolean(),
+    nature: t.string(),
   },
   "EnemyState",
 );

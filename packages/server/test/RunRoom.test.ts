@@ -862,6 +862,29 @@ describe("RunRoom: orbes y botín", () => {
     await ticksUntil(() => beto.client.state.players.get("beto")?.weaponTier === 2, 5);
   });
 
+  it("un élite muerto suelta orbes con su xp x4 y, con la RNG forzada, cada jugador recibe su arma un tier arriba con su naturaleza", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await Promise.all([ana.welcome, beto.welcome]);
+    collect(ana.client);
+    collect(beto.client);
+    await ticksUntil(() => ana.floors.length >= 1 && beto.floors.length >= 1, 10);
+    vi.spyOn(room["orbs"], "step").mockReturnValue(0);
+    const { target } = await killOne("ana", ana.client, (e) => {
+      const t = e as unknown as { elite: boolean; nature: string; kind: string; loadout: unknown };
+      t.elite = true;
+      t.nature = "ice";
+      t.kind = "brute";
+      t.loadout = { weaponId: "great-sword", tier: 2, nature: "ice" };
+      vi.spyOn(room["enemySystem"]["rng"], "next").mockReturnValue(0);
+    });
+    await ticksUntil(() => ana.floors.length >= 2 && beto.floors.length >= 2, 10);
+    const dropped = { weaponId: "great-sword", tier: 3, nature: "ice", x: target.x, z: target.z };
+    expect(ana.floors.at(-1)!.items.at(-1)).toMatchObject(dropped);
+    expect(beto.floors.at(-1)!.items.at(-1)).toMatchObject(dropped);
+    expect(room["orbs"].orbs.reduce((sum, o) => sum + o.value, 0)).toBe(ENEMY_DEFS.brute.xp * 4);
+  });
+
   it("un arma del suelo con naturaleza se toma, y la anterior queda con la suya", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
@@ -1152,7 +1175,7 @@ describe("RunRoom: escalado de enemigos", () => {
     teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
     await ticksUntil(() => room["enemySystem"].enemies.length >= 4, 5);
     const enemies = room["enemySystem"].enemies;
-    for (const e of enemies) expect(e.maxHp).toBe(Math.round(ENEMY_DEFS[e.kind].hp * hpMult));
+    for (const e of enemies) expect(e.maxHp).toBe(Math.round(ENEMY_DEFS[e.kind].hp * hpMult) * (e.elite ? 3 : 1));
     await ticksUntil(() => enemies.every((e) => ana.client.state.enemies?.get(e.id)?.maxHp === e.maxHp), 10);
   });
 });
@@ -1500,6 +1523,24 @@ describe("RunRoom: sandbox", () => {
     dev(ana.client, { cmd: "god", on: false });
     await settle();
     expect(record("ana").combat.mods.damageTakenMult).toBeCloseTo(0.92, 12);
+  });
+
+  it("status aplica el estado a quien lo pide y llega al cliente; spawn con elite crea un élite", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "status", kind: "ice" });
+    dev(ana.client, { cmd: "status", kind: "slow" });
+    await ticksUntil(() => ana.client.state.players.get("ana")?.slowLeft! > 0, 10);
+    expect(ana.client.state.players.get("ana")!.statusSpeedMult).toBeCloseTo(0.7, 6);
+    dev(ana.client, { cmd: "status", kind: "stun" });
+    await ticksUntil(() => ana.client.state.players.get("ana")?.stunLeft! > 0, 10);
+    expect(ana.client.state.players.get("ana")!.statusSpeedMult).toBe(0);
+    dev(ana.client, { cmd: "status", kind: "burn" });
+    await ticksUntil(() => ana.client.state.players.get("ana")?.burnLeft! > 0, 10);
+
+    dev(ana.client, { cmd: "god", on: true });
+    dev(ana.client, { cmd: "spawn", kind: "brute", count: 1, tier: 2, elite: true, nature: "fire" });
+    await ticksUntil(() => ana.client.state.enemies.size === 1, 10);
+    expect([...ana.client.state.enemies.values()][0]).toMatchObject({ elite: true, nature: "fire", weaponNature: "fire" });
   });
 
   it("clock adelanta el reloj, weapon equipa el arma con su tier y los comandos inválidos se ignoran", async () => {

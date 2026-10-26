@@ -41,7 +41,7 @@ import {
   type WeaponId,
 } from "@roguelike/shared";
 import { AbilitySystem } from "../sim/AbilitySystem";
-import { CombatSystem, moveSpeedMult, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
+import { applyStatus, CombatSystem, moveSpeedMult, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
 import { EnemySystem, type SimPlayer } from "../sim/EnemySystem";
 import { LevelUpSystem, type ChoiceEvent } from "../sim/LevelUpSystem";
 import { OrbSystem } from "../sim/OrbSystem";
@@ -312,11 +312,15 @@ export class RunRoom extends Room<{ state: RunState }> {
         c.abilityCd = {};
         break;
       case "spawn": {
+        const elite = cmd.elite ? { nature: cmd.nature } : undefined;
         for (const spot of sandboxSpawnSpots(this.dungeon, record.kinematic, cmd.count)) {
-          this.enemySystem.spawnAt(cmd.kind, spot.x, spot.z, cmd.tier);
+          this.enemySystem.spawnAt(cmd.kind, spot.x, spot.z, cmd.tier, elite);
         }
         break;
       }
+      case "status":
+        applyStatus(c, cmd.kind);
+        break;
       case "killAll":
         this.enemySystem.killAll();
         break;

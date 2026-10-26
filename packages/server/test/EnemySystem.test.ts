@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ARMED_CHANCE,
+  ELITE,
   ENEMY_DEFS,
   PLAYER_RADIUS,
+  WEAPONS,
+  enemyScale,
   enemyAttack,
   ENEMY_SPAWN_MIN_PLAYER_DIST_TILES,
   SIM_DT,
@@ -820,5 +823,93 @@ describe("EnemySystem: naturaleza de las armas", () => {
     expect(alone.sys.takeChains()).toEqual([]);
     const unlucky = chainSetup(0.9, [2]);
     expect(unlucky.sys.strike(unlucky.made[0]!.id, 20, LIGHT)).toHaveLength(1);
+  });
+});
+
+describe("élites", () => {
+  const spots = Array.from({ length: 100 }, (_, i) => ({ x: 30 + (i % 10) * 0.1, z: 30 + Math.floor(i / 10) * 0.1 }));
+  const wave = (floorTime: number, kinds: EnemyKind[], seed = 4) => {
+    const sys = new EnemySystem(arena(), createRng(seed));
+    sys.setFloorClock(floorTime, 1, 1);
+    return { sys, list: sys.spawnWave(spots, kinds) };
+  };
+
+  it("antes del minuto 3 no hay élites ni se consume RNG de más", () => {
+    const { list } = wave(100, ["minion", "brute"]);
+    expect(list.some((e) => e.elite)).toBe(false);
+    expect(list.every((e) => e.nature === "none")).toBe(true);
+  });
+
+  it("con eliteChance > 0 hay élites: vida x3 del escalado, armados con su naturaleza e inmunes al aturdimiento", () => {
+    const { sys, list } = wave(3000, ["minion", "brute"]);
+    const elites = list.filter((e) => e.elite);
+    expect(elites.length).toBeGreaterThan(0);
+    expect(elites.length).toBeLessThan(list.length);
+    const { hpMult, damageMult } = enemyScale(3000, 1);
+    for (const e of elites) {
+      expect(e.maxHp).toBe(Math.round(ENEMY_DEFS[e.kind].hp * hpMult) * ELITE.hpMult);
+      expect(e.damageMult).toBeCloseTo(damageMult * ELITE.damageMult, 12);
+      expect(["fire", "ice", "lightning"]).toContain(e.nature);
+      expect(e.loadout).toMatchObject({ weaponId: ARMED_CHANCE[e.kind]!.weaponId, nature: e.nature });
+      sys.stun(e.id, 2);
+      expect(e.stunned).toBe(0);
+    }
+    for (const e of list.filter((x) => !x.elite)) {
+      expect(e.nature).toBe("none");
+      expect(e.maxHp).toBe(Math.round(ENEMY_DEFS[e.kind].hp * hpMult));
+    }
+  });
+
+  it("los golpes cuerpo a cuerpo de un élite llevan su naturaleza y su quemadura", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    const e = sys.spawnAt("minion", 20, 30, 1, { nature: "fire" });
+    e.damageMult = 2;
+    const hits = run(sys, [P("a", 20.9, 30)], 60);
+    expect(hits[0]).toMatchObject({ nature: "fire", burnDps: ELITE.playerBurnDps * 2 });
+  });
+
+  it("spawnAt sin élite no marca nada en los golpes", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    sys.spawnAt("minion", 20, 30, 1);
+    const hits = run(sys, [P("a", 20.9, 30)], 60);
+    expect(hits[0]).not.toHaveProperty("nature");
+  });
+
+  it("un piromante élite alterna zona y rayo en lanzamientos seguidos, con el daño y el tier propios", () => {
+    const sys = new EnemySystem(arena(), createRng(5));
+    const e = sys.spawnAt("pyromancer", 20, 30, 2, { nature: "ice" });
+    const a = P("a", 29, 30);
+    const seen: string[] = [];
+    for (let i = 0; i < 600 && seen.length < 3; i++) {
+      sys.step([a], SIM_DT);
+      const h = sys.hazards.find((x) => x.phase === "warn" && !seen.includes(x.id + x.kind));
+      if (h && !seen.some((s) => s.startsWith(h.id))) seen.push(h.id + h.kind);
+    }
+    expect(seen.map((s) => s.replace(/^h\d+/, ""))).toEqual(["zone", "beam", "zone"]);
+    expect(e.spellTier).toBe(2);
+    expect(sys.hazards.every((h) => h.nature === "ice" && h.damage === Math.round(ENEMY_DEFS.pyromancer.damage * e.damageMult))).toBe(true);
+  });
+
+  it("matar a un élite da la xp x4 y, con la RNG forzada, suelta su arma un tier arriba con su naturaleza", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    const e = sys.spawnAt("brute", 20, 30, 3, { nature: "lightning" });
+    vi.spyOn(sys["rng"], "next").mockReturnValue(0);
+    const r = sys.damage(e.id, 1e9);
+    expect(r.xp).toBe(ENEMY_DEFS.brute.xp * ELITE.xpMult);
+    expect(r.drop).toEqual({ weaponId: ARMED_CHANCE.brute!.weaponId, tier: 4, nature: "lightning" });
+  });
+
+  it("el hechicero élite suelta un arma al azar de WEAPONS; sin suerte no suelta, pero la xp sigue x4", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    const e = sys.spawnAt("mage", 20, 30, 2, { nature: "fire" });
+    const r = vi.spyOn(sys["rng"], "next").mockReturnValue(0);
+    const win = sys.damage(e.id, 1e9);
+    expect(Object.keys(WEAPONS)).toContain(win.drop!.weaponId);
+    expect(win.drop).toMatchObject({ tier: 3, nature: "fire" });
+    const f = sys.spawnAt("mage", 20, 30, 1, { nature: "fire" });
+    r.mockReturnValue(0.99);
+    const lose = sys.damage(f.id, 1e9);
+    expect(lose.drop).toBeNull();
+    expect(lose.xp).toBe(ENEMY_DEFS.mage.xp * ELITE.xpMult);
   });
 });

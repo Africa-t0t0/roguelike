@@ -172,7 +172,7 @@ export class AbilitySystem {
       if ((pressed & (1 << i)) === 0) continue;
       const { id, rank } = slots[i]!;
       const def = ABILITIES[id];
-      if (def.kind !== "active" || (c.abilityCd[id] ?? 0) > 0 || c.swingTimer > 0 || c.abilityAnim) continue;
+      if (def.kind !== "active" || (c.abilityCd[id] ?? 0) > 0 || c.swingTimer > 0 || c.abilityAnim || c.stunLeft > 0) continue;
       // Celeridad: el enfriamiento se fija al lanzarla.
       c.abilityCd[id] = def.cooldownS * c.mods.cooldownMult;
       c.abilityAnim = {
@@ -184,7 +184,7 @@ export class AbilitySystem {
     }
 
     const block = slots.findIndex((s) => s.id === "block");
-    c.blocking = block >= 0 && (input.abilities & (1 << block)) !== 0 && c.swingTimer === 0 && !c.abilityAnim;
+    c.blocking = block >= 0 && (input.abilities & (1 << block)) !== 0 && c.swingTimer === 0 && !c.abilityAnim && c.stunLeft === 0;
     return res;
   }
 

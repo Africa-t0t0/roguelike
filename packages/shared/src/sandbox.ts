@@ -21,7 +21,9 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `clearCards`: quita todas las cartas y habilidades.
  * - `god` / `noCooldown` / `waves`: interruptores (`waves` apaga oleadas y el llenado de salas para todos).
  * - `heal`: vida al máximo y enfriamientos a cero.
- * - `spawn`: `count` enemigos delante del jugador; `tier` 0 = desarmado (los magos siempre lo van).
+ * - `spawn`: `count` enemigos delante del jugador; `tier` 0 = desarmado (los magos siempre lo van). Con `elite`
+ *   son élites (de la `nature` dada o sorteada) y los que pueden llevar arma la llevan siempre.
+ * - `status`: aplica a quien lo pide quemadura, ralentización o aturdimiento, con los números de los élites.
  * - `killAll`: mata a todos los enemigos sin dejar orbes ni armas.
  * - `clock`: adelanta el reloj del piso `seconds`.
  * - `freeze`: congela a los enemigos que no preparan un ataque (proyectiles y peligros siguen).
@@ -36,11 +38,12 @@ export type DevCommand =
   | { cmd: "noCooldown"; on: boolean }
   | { cmd: "waves"; on: boolean }
   | { cmd: "heal" }
-  | { cmd: "spawn"; kind: EnemyKind; count: number; tier: 0 | CasterTier }
+  | { cmd: "spawn"; kind: EnemyKind; count: number; tier: 0 | CasterTier; elite?: boolean; nature?: Exclude<Nature, "none"> }
   | { cmd: "killAll" }
   | { cmd: "clock"; seconds: number }
   | { cmd: "freeze"; on: boolean }
   | { cmd: "castNow" }
+  | { cmd: "status"; kind: "burn" | "slow" | "stun" }
   | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
@@ -77,10 +80,21 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
     case "killAll":
     case "castNow":
       return { cmd: m.cmd };
-    case "spawn":
-      return has(ENEMY_DEFS, m.kind) && isInt(m.count, 1, SANDBOX_MAX_SPAWN) && isInt(m.tier, 0, 3)
-        ? { cmd: "spawn", kind: m.kind as EnemyKind, count: m.count, tier: m.tier as 0 | CasterTier }
-        : null;
+    case "spawn": {
+      if (!has(ENEMY_DEFS, m.kind) || !isInt(m.count, 1, SANDBOX_MAX_SPAWN) || !isInt(m.tier, 0, 3)) return null;
+      const spawn: DevCommand = { cmd: "spawn", kind: m.kind as EnemyKind, count: m.count, tier: m.tier as 0 | CasterTier };
+      if (m.elite !== undefined) {
+        if (typeof m.elite !== "boolean") return null;
+        spawn.elite = m.elite;
+      }
+      if (m.nature !== undefined && m.nature !== "none") {
+        if (!(ELEMENTS as readonly unknown[]).includes(m.nature)) return null;
+        spawn.nature = m.nature as Exclude<Nature, "none">;
+      }
+      return spawn;
+    }
+    case "status":
+      return m.kind === "burn" || m.kind === "slow" || m.kind === "stun" ? { cmd: "status", kind: m.kind } : null;
     case "clock":
       return typeof m.seconds === "number" && Number.isFinite(m.seconds) && m.seconds > 0 && m.seconds <= SANDBOX_MAX_CLOCK_STEP_S
         ? { cmd: "clock", seconds: m.seconds }
