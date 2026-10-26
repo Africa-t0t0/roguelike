@@ -2,8 +2,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { boot, type ColyseusTestServer } from "@colyseus/testing";
 import type { Room as ClientRoom } from "@colyseus/sdk";
 import { ErrorCode, matchMaker } from "colyseus";
+import type { FloorWeapon } from "../src/rooms/PlayerRegistry";
 import {
   createRng,
+  GEAR_SLOTS,
+  playerStats,
+  RELICS,
+  type GearItem,
   generateDungeon,
   isWalkableTile,
   roomSpawnPoints,
@@ -68,7 +73,7 @@ afterEach(async () => {
 
 type FloorMsg = { items: { weaponId: string; tier: number; x: number; z: number; ttl: number }[] };
 /** Solo arma y posición (sin vencimiento): para comparar listas de armas del suelo. */
-const place = (items: readonly { weaponId: string; tier: number; x: number; z: number }[]) =>
+const place = (items: readonly { weaponId?: string; tier?: number; x: number; z: number }[]) =>
   items.map(({ weaponId, tier, x, z }) => ({ weaponId, tier, x, z }));
 type ChoiceMsg = { offerId: number; cards: unknown[]; index: number; total: number; deadlineS: number };
 
@@ -934,7 +939,8 @@ describe("RunRoom: orbes y botín", () => {
       t.nature = "ice";
       t.kind = "brute";
       t.loadout = { weaponId: "great-sword", tier: 2, nature: "ice" };
-      vi.spyOn(room["enemySystem"]["rng"], "next").mockReturnValue(0);
+      // dropChance pasa, el reparto cae del lado del arma y la reliquia no sale
+      vi.spyOn(room["enemySystem"]["rng"], "next").mockReturnValueOnce(0).mockReturnValueOnce(0.9).mockReturnValue(0.99);
     });
     await ticksUntil(() => ana.floors.length >= 2 && beto.floors.length >= 2, 10);
     const dropped = { weaponId: "great-sword", tier: 3, nature: "ice", x: target.x, z: target.z };
@@ -950,7 +956,7 @@ describe("RunRoom: orbes y botín", () => {
     const r = record("ana");
     r.combat.weaponNature = "ice";
     const me = r.kinematic;
-    r.floorWeapons = [{ weaponId: "great-sword", tier: 2, nature: "fire", x: me.x + 1, z: me.z, expiresAt: room["floorTime"] + 30 }];
+    r.floorWeapons = [{ kind: "weapon" as const, weaponId: "great-sword", tier: 2, nature: "fire", x: me.x + 1, z: me.z, expiresAt: room["floorTime"] + 30 }];
     const sent = ana.floors.length;
     ana.client.send(MSG.input, idle(1, { interact: true }));
     await ticksUntil(() => player("ana").lastSeq === 1, 5);
@@ -1001,7 +1007,7 @@ describe("RunRoom: orbes y botín", () => {
     const r = record("ana");
     r.combat.weaponId = "great-sword";
     r.combat.weaponTier = 3;
-    r.floorWeapons[0] = { ...r.floorWeapons[0]!, tier: 2 };
+    r.floorWeapons[0] = { ...(r.floorWeapons[0] as FloorWeapon), tier: 2 };
     const floor = r.floorWeapons.map((f) => ({ ...f }));
     room["orbs"].spawn(1000, 1000, 7, room.state.tick);
     await ticksUntil(() => player("ana").weaponTier === 3 && room.state.orbs.size > 0, 5);
@@ -1069,7 +1075,7 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     const p = record("ana").progress;
     expect(Object.keys(p.stats).length + p.abilities.length).toBe(1);
     // Al aplicarse, los multiplicadores salen del progreso y se sincronizan.
-    expect(record("ana").combat.mods).toEqual(playerMods(p));
+    expect(record("ana").combat.mods).toMatchObject(playerMods(p));
     expect(player("ana").moveSpeedMult).toBe(playerMods(p).moveSpeedMult);
     expect(player("ana").attackSpeedMult).toBe(playerMods(p).attackSpeedMult);
     const t1 = room.state.tick;
@@ -1168,7 +1174,7 @@ describe("RunRoom: vencimiento de las armas del suelo", () => {
     await ticksUntil(() => ana.floors.length >= 1, 10);
     record("ana").floorWeapons = [];
     const me = record("ana").kinematic;
-    room["dropWeapon"]({ weaponId: "great-sword", tier: 2, nature: "none", x: me.x + 5, z: me.z });
+    room["dropItem"]({ kind: "weapon", weaponId: "great-sword", tier: 2, nature: "none", x: me.x + 5, z: me.z });
     await ticksUntil(() => ana.floors.length >= 2, 10);
     const f = record("ana").floorWeapons[0]!;
     expect(f.expiresAt).toBeCloseTo(room["floorTime"] + FLOOR_WEAPON_TTL_S, 0);
@@ -1470,16 +1476,22 @@ describe("HTTP", () => {
 describe("RunRoom: cofres", () => {
   const d = generateDungeon(SEED, 1);
   const idle = (seq: number) => ({ ...attackInput(seq, 0, room.state.tick), attack: false, interact: true });
-  /** RNG del cofre con `next` fijo: <0,6 arma, <0,85 orbes, si no vida. */
+  /** RNG del cofre con `next` fijo: <0,37 arma, <0,67 equipo, <0,75 reliquia, <0,9 orbes, si no vida. */
   const forceLoot = (v: number) => {
     room["chestRng"] = { ...createRng(9), next: () => v };
   };
   const chest = () => [...room.state.chests.entries()][0]!;
 
   it("rollChestLoot reparte según CHEST_LOOT", () => {
-    expect(rollChestLoot({ ...createRng(1), next: () => 0.59 })).toBe("weapon");
-    expect(rollChestLoot({ ...createRng(1), next: () => 0.6 })).toBe("orbs");
-    expect(rollChestLoot({ ...createRng(1), next: () => 0.85 })).toBe("heal");
+    const roll = (v: number) => rollChestLoot({ ...createRng(1), next: () => v });
+    expect(roll(0.36)).toBe("weapon");
+    expect(roll(0.37)).toBe("gear");
+    expect(roll(0.66)).toBe("gear");
+    expect(roll(0.67)).toBe("relic");
+    expect(roll(0.74)).toBe("relic");
+    expect(roll(0.75)).toBe("orbs");
+    expect(roll(0.89)).toBe("orbs");
+    expect(roll(0.9)).toBe("heal");
   });
 
   it("la sala trae ceil(combate / 2) cofres cerrados, también en el estado del cliente", async () => {
@@ -1503,7 +1515,7 @@ describe("RunRoom: cofres", () => {
     teleport("beto", { x: cs.x, z: cs.z + 5 });
     const before = [record("ana").floorWeapons.length, record("beto").floorWeapons.length];
     // Un arma del suelo también al alcance: el cofre tiene prioridad.
-    record("ana").floorWeapons.push({ weaponId: "great-sword", tier: 1, nature: "none", x: cs.x + 1, z: cs.z, expiresAt: 1e9 });
+    record("ana").floorWeapons.push({ kind: "weapon" as const, weaponId: "great-sword", tier: 1, nature: "none", x: cs.x + 1, z: cs.z, expiresAt: 1e9 });
     const equipped = record("ana").combat.weaponId;
     ana.client.send(MSG.input, idle(1));
     await ticksUntil(() => player("ana").lastSeq === 1, 5);
@@ -1511,7 +1523,7 @@ describe("RunRoom: cofres", () => {
     expect(record("ana").combat.weaponId).toBe(equipped);
     expect(record("ana").floorWeapons).toHaveLength(before[0]! + 2);
     expect(record("beto").floorWeapons).toHaveLength(before[1]! + 1);
-    const mine = record("ana").floorWeapons.at(-1)!;
+    const mine = record("ana").floorWeapons.at(-1) as FloorWeapon;
     expect(mine.tier).toBeGreaterThanOrEqual(1);
     expect(mine.tier).toBeLessThanOrEqual(4);
     expect(mine.nature).not.toBe("none");
@@ -1528,10 +1540,62 @@ describe("RunRoom: cofres", () => {
     await ticksUntil(() => ana.client.state.chests.get(id)?.open === true, 10);
   });
 
+  it("cofre de equipo: Ana y Beto reciben cada uno su propia pieza (tier 1..4), 1 m hacia quien abre", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await Promise.all([ana.welcome, beto.welcome]);
+    await ticksUntil(() => ana.floors.length >= 1 && beto.floors.length >= 1, 10);
+    forceLoot(0.5);
+    const [, cs] = chest();
+    teleport("ana", { x: cs.x + 1, z: cs.z });
+    teleport("beto", { x: cs.x, z: cs.z + 5 });
+    const before = [record("ana").floorWeapons.length, record("beto").floorWeapons.length];
+    ana.client.send(MSG.input, idle(1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    const mine = record("ana").floorWeapons.at(-1)!;
+    const theirs = record("beto").floorWeapons.at(-1)!;
+    expect(record("ana").floorWeapons).toHaveLength(before[0]! + 1);
+    expect(record("beto").floorWeapons).toHaveLength(before[1]! + 1);
+    for (const g of [mine, theirs]) {
+      expect(g.kind).toBe("gear");
+      if (g.kind !== "gear") continue;
+      expect(g.item.tier).toBeGreaterThanOrEqual(1);
+      expect(g.item.tier).toBeLessThanOrEqual(4);
+      expect(GEAR_SLOTS).toContain(g.item.slot);
+      expect(g.expiresAt).toBeGreaterThan(room.state.floorTime);
+    }
+    // Cada uno la suya: se sortean por separado (objetos distintos).
+    expect(mine).not.toBe(theirs);
+    expect(Math.hypot(mine.x - cs.x, mine.z - cs.z)).toBeCloseTo(1, 5);
+    await ticksUntil(() => ana.floors.length >= 2 && beto.floors.length >= 2, 10);
+    expect(beto.floors.at(-1)!.items.at(-1)).toMatchObject({ kind: "gear", item: (theirs as { item: unknown }).item, x: theirs.x, z: theirs.z });
+  });
+
+  it("cofre de reliquia: cada jugador recibe la suya", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await Promise.all([ana.welcome, beto.welcome]);
+    await ticksUntil(() => ana.floors.length >= 1 && beto.floors.length >= 1, 10);
+    forceLoot(0.7);
+    const [, cs] = chest();
+    teleport("ana", { x: cs.x + 1, z: cs.z });
+    const before = [record("ana").floorWeapons.length, record("beto").floorWeapons.length];
+    ana.client.send(MSG.input, idle(1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    for (const key of ["ana", "beto"]) {
+      expect(record(key).floorWeapons).toHaveLength(before[key === "ana" ? 0 : 1]! + 1);
+      const r = record(key).floorWeapons.at(-1)!;
+      expect(r.kind).toBe("relic");
+      expect(Object.keys(RELICS)).toContain((r as { id: string }).id);
+    }
+    await ticksUntil(() => beto.floors.length >= 2, 10);
+    expect(beto.floors.at(-1)!.items.at(-1)).toMatchObject({ kind: "relic", id: (record("beto").floorWeapons.at(-1) as { id: string }).id });
+  });
+
   it("botín de orbes: 30 XP en el cofre", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
-    forceLoot(0.7);
+    forceLoot(0.8);
     const [, cs] = chest();
     teleport("ana", { x: cs.x + 1, z: cs.z });
     const spawn = vi.spyOn(room["orbs"], "spawn");
@@ -1543,7 +1607,7 @@ describe("RunRoom: cofres", () => {
   it("botín de vida: vida al máximo", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
-    forceLoot(0.9);
+    forceLoot(0.95);
     const [, cs] = chest();
     teleport("ana", { x: cs.x + 1, z: cs.z });
     record("ana").combat.hp = 10;
@@ -1559,6 +1623,111 @@ describe("RunRoom: cofres", () => {
     ana.client.send(MSG.input, idle(1));
     await ticksUntil(() => player("ana").lastSeq === 1, 5);
     expect(chest()[1].open).toBe(false);
+  });
+});
+
+describe("RunRoom: equipo y reliquias del suelo", () => {
+  const idle = (seq: number) => ({ ...attackInput(seq, 0, room.state.tick), attack: false, interact: true });
+  const boots = (tier: 1 | 2 | 3 | 4, value = 0.05): GearItem => ({ slot: "boots", tier, stats: [{ stat: "moveSpeed", value }], legendary: null });
+  const press = async (ana: Awaited<ReturnType<typeof join>>, seq: number) => {
+    ana.client.send(MSG.input, idle(seq));
+    await ticksUntil(() => player("ana").lastSeq === seq, 5);
+  };
+
+  it("recoger botas del suelo las equipa y deja las anteriores en el suelo con kind gear y vencimiento nuevo", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    const r = record("ana");
+    const old = boots(1);
+    r.gear.boots = old;
+    const me = r.kinematic;
+    r.floorWeapons = [{ kind: "gear", item: boots(3, 0.1), x: me.x + 1, z: me.z, expiresAt: room["floorTime"] + 5 }];
+    const sent = ana.floors.length;
+    await press(ana, 1);
+    expect(r.gear.boots!.tier).toBe(3);
+    expect(r.combat.mods.moveSpeedMult).toBeCloseTo(1.1, 12);
+    expect(r.floorWeapons).toHaveLength(1);
+    expect(r.floorWeapons[0]).toMatchObject({ kind: "gear", item: old, x: me.x + 1, z: me.z });
+    expect(r.floorWeapons[0]!.expiresAt).toBeGreaterThan(room["floorTime"] + 5);
+    await ticksUntil(() => ana.floors.length > sent && player("ana").gear.get("boots")?.tier === 3, 10);
+    expect(ana.floors.at(-1)!.items[0]).toMatchObject({ kind: "gear", item: old });
+  });
+
+  it("recoger una pieza de una ranura vacía la quita del suelo; la reliquia también se intercambia", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    const r = record("ana");
+    const me = r.kinematic;
+    r.floorWeapons = [
+      { kind: "gear", item: boots(2), x: me.x + 1, z: me.z, expiresAt: room["floorTime"] + 30 },
+      { kind: "relic", id: "oakHeart", x: me.x, z: me.z + 3, expiresAt: room["floorTime"] + 30 },
+    ];
+    await press(ana, 1);
+    expect(r.gear.boots!.tier).toBe(2);
+    expect(r.floorWeapons.map((f) => f.kind)).toEqual(["relic"]);
+    teleport("ana", { x: me.x, z: me.z + 3.5 });
+    await press(ana, 2);
+    expect(r.relic).toBe("oakHeart");
+    expect(r.floorWeapons).toHaveLength(0);
+    expect(r.combat.maxHp).toBe(playerStats("warrior", 1).maxHp + 40);
+    // Una segunda reliquia del suelo deja la anterior.
+    r.floorWeapons = [{ kind: "relic", id: "scholarEye", x: r.kinematic.x, z: r.kinematic.z, expiresAt: room["floorTime"] + 30 }];
+    await press(ana, 3);
+    expect(r.relic).toBe("scholarEye");
+    expect(r.floorWeapons).toMatchObject([{ kind: "relic", id: "oakHeart" }]);
+    expect(r.combat.maxHp).toBe(playerStats("warrior", 1).maxHp);
+  });
+
+  it("con un arma y una pieza a la misma distancia se toma la primera de la lista; el más cercano gana", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    const r = record("ana");
+    const me = r.kinematic;
+    const weapon = { kind: "weapon" as const, weaponId: "great-sword" as const, tier: 2 as const, nature: "none" as const, x: me.x + 1, z: me.z, expiresAt: 1e9 };
+    const gear = { kind: "gear" as const, item: boots(2), x: me.x - 1, z: me.z, expiresAt: 1e9 };
+    r.floorWeapons = [gear, weapon];
+    await press(ana, 1);
+    // Misma distancia: la pieza (primera) se equipa y el arma sigue en el suelo.
+    expect(r.gear.boots!.tier).toBe(2);
+    expect(r.combat.weaponId).not.toBe("great-sword");
+    expect(r.floorWeapons).toEqual([weapon]);
+    // Más cercano: el arma, aunque la pieza esté primero.
+    r.floorWeapons = [{ ...gear, item: boots(3), x: me.x - 1.5 }, weapon];
+    await press(ana, 2);
+    expect(r.combat.weaponId).toBe("great-sword");
+    expect(r.gear.boots!.tier).toBe(2);
+  });
+
+  it("el cofre tiene prioridad sobre una pieza al alcance", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    room["chestRng"] = { ...createRng(9), next: () => 0.8 };
+    const [id, cs] = [...room.state.chests.entries()][0]!;
+    teleport("ana", { x: cs.x + 1, z: cs.z });
+    const r = record("ana");
+    r.floorWeapons = [{ kind: "gear", item: boots(2), x: cs.x + 1, z: cs.z, expiresAt: 1e9 }];
+    await press(ana, 1);
+    expect(room.state.chests.get(id)!.open).toBe(true);
+    expect(r.gear.boots).toBeUndefined();
+    expect(r.floorWeapons).toHaveLength(1);
+  });
+
+  it("equipo y reliquia vencen como las armas", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    startRun();
+    const r = record("ana");
+    r.floorWeapons = [
+      { kind: "gear", item: boots(1), x: 0, z: 0, expiresAt: room["floorTime"] + 0.1 },
+      { kind: "relic", id: "oakHeart", x: 0, z: 0, expiresAt: room["floorTime"] + 1e6 },
+    ];
+    await ticksUntil(() => r.floorWeapons.length === 1, 20);
+    expect(r.floorWeapons[0]!.kind).toBe("relic");
   });
 });
 
@@ -1632,6 +1801,115 @@ describe("RunRoom: sandbox", () => {
     dev(ana.client, { cmd: "weapon", weaponId: "great-sword", tier: 3, nature: "ice" });
     await ticksUntil(() => player("ana").weaponNature === "ice", 10);
     expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", weaponTier: 3, weaponNature: "ice" });
+  });
+
+  it("gear equip: sincroniza la pieza en PlayerState, sube la velocidad y se conserva al reconectar", async () => {
+    const { ana } = await sandboxRoom();
+    const base = player("ana").moveSpeedMult;
+    dev(ana.client, { cmd: "gear", slot: "boots", tier: 3, action: "equip" });
+    await ticksUntil(() => player("ana").gear.get("boots")?.tier === 3, 10);
+    const gs = player("ana").gear.get("boots")!;
+    expect(gs.slot).toBe("boots");
+    expect(gs.legendary).toBe(false);
+    expect(["fire", "ice", "lightning", "none"]).toContain(gs.glow);
+    const item = JSON.parse(gs.data) as GearItem;
+    expect(item).toMatchObject({ slot: "boots", tier: 3 });
+    expect(player("ana").moveSpeedMult).toBeCloseTo(base + 0.1 + (item.stats.slice(1).find((e) => e.stat === "moveSpeed")?.value ?? 0), 12);
+    expect(player("ana").moveSpeedMult).toBeGreaterThan(base);
+    const maxHp = player("ana").maxHp;
+    const mult = player("ana").moveSpeedMult;
+    await ana.client.leave();
+    await ticksUntil(() => !room.state.players.has("ana"), 20);
+    const back = await join("Ana", "t-ana");
+    await back.welcome;
+    await ticksUntil(() => player("ana").gear.get("boots")?.tier === 3, 10);
+    expect(player("ana").moveSpeedMult).toBe(mult);
+    expect(player("ana").maxHp).toBe(maxHp);
+  });
+
+  it("gear equip de un casco no duplica ni pierde la vida máxima al reconectar ni al tomar el control", async () => {
+    const { ana } = await sandboxRoom();
+    const base = playerStats("warrior", 1).maxHp;
+    dev(ana.client, { cmd: "gear", slot: "helmet", tier: 2, action: "equip" });
+    await ticksUntil(() => player("ana").maxHp > base, 10);
+    const maxHp = player("ana").maxHp;
+    expect(maxHp).toBe(base + 22.5);
+    const oldLeft = new Promise<number>((resolve) => ana.client.onLeave((code) => resolve(code)));
+    const again = await join("Ana", "t-ana");
+    await again.welcome;
+    await oldLeft;
+    await ticksUntil(() => room.clients.length === 1, 20);
+    await settle();
+    expect(player("ana").maxHp).toBe(maxHp);
+    expect(record("ana").combat.maxHp).toBe(maxHp);
+  });
+
+  it("gear drop deja una pieza nueva en el suelo a 2,5 m (o a sus pies si hay muro) y se manda al cliente", async () => {
+    const { ana } = await sandboxRoom();
+    const k = record("ana").kinematic;
+    const sent = ana.floors.length;
+    dev(ana.client, { cmd: "gear", slot: "chest", tier: 2, action: "drop" });
+    await ticksUntil(() => ana.floors.length > sent, 10);
+    const g = record("ana").floorWeapons.at(-1)!;
+    expect(g).toMatchObject({ kind: "gear", item: { slot: "chest", tier: 2 } });
+    const d = Math.hypot(g.x - k.x, g.z - k.z);
+    expect(d === 0 || Math.abs(d - 2.5) < 1e-9).toBe(true);
+    expect(record("ana").gear.chest).toBeUndefined();
+    expect(ana.floors.at(-1)!.items.at(-1)).toMatchObject({ kind: "gear", item: { slot: "chest", tier: 2 } });
+  });
+
+  it("relic equipa la reliquia y la sincroniza", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "relic", id: "hawkFeather" });
+    await ticksUntil(() => player("ana").relic === "hawkFeather", 10);
+    expect(record("ana").relic).toBe("hawkFeather");
+    expect(player("ana").moveSpeedMult).toBeCloseTo(1.12, 12);
+  });
+
+  it("Corazón de cristal con la vida llena: vida máxima ×0,75 y la actual se acota; quitarlo la recalcula", async () => {
+    const { ana } = await sandboxRoom();
+    const base = playerStats("warrior", 1).maxHp;
+    expect(record("ana").combat.hp).toBe(base);
+    dev(ana.client, { cmd: "relic", id: "glassHeart" });
+    await ticksUntil(() => player("ana").relic === "glassHeart", 10);
+    expect(record("ana").combat.maxHp).toBe(base * 0.75);
+    expect(record("ana").combat.hp).toBe(base * 0.75);
+    expect(player("ana").maxHp).toBe(base * 0.75);
+    dev(ana.client, { cmd: "relic", id: "scholarEye" });
+    await ticksUntil(() => player("ana").relic === "scholarEye", 10);
+    expect(record("ana").combat.maxHp).toBe(base);
+    // La vida no salta al quitar el trade-off (solo la regeneración pasiva la sube de a poco).
+    expect(record("ana").combat.hp).toBeCloseTo(base * 0.75, 0);
+  });
+
+  it("un élite muerto con la RNG forzada suelta una reliquia a cada jugador; un enemigo normal, una pieza con 1,5 %", async () => {
+    const { ana } = await sandboxRoom();
+    const sys = room["enemySystem"];
+    const kill = (id: string) => {
+      const r = sys.damage(id, 1e9);
+      room["spawnKills"]([{ x: r.x, z: r.z, xp: r.xp, drop: r.drop, gear: r.gear, relic: r.relic }]);
+    };
+    const next = vi.spyOn(sys["rng"], "next");
+    // Élite: no suelta arma ni pieza (0,99) pero sí reliquia (0,01 < 6 %).
+    next.mockReturnValueOnce(0.99).mockReturnValueOnce(0.01).mockReturnValue(0.99);
+    kill(sys.spawnAt("minion", 20, 30, 1, { nature: "fire" }).id);
+    expect(record("ana").floorWeapons.at(-1)).toMatchObject({ kind: "relic", x: 20, z: 30 });
+    expect(Object.keys(RELICS)).toContain((record("ana").floorWeapons.at(-1) as { id: string }).id);
+    // Normal sin arma: 0,0149 < 1,5 %.
+    const e2 = sys.spawnAt("minion", 21, 30, 0);
+    e2.loadout = null;
+    next.mockReset().mockReturnValue(0.0149);
+    kill(e2.id);
+    const g = record("ana").floorWeapons.at(-1)!;
+    expect(g).toMatchObject({ kind: "gear", x: 21, z: 30 });
+    expect((g as { item: GearItem }).item.tier).toBeLessThanOrEqual(2);
+    // 0,015 ya no.
+    const n = record("ana").floorWeapons.length;
+    const e3 = sys.spawnAt("minion", 22, 30, 0);
+    e3.loadout = null;
+    next.mockReset().mockReturnValue(0.015);
+    kill(e3.id);
+    expect(record("ana").floorWeapons).toHaveLength(n);
   });
 
   it("levelUp sin elegir sube niveles sin pausa; con elegir abre la elección con pausa", async () => {

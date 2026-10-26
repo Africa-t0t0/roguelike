@@ -131,6 +131,11 @@ export function rewindTick(nowTick: number, viewTick: number): number {
   return Math.min(nowTick, Math.max(nowTick - REWIND_MAX_TICKS, Math.round(viewTick)));
 }
 
+/** Vida máxima: (la del nivel + bonos de cartas y equipo) × `maxHpMult` (Corazón de cristal). */
+export function maxHpFor(cls: ClassId, level: number, mods: PlayerMods): number {
+  return (playerStats(cls, level).maxHp + mods.maxHpBonus) * mods.maxHpMult;
+}
+
 export function newCombatState(
   cls: ClassId,
   level: number,
@@ -175,7 +180,7 @@ export interface ImpactResult {
   step: number;
   hits: { enemyId: string; amount: number; killed: boolean; x: number; z: number }[];
   /** enemigos muertos por este impacto: dónde cayeron, su xp (para los orbes) y el arma que sueltan */
-  kills: { x: number; z: number; xp: number; drop: EnemyLoadout | null }[];
+  kills: { x: number; z: number; xp: number; drop: EnemyLoadout | null; gear: WeaponTier | null; relic: boolean }[];
 }
 
 export interface InputResult {
@@ -262,7 +267,7 @@ export class CombatSystem {
       // El primero es el golpeado (posición actual en el golpe); los demás, encadenados por el rayo.
       enemies.strike(e.id, amount, src).forEach((r, i) => {
         result.hits.push({ enemyId: r.enemyId, amount: r.amount, killed: r.killed, x: i === 0 ? e.x : r.x, z: i === 0 ? e.z : r.z });
-        if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
+        if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop, gear: r.gear, relic: r.relic });
       });
     }
     // Sed de sangre: cada kill propio cura.
@@ -346,12 +351,12 @@ export class CombatSystem {
   }
 
   /**
-   * Cambia los multiplicadores de sus cartas. La vida máxima pasa a ser la del nivel más `maxHpBonus`;
+   * Cambia los multiplicadores de sus cartas y equipo. La vida máxima pasa a ser `maxHpFor`;
    * la vida no sube con ella (la cura de Vitalidad la da `heal`) y se recorta si la máxima baja.
    */
   setMods(c: CombatState, mods: PlayerMods): void {
     c.mods = mods;
-    c.maxHp = playerStats(c.cls, this.level).maxHp + mods.maxHpBonus;
+    c.maxHp = maxHpFor(c.cls, this.level, mods);
     c.hp = Math.min(c.hp, c.maxHp);
   }
 
@@ -418,7 +423,7 @@ export class CombatSystem {
     }
     if (reached.length > 0) {
       for (const c of states.values()) {
-        const maxHp = playerStats(c.cls, this.level).maxHp + c.mods.maxHpBonus;
+        const maxHp = maxHpFor(c.cls, this.level, c.mods);
         const diff = maxHp - c.maxHp;
         c.maxHp = maxHp;
         if (!c.dead) c.hp += diff;

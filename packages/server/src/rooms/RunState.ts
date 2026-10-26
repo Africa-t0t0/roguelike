@@ -13,6 +13,21 @@ export const AbilitySlotState = schema(
 );
 export type AbilitySlotState = SchemaType<typeof AbilitySlotState>;
 
+/** Pieza de equipo puesta, por ranura (la clave del mapa). */
+export const GearState = schema(
+  {
+    slot: t.string(),
+    tier: t.number(),
+    legendary: t.boolean(),
+    /** resistencia más alta de la pieza: "fire", "ice", "lightning" o "none" (color del brillo) */
+    glow: t.string(),
+    /** el `GearItem` completo en JSON */
+    data: t.string(),
+  },
+  "GearState",
+);
+export type GearState = SchemaType<typeof GearState>;
+
 export const PlayerState = schema(
   {
     name: t.string(),
@@ -56,6 +71,10 @@ export const PlayerState = schema(
     burnLeft: t.number(),
     slowLeft: t.number(),
     stunLeft: t.number(),
+    /** equipo puesto por ranura ("helmet", "chest", "gloves", "boots") */
+    gear: t.map(GearState),
+    /** RelicId de la reliquia puesta; "" si no tiene */
+    relic: t.string(),
   },
   "PlayerState",
 );

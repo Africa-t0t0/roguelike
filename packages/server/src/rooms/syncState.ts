@@ -1,4 +1,4 @@
-import { xpToNext } from "@roguelike/shared";
+import { GEAR_SLOTS, xpToNext, type GearItem } from "@roguelike/shared";
 import { abilitySlots, type PlayerShot } from "../sim/AbilitySystem";
 import { abilityRank, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
@@ -8,6 +8,7 @@ import type { PlayerRecord } from "./PlayerRegistry";
 import {
   AbilitySlotState,
   EnemyState,
+  GearState,
   HazardState,
   OrbState,
   PlayerShotState,
@@ -15,6 +16,20 @@ import {
   type PlayerState,
   type RunState,
 } from "./RunState";
+
+/** Resistencia más alta de la pieza (sus propias entradas, sin `allRes`, que es igual para las tres); a igual, fuego, hielo, rayo. */
+function gearGlow(item: GearItem): string {
+  const res = { fire: 0, ice: 0, lightning: 0 };
+  for (const e of item.stats) {
+    if (e.stat === "resFire") res.fire += e.value;
+    else if (e.stat === "resIce") res.ice += e.value;
+    else if (e.stat === "resLightning") res.lightning += e.value;
+  }
+  let best = "none";
+  let bestV = 0;
+  for (const [k, v] of Object.entries(res)) if (v > bestV) [best, bestV] = [k, v];
+  return best;
+}
 
 export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: boolean): void {
   const k = record.kinematic;
@@ -45,6 +60,26 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.burnLeft = c.burnLeft;
   ps.slowLeft = c.slowLeft;
   ps.stunLeft = c.stunLeft;
+  ps.relic = record.relic ?? "";
+  for (const slot of GEAR_SLOTS) {
+    const item = record.gear[slot];
+    if (!item) {
+      if (ps.gear.has(slot)) ps.gear.delete(slot);
+      continue;
+    }
+    const data = JSON.stringify(item);
+    let gs = ps.gear.get(slot);
+    if (gs?.data === data) continue;
+    if (!gs) {
+      gs = new GearState();
+      ps.gear.set(slot, gs);
+    }
+    gs.slot = slot;
+    gs.tier = item.tier;
+    gs.legendary = item.legendary !== null;
+    gs.glow = gearGlow(item);
+    gs.data = data;
+  }
 
   // Casillas en su sitio: solo se agregan o quitan entradas si cambia la cantidad.
   const slots = abilitySlots(c);

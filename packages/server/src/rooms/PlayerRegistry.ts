@@ -3,6 +3,9 @@ import {
   newComboTimers,
   newProgress,
   normalizeName,
+  type GearItem,
+  type GearSlot,
+  type RelicId,
   type JoinErrorCode,
   type KinematicState,
   type PlayerInput,
@@ -13,18 +16,22 @@ import {
 } from "@roguelike/shared";
 import { newCombatState, type CombatState } from "../sim/CombatSystem";
 
-/** Arma del suelo propia de un jugador (cada uno ve y toma solo las suyas). */
-export interface FloorWeapon {
-  weaponId: WeaponId;
-  tier: WeaponTier;
-  nature: Nature;
+/** Posición y vencimiento comunes a todo objeto del suelo. */
+interface FloorSpot {
   x: number;
   z: number;
   /** `floorTime` en que vence (tiempo simulado: se congela en la pausa) */
   expiresAt: number;
 }
 
-/** Quita del registro las armas del suelo vencidas en `floorTime`; devuelve si quitó alguna. */
+export type FloorWeapon = { kind: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature } & FloorSpot;
+export type FloorGear = { kind: "gear"; item: GearItem } & FloorSpot;
+export type FloorRelic = { kind: "relic"; id: RelicId } & FloorSpot;
+
+/** Objeto del suelo propio de un jugador (cada uno ve y toma solo los suyos): arma, pieza de equipo o reliquia. */
+export type FloorItem = FloorWeapon | FloorGear | FloorRelic;
+
+/** Quita del registro los objetos del suelo vencidos en `floorTime`; devuelve si quitó alguna. */
 export function pruneFloorWeapons(record: PlayerRecord, floorTime: number): boolean {
   const keep = record.floorWeapons.filter((f) => f.expiresAt > floorTime);
   if (keep.length === record.floorWeapons.length) return false;
@@ -46,7 +53,11 @@ export interface PlayerRecord {
    */
   combat: CombatState;
   /** Se crean con el registro; reconnect y takeover las conservan. */
-  floorWeapons: FloorWeapon[];
+  floorWeapons: FloorItem[];
+  /** Equipo puesto, por ranura; reconnect y takeover lo conservan. */
+  gear: Partial<Record<GearSlot, GearItem>>;
+  /** Reliquia puesta, si la tiene; reconnect y takeover la conservan. */
+  relic: RelicId | null;
   /** Cartas y habilidades elegidas; reconnect y takeover las conservan. */
   progress: Progress;
   /** Elecciones de carta que le faltan (también se suman estando desconectado). */
@@ -66,7 +77,7 @@ export class PlayerRegistry {
     opts: { name: unknown; token: unknown; sessionId: string },
     spawn: () => KinematicState,
     makeCombat: () => CombatState = () => newCombatState("warrior", 1),
-    makeFloorWeapons: (equipped: WeaponId) => FloorWeapon[] = () => [],
+    makeFloorWeapons: (equipped: WeaponId) => FloorItem[] = () => [],
   ): JoinResult {
     const name = normalizeName(opts.name);
     if (!name) return { ok: false, code: "invalid-name" };
@@ -102,6 +113,8 @@ export class PlayerRegistry {
       inputQueue: [],
       combat: makeCombat(),
       floorWeapons: [],
+      gear: {},
+      relic: null,
       progress: newProgress(),
       pendingChoices: 0,
     };

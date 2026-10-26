@@ -262,7 +262,7 @@ describe("impacto", () => {
     const c = newCombatState("warrior", 1);
     const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
     expect(impact!.hits[0]!.killed).toBe(true);
-    expect(impact!.kills).toEqual([{ x: 0, z: 1, xp: ENEMY_DEFS[e.kind].xp, drop: null }]);
+    expect(impact!.kills).toEqual([{ x: 0, z: 1, xp: ENEMY_DEFS[e.kind].xp, drop: null, gear: null, relic: false }]);
     expect(cs.xp).toBe(0);
   });
 

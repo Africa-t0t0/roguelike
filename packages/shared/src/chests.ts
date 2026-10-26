@@ -2,8 +2,8 @@ import { MAX_PLAYERS } from "./constants";
 import { isWalkableTile, roomSpawnPoints, tileCenter, type Dungeon } from "./dungeon";
 import { WEAPONS } from "./weapons";
 
-/** Reparto del botín de un cofre y probabilidad de subir un tier el arma que da. */
-export const CHEST_LOOT = { weapon: 0.6, orbs: 0.25, heal: 0.15, orbXp: 30, tierBumpChance: 0.3 } as const;
+/** Reparto del botín de un cofre (arma, equipo, reliquia, orbes, curación; suman 1) y probabilidad de subir un tier el arma que da. */
+export const CHEST_LOOT = { weapon: 0.37, gear: 0.3, relic: 0.08, orbs: 0.15, heal: 0.1, orbXp: 30, tierBumpChance: 0.3 } as const;
 
 /**
  * Un cofre cada dos salas de combate (índices pares por id), en la primera casilla caminable pegada a un muro

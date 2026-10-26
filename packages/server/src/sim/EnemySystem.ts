@@ -25,6 +25,7 @@ import {
   isWalkableTile,
   moveCircle,
   natureEffects,
+  rollGearTier,
   rollTier,
   tileCenter,
   type Dungeon,
@@ -118,7 +119,19 @@ export interface EnemyDamageResult {
   z: number;
   /** arma soltada al morir; solo los armados, con `TIERS[tier].dropChance` */
   drop: EnemyLoadout | null;
+  /** tier de la pieza de equipo que suelta (la ranura y los stats se sortean por jugador); null si no suelta */
+  gear: WeaponTier | null;
+  /** suelta una reliquia (cuál se sortea por jugador); solo los élites */
+  relic: boolean;
 }
+
+/** De un élite que suelta botín, fracción de veces que es una pieza de equipo en vez de arma. */
+const ELITE_GEAR_SHARE = 0.5;
+/** Probabilidad de que un élite suelte además una reliquia. */
+const ELITE_RELIC_CHANCE = 0.06;
+/** Probabilidad de que un enemigo normal suelte una pieza de equipo, y tier máximo que puede ser. */
+const NORMAL_GEAR_CHANCE = 0.015;
+const NORMAL_GEAR_TIER_CAP: WeaponTier = 2;
 
 /** Quién golpea y con qué naturaleza; `affinity` es el conteo de cartas de Afinidad. */
 export interface StrikeSource {
@@ -794,27 +807,40 @@ export class EnemySystem {
   /** Si el id no existe devuelve x: 0, z: 0: el llamador solo debe usar la posición cuando `killed`. */
   damage(enemyId: string, amount: number): EnemyDamageResult {
     const e = this.list.find((x) => x.id === enemyId);
-    if (!e || e.ai === "dead") return { killed: false, xp: 0, x: e?.x ?? 0, z: e?.z ?? 0, drop: null };
+    if (!e || e.ai === "dead") return { killed: false, xp: 0, x: e?.x ?? 0, z: e?.z ?? 0, drop: null, gear: null, relic: false };
     e.hp = Math.max(0, e.hp - amount);
-    if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null };
+    if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null, gear: null, relic: false };
     this.setAi(e, "dead");
     e.burn = null;
     e.frozen = 0;
     e.slow = null;
     e.iceHits = [];
     e.freezeImmune = 0;
-    return { killed: true, xp: ENEMY_DEFS[e.kind].xp * (e.elite ? ELITE.xpMult : 1), x: e.x, z: e.z, drop: this.rollDrop(e) };
+    const loot = this.rollDrop(e);
+    return { killed: true, xp: ENEMY_DEFS[e.kind].xp * (e.elite ? ELITE.xpMult : 1), x: e.x, z: e.z, ...loot };
   }
 
   /**
-   * Arma que suelta al morir. El élite la suelta con `ELITE.dropChance`, un tier más (hasta 4) y su naturaleza;
-   * el hechicero, que no lleva arma, trae una al azar. Los demás armados, con `TIERS[tier].dropChance`.
+   * Botín al morir. El élite suelta con `ELITE.dropChance`, un tier más (hasta 4): la mitad de las veces un arma
+   * (con su naturaleza; el hechicero, que no lleva arma, trae una al azar) y la otra mitad una pieza de ese tier;
+   * además, con ELITE_RELIC_CHANCE, una reliquia. Los armados normales sueltan su arma con `TIERS[tier].dropChance`
+   * y, aparte, cualquier normal una pieza de tier 1 o 2 con NORMAL_GEAR_CHANCE.
    */
-  private rollDrop(e: Enemy): EnemyLoadout | null {
-    if (!e.elite) return e.loadout && this.rng.next() < TIERS[e.loadout.tier].dropChance ? { ...e.loadout } : null;
-    if (this.rng.next() >= ELITE.dropChance) return null;
-    const weaponId = e.loadout?.weaponId ?? this.rng.pick(Object.keys(WEAPONS) as WeaponId[]);
-    const tier = Math.min(4, (e.loadout?.tier ?? e.spellTier) + 1) as WeaponTier;
-    return { weaponId, tier, nature: e.nature };
+  private rollDrop(e: Enemy): Pick<EnemyDamageResult, "drop" | "gear" | "relic"> {
+    if (!e.elite) {
+      const drop = e.loadout && this.rng.next() < TIERS[e.loadout.tier].dropChance ? { ...e.loadout } : null;
+      const gear = this.rng.next() < NORMAL_GEAR_CHANCE
+        ? rollGearTier(this.rng, this.floorTime, this.floor, NORMAL_GEAR_TIER_CAP)
+        : null;
+      return { drop, gear, relic: false };
+    }
+    let drop: EnemyLoadout | null = null;
+    let gear: WeaponTier | null = null;
+    if (this.rng.next() < ELITE.dropChance) {
+      const tier = Math.min(4, (e.loadout?.tier ?? e.spellTier) + 1) as WeaponTier;
+      if (this.rng.next() < ELITE_GEAR_SHARE) gear = tier;
+      else drop = { weaponId: e.loadout?.weaponId ?? this.rng.pick(Object.keys(WEAPONS) as WeaponId[]), tier, nature: e.nature };
+    }
+    return { drop, gear, relic: this.rng.next() < ELITE_RELIC_CHANCE };
   }
 }

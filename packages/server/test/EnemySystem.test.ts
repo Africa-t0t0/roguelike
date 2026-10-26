@@ -244,7 +244,7 @@ describe("daño", () => {
     const { sys, e } = setup("minion", 30, 30);
     expect(sys.damage("nope", 5)).toMatchObject({ killed: false, xp: 0, drop: null });
     expect(sys.damage(e.id, 5)).toMatchObject({ killed: false, xp: 0, drop: null });
-    expect(sys.damage(e.id, 999)).toEqual({ killed: true, xp: ENEMY_DEFS.minion.xp, x: 30, z: 30, drop: null });
+    expect(sys.damage(e.id, 999)).toEqual({ killed: true, xp: ENEMY_DEFS.minion.xp, x: 30, z: 30, drop: null, gear: null, relic: false });
     expect(e.ai).toBe("dead");
     expect(sys.damage(e.id, 999)).toMatchObject({ killed: false, xp: 0, drop: null });
     const pl = [P("a", 30.5, 30)];
@@ -917,16 +917,62 @@ describe("élites", () => {
   it("matar a un élite da la xp x4 y, con la RNG forzada, suelta su arma un tier arriba con su naturaleza", () => {
     const sys = new EnemySystem(arena(), createRng(3));
     const e = sys.spawnAt("brute", 20, 30, 3, { nature: "lightning" });
-    vi.spyOn(sys["rng"], "next").mockReturnValue(0);
+    // dropChance pasa; el reparto arma/pieza (0,5) cae del lado del arma.
+    vi.spyOn(sys["rng"], "next").mockReturnValueOnce(0).mockReturnValueOnce(0.9).mockReturnValue(0.99);
     const r = sys.damage(e.id, 1e9);
     expect(r.xp).toBe(ENEMY_DEFS.brute.xp * ELITE.xpMult);
     expect(r.drop).toEqual({ weaponId: ARMED_CHANCE.brute!.weaponId, tier: 4, nature: "lightning" });
+    expect(r.gear).toBeNull();
+    expect(r.relic).toBe(false);
+  });
+
+  it("el élite que suelta botín reparte 50/50 arma o pieza (del mismo tier) y con 6 % suelta además una reliquia", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    const rng = vi.spyOn(sys["rng"], "next");
+    // Lado de la pieza: un tier más que el suyo, sin arma; sin suerte de reliquia.
+    rng.mockReturnValueOnce(0).mockReturnValueOnce(0.49).mockReturnValue(0.06);
+    const a = sys.damage(sys.spawnAt("brute", 20, 30, 2, { nature: "fire" }).id, 1e9);
+    expect(a).toMatchObject({ drop: null, gear: 3, relic: false });
+    // Lado del arma + reliquia (0,05999 < 0,06).
+    rng.mockReset().mockReturnValueOnce(0).mockReturnValueOnce(0.5).mockReturnValueOnce(0).mockReturnValue(0.05999);
+    const b = sys.damage(sys.spawnAt("brute", 20, 30, 2, { nature: "fire" }).id, 1e9);
+    expect(b.drop).toMatchObject({ tier: 3, nature: "fire" });
+    expect(b).toMatchObject({ gear: null, relic: true });
+    // El tier 4 es el tope.
+    rng.mockReset().mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(0.99);
+    expect(sys.damage(sys.spawnAt("brute", 20, 30, 3, { nature: "ice" }).id, 1e9).gear).toBe(4);
+    // Sin suerte de botín, solo la reliquia puede salir sola.
+    rng.mockReset().mockReturnValueOnce(0.99).mockReturnValueOnce(0.01);
+    expect(sys.damage(sys.spawnAt("brute", 20, 30, 3, { nature: "ice" }).id, 1e9)).toMatchObject({ drop: null, gear: null, relic: true });
+  });
+
+  it("el enemigo normal suelta una pieza con 1,5 % de tier 1 o 2 y nunca reliquia", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    const rng = vi.spyOn(sys["rng"], "next");
+    // Sin arma (minion sin loadout): primero el 1,5 % y luego el tier de rollGearTier.
+    const kill = () => {
+      const e = sys.spawnAt("minion", 20, 30, 0);
+      e.loadout = null;
+      return sys.damage(e.id, 1e9);
+    };
+    rng.mockReturnValue(0.0149);
+    const lucky = kill();
+    expect(lucky.drop).toBeNull();
+    expect([1, 2]).toContain(lucky.gear);
+    expect(lucky.relic).toBe(false);
+    rng.mockReturnValue(0.015);
+    expect(kill().gear).toBeNull();
+    // Aunque el tier sorteado sea alto, una pieza suelta de enemigo normal no pasa del 2.
+    sys.setFloorClock(1e6, 1);
+    rng.mockReturnValue(0.0149);
+    expect(kill().gear).toBeLessThanOrEqual(2);
   });
 
   it("el hechicero élite suelta un arma al azar de WEAPONS; sin suerte no suelta, pero la xp sigue x4", () => {
     const sys = new EnemySystem(arena(), createRng(3));
     const e = sys.spawnAt("mage", 20, 30, 2, { nature: "fire" });
-    const r = vi.spyOn(sys["rng"], "next").mockReturnValue(0);
+    // dropChance pasa y el reparto cae del lado del arma
+    const r = vi.spyOn(sys["rng"], "next").mockReturnValueOnce(0).mockReturnValueOnce(0.9).mockReturnValue(0);
     const win = sys.damage(e.id, 1e9);
     expect(Object.keys(WEAPONS)).toContain(win.drop!.weaponId);
     expect(win.drop).toMatchObject({ tier: 3, nature: "fire" });

@@ -5,11 +5,13 @@ import {
   ABILITIES,
   applyCard,
   CHEST_LOOT,
+  combinedMods,
   chestSpots,
   createRng,
   ELEMENTS,
   EMPTY_ROOM_TTL_MS,
   FLOOR_WEAPON_TTL_S,
+  GEAR_SLOTS,
   generateDungeon,
   isWalkableTile,
   JOIN_ERROR_STATUS,
@@ -23,9 +25,11 @@ import {
   outsideStartRoom,
   parseDevCommand,
   PATCH_RATE_MS,
-  playerMods,
   PICKUP_RANGE,
   PROTOCOL_VERSION,
+  RELICS,
+  rollGear,
+  rollGearTier,
   rollTier,
   roomSpawnPoints,
   SANDBOX_COOLDOWN_MULT,
@@ -43,6 +47,7 @@ import {
   type Dungeon,
   type KinematicState,
   type PlayerInput,
+  type RelicId,
   type Rng,
   type WeaponId,
   type WeaponTier,
@@ -55,7 +60,7 @@ import { OrbSystem } from "../sim/OrbSystem";
 import { PositionHistory } from "../sim/PositionHistory";
 import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
-import { PlayerRegistry, pruneFloorWeapons, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
+import { PlayerRegistry, pruneFloorWeapons, type FloorItem, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
 import { SANDBOX_CHEST_AHEAD_M, SANDBOX_CHEST_MIN_M, sandboxSpawnSpots } from "./sandbox";
 import { ChestState, PlayerState, RunState } from "./RunState";
@@ -69,19 +74,29 @@ const WAVE_RNG_SALT = 0x7a3e;
 const ORB_RNG_SALT = 0x0b5e;
 const CARD_RNG_SALT = 0xca7d;
 const CHEST_RNG_SALT = 0xc4e5;
+const LOOT_RNG_SALT = 0x10a7;
+/** distancia delante del jugador a la que el sandbox deja una pieza (`gear drop`) */
+const SANDBOX_GEAR_DROP_M = 2.5;
 /** lo que cura la carta Vitalidad al aplicarse */
 const VITALITY_HEAL = 20;
 /** ticks entre números de daño de la quemadura de un mismo enemigo (1 s) */
 const BURN_EVENT_TICKS = SIM_HZ;
 
-export type ChestLoot = "weapon" | "orbs" | "heal";
+export type ChestLoot = "weapon" | "gear" | "relic" | "orbs" | "heal";
 
 /** Sortea el botín de un cofre según CHEST_LOOT. */
 export function rollChestLoot(rng: Rng): ChestLoot {
   const r = rng.next();
-  if (r < CHEST_LOOT.weapon) return "weapon";
-  return r < CHEST_LOOT.weapon + CHEST_LOOT.orbs ? "orbs" : "heal";
+  let acc = CHEST_LOOT.weapon;
+  if (r < acc) return "weapon";
+  acc += CHEST_LOOT.gear;
+  if (r < acc) return "gear";
+  acc += CHEST_LOOT.relic;
+  if (r < acc) return "relic";
+  return r < acc + CHEST_LOOT.orbs ? "orbs" : "heal";
 }
+
+const RELIC_IDS = Object.keys(RELICS) as RelicId[];
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -98,6 +113,9 @@ const deadInput = (input: PlayerInput, k: KinematicState): PlayerInput => ({
   abilities: 0,
 });
 
+/** `Omit` que reparte sobre cada miembro de la unión. */
+type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;
+
 export class RunRoom extends Room<{ state: RunState }> {
   private readonly registry = new PlayerRegistry();
   private dungeon!: Dungeon;
@@ -109,6 +127,8 @@ export class RunRoom extends Room<{ state: RunState }> {
   private levelUp!: LevelUpSystem;
   /** Botín de los cofres. */
   private chestRng!: Rng;
+  /** Piezas y reliquias que sueltan los enemigos: ranura, stats y reliquia de cada jugador. */
+  private lootRng!: Rng;
   private nextChest = 1;
   private floorTime = 0;
   private readonly history = new PositionHistory();
@@ -140,6 +160,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.orbs = new OrbSystem(createRng(seed ^ ORB_RNG_SALT));
     this.levelUp = new LevelUpSystem(createRng(seed ^ CARD_RNG_SALT));
     this.chestRng = createRng(seed ^ CHEST_RNG_SALT);
+    this.lootRng = createRng(seed ^ LOOT_RNG_SALT);
     this.abilities = new AbilitySystem(this.dungeon, this.combat);
     this.floorTime = floorTimeStart;
     this.state = new RunState({
@@ -262,9 +283,12 @@ export class RunRoom extends Room<{ state: RunState }> {
     }
   }
 
-  /** Multiplicadores de sus cartas, con los interruptores del panel de pruebas encima. */
+  /**
+   * Multiplicadores de sus cartas, equipo y reliquia, con los interruptores del panel de pruebas encima.
+   * Recalcula la vida máxima (y recorta la actual).
+   */
   private refreshMods(record: PlayerRecord): void {
-    const mods = playerMods(record.progress);
+    const mods = combinedMods(record.progress, record.gear, record.relic);
     const flags = this.devFlags.get(record.key);
     if (flags?.god) mods.damageTakenMult = 0;
     if (flags?.noCooldown) mods.cooldownMult = SANDBOX_COOLDOWN_MULT;
@@ -362,6 +386,24 @@ export class RunRoom extends Room<{ state: RunState }> {
         if (spot) this.addChest(spot.x, spot.z);
         break;
       }
+      case "gear": {
+        const item = rollGear(this.lootRng, cmd.slot, cmd.tier, c.cls);
+        if (cmd.action === "equip") {
+          record.gear[cmd.slot] = item;
+          this.refreshMods(record);
+        } else {
+          // 2,5 m hacia donde mira; si ese punto es muro, a sus pies.
+          const k = record.kinematic;
+          const at = { x: k.x + Math.sin(k.facing) * SANDBOX_GEAR_DROP_M, z: k.z + Math.cos(k.facing) * SANDBOX_GEAR_DROP_M };
+          if (!isWalkableTile(this.dungeon, tileOf(at.x), tileOf(at.z))) [at.x, at.z] = [k.x, k.z];
+          this.giveFloorItem(record, { kind: "gear", item, x: at.x, z: at.z });
+        }
+        break;
+      }
+      case "relic":
+        record.relic = cmd.id;
+        this.refreshMods(record);
+        break;
       case "weapon":
         c.weaponId = cmd.weaponId;
         c.weaponTier = cmd.tier;
@@ -527,7 +569,16 @@ export class RunRoom extends Room<{ state: RunState }> {
   private spawnKills(kills: Pick<ImpactResult, "kills">["kills"]): void {
     for (const k of kills) {
       this.orbs.spawn(k.x, k.z, k.xp, this.state.tick);
-      if (k.drop) this.dropWeapon({ ...k.drop, x: k.x, z: k.z });
+      if (k.drop) this.dropItem({ kind: "weapon", ...k.drop, x: k.x, z: k.z });
+      const rng = this.lootRng;
+      // Cada jugador conectado recibe su propia pieza (ranura y stats) y su propia reliquia.
+      for (const r of this.registry.connected()) {
+        if (k.gear) {
+          const item = rollGear(rng, rng.pick(GEAR_SLOTS), k.gear, r.combat.cls);
+          this.giveFloorItem(r, { kind: "gear", item, x: k.x, z: k.z });
+        }
+        if (k.relic) this.giveFloorItem(r, { kind: "relic", id: rng.pick(RELIC_IDS), x: k.x, z: k.z });
+      }
     }
   }
 
@@ -545,7 +596,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       acc.z = r.z;
       this.burnAcc.set(r.enemyId, acc);
       if (r.killed) {
-        kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
+        kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop, gear: r.gear, relic: r.relic });
         this.flushBurn(r.enemyId);
       }
     }
@@ -580,14 +631,14 @@ export class RunRoom extends Room<{ state: RunState }> {
     return this.floorTime + FLOOR_WEAPON_TTL_S;
   }
 
-  /** Cada jugador conectado recibe su propia copia del arma soltada y se le reenvía su lista. */
-  private dropWeapon(item: Omit<FloorWeapon, "expiresAt">): void {
-    for (const r of this.registry.connected()) this.giveFloorWeapon(r, item);
+  /** Cada jugador conectado recibe su propia copia del objeto soltado y se le reenvía su lista. */
+  private dropItem(item: DistributiveOmit<FloorItem, "expiresAt">): void {
+    for (const r of this.registry.connected()) this.giveFloorItem(r, item);
   }
 
-  /** Agrega un arma a la lista del suelo de un jugador y se la reenvía si está conectado. */
-  private giveFloorWeapon(r: PlayerRecord, item: Omit<FloorWeapon, "expiresAt">): void {
-    r.floorWeapons.push({ ...item, expiresAt: this.floorWeaponExpiry() });
+  /** Agrega un objeto a la lista del suelo de un jugador y se la reenvía si está conectado. */
+  private giveFloorItem(r: PlayerRecord, item: DistributiveOmit<FloorItem, "expiresAt">): void {
+    r.floorWeapons.push({ ...item, expiresAt: this.floorWeaponExpiry() } as FloorItem);
     const client = this.clients.find((c) => c.sessionId === r.sessionId);
     if (client) this.sendFloorWeapons(client, r);
   }
@@ -625,12 +676,18 @@ export class RunRoom extends Room<{ state: RunState }> {
       const at = { x: best.x + (d > 0 ? (x - best.x) / d : 0), z: best.z + (d > 0 ? (z - best.z) / d : 0) };
       if (!isWalkableTile(this.dungeon, tileOf(at.x), tileOf(at.z))) [at.x, at.z] = [best.x, best.z];
       const rng = this.chestRng;
+      // Arma, pieza o reliquia: cada jugador conectado recibe la suya (el tier de armas y piezas sale igual).
       for (const r of this.registry.connected()) {
-        const weaponId = rng.pick(Object.keys(WEAPONS) as WeaponId[]);
-        const nature = rng.pick(ELEMENTS);
+        if (loot === "relic") {
+          this.giveFloorItem(r, { kind: "relic", id: rng.pick(RELIC_IDS), x: at.x, z: at.z });
+          continue;
+        }
+        const weaponId = loot === "weapon" ? rng.pick(Object.keys(WEAPONS) as WeaponId[]) : null;
+        const nature = loot === "weapon" ? rng.pick(ELEMENTS) : null;
         const base = rollTier(rng, this.floorTime, this.state.floor);
         const tier = Math.min(4, base + (rng.next() < CHEST_LOOT.tierBumpChance ? 1 : 0)) as WeaponTier;
-        this.giveFloorWeapon(r, { weaponId, tier, nature, x: at.x, z: at.z });
+        if (weaponId && nature) this.giveFloorItem(r, { kind: "weapon", weaponId, tier, nature, x: at.x, z: at.z });
+        else this.giveFloorItem(r, { kind: "gear", item: rollGear(rng, rng.pick(GEAR_SLOTS), tier, r.combat.cls), x: at.x, z: at.z });
       }
     }
     return true;
@@ -640,24 +697,34 @@ export class RunRoom extends Room<{ state: RunState }> {
    * Todas las armas menos la equipada, en el orden de WEAPONS, sobre puntos fijos de la sala inicial
    * que siguen a los MAX_PLAYERS primeros (reservados para aparecer).
    */
-  private initialFloorWeapons(equipped: WeaponId): FloorWeapon[] {
+  private initialFloorWeapons(equipped: WeaponId): FloorItem[] {
     const ids = (Object.keys(WEAPONS) as WeaponId[]).filter((id) => id !== equipped);
     const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + ids.length).slice(MAX_PLAYERS);
     if (points.length < ids.length) throw new Error("la sala inicial no tiene sitio para las armas del suelo");
     const expiresAt = this.floorWeaponExpiry();
-    return ids.map((weaponId, i) => ({ weaponId, tier: 1, nature: "none", x: points[i]!.x, z: points[i]!.z, expiresAt }));
+    return ids.map((weaponId, i) => ({ kind: "weapon" as const, weaponId, tier: 1, nature: "none", x: points[i]!.x, z: points[i]!.z, expiresAt }));
   }
 
-  /** `ttl`: segundos simulados que le quedan a cada arma al enviarla. */
+  /** `ttl`: segundos simulados que le quedan a cada objeto al enviarlo; `kind` dice si es arma, pieza o reliquia. */
   private sendFloorWeapons(client: Client, record: PlayerRecord): void {
     client.send(MSG.floorWeapons, {
-      items: record.floorWeapons.map(({ weaponId, tier, nature, x, z, expiresAt }) => ({
-        weaponId, tier, nature, x, z, ttl: expiresAt - this.floorTime,
-      })),
+      items: record.floorWeapons.map((f) => {
+        const ttl = f.expiresAt - this.floorTime;
+        if (f.kind === "gear") return { kind: f.kind, item: f.item, x: f.x, z: f.z, ttl };
+        if (f.kind === "relic") return { kind: f.kind, id: f.id, x: f.x, z: f.z, ttl };
+        return { kind: f.kind, weaponId: f.weaponId, tier: f.tier, nature: f.nature, x: f.x, z: f.z, ttl };
+      }),
     });
   }
 
-  /** Intercambia el arma equipada (con su tier) por la propia del suelo más cercana a ≤ PICKUP_RANGE, si la hay. */
+  /**
+   * Toma el objeto del suelo propio más cercano a ≤ PICKUP_RANGE (a igual distancia, el primero de la lista):
+   * - arma: se intercambia con la equipada (con su tier);
+   * - pieza: se equipa en su ranura;
+   * - reliquia: se equipa.
+   * Lo que se deja (arma, pieza o reliquia anterior) queda en el mismo sitio y vence a los FLOOR_WEAPON_TTL_S
+   * desde ahora; sin nada que dejar, el objeto desaparece del suelo.
+   */
   private tryPickup(record: PlayerRecord): void {
     const { x, z } = record.kinematic;
     let best = -1;
@@ -668,15 +735,28 @@ export class RunRoom extends Room<{ state: RunState }> {
     });
     if (best === -1) return;
     const taken = record.floorWeapons[best]!;
-    // La que se deja vence a los FLOOR_WEAPON_TTL_S desde ahora.
-    record.floorWeapons[best] = {
-      weaponId: record.combat.weaponId, tier: record.combat.weaponTier, nature: record.combat.weaponNature, x: taken.x, z: taken.z,
-      expiresAt: this.floorWeaponExpiry(),
-    };
-    record.combat.weaponId = taken.weaponId;
-    record.combat.weaponTier = taken.tier;
-    record.combat.weaponNature = taken.nature;
-    Object.assign(record.combat, newComboTimers());
+    const at = { x: taken.x, z: taken.z, expiresAt: this.floorWeaponExpiry() };
+    let left: FloorItem | null = null;
+    if (taken.kind === "weapon") {
+      left = {
+        kind: "weapon", weaponId: record.combat.weaponId, tier: record.combat.weaponTier, nature: record.combat.weaponNature, ...at,
+      };
+      record.combat.weaponId = taken.weaponId;
+      record.combat.weaponTier = taken.tier;
+      record.combat.weaponNature = taken.nature;
+      Object.assign(record.combat, newComboTimers());
+    } else if (taken.kind === "gear") {
+      const old = record.gear[taken.item.slot];
+      if (old) left = { kind: "gear", item: old, ...at };
+      record.gear[taken.item.slot] = taken.item;
+      this.refreshMods(record);
+    } else {
+      if (record.relic) left = { kind: "relic", id: record.relic, ...at };
+      record.relic = taken.id;
+      this.refreshMods(record);
+    }
+    if (left) record.floorWeapons[best] = left;
+    else record.floorWeapons.splice(best, 1);
     const client = this.clients.find((c) => c.sessionId === record.sessionId);
     if (client) this.sendFloorWeapons(client, record);
   }

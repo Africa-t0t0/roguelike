@@ -247,7 +247,7 @@ export class AbilitySystem {
         enemies.strike(e.id, s.damage, src).forEach((d, i) => {
           r.hits.push({ enemyId: d.enemyId, amount: d.amount, killed: d.killed, x: i === 0 ? e.x : d.x, z: i === 0 ? e.z : d.z });
           if (d.killed) {
-            r.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop });
+            r.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop, gear: d.gear, relic: d.relic });
             // Sed de sangre también con las kills de la onda.
             this.combat.heal(s.owner, s.owner.mods.lifeOnKill);
           }
@@ -311,7 +311,7 @@ export class AbilitySystem {
       results.forEach((d, i) => {
         res.hits.push({ enemyId: d.enemyId, amount: d.amount, killed: d.killed, x: i === 0 ? e.x : d.x, z: i === 0 ? e.z : d.z });
         if (d.killed) {
-          res.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop });
+          res.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop, gear: d.gear, relic: d.relic });
           kills++;
         }
       });

@@ -129,13 +129,13 @@ describe("PlayerRegistry", () => {
     const seen: string[] = [];
     const floor = (equipped: WeaponId) => {
       seen.push(equipped);
-      return [{ weaponId: "great-sword" as const, tier: 2 as const, nature: "none" as const, x: 3, z: 5, expiresAt: 40 }];
+      return [{ kind: "weapon" as const, weaponId: "great-sword" as const, tier: 2 as const, nature: "none" as const, x: 3, z: 5, expiresAt: 40 }];
     };
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn, undefined, floor);
     if (!first.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", tier: 2, nature: "none", x: 3, z: 5, expiresAt: 40 }]);
-    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", tier: 3, nature: "none", x: 3, z: 5, expiresAt: 40 };
+    expect(first.record.floorWeapons).toEqual([{ kind: "weapon" as const, weaponId: "great-sword", tier: 2, nature: "none", x: 3, z: 5, expiresAt: 40 }]);
+    first.record.floorWeapons[0] = { kind: "weapon" as const, weaponId: "kingslayer-sword", tier: 3, nature: "none", x: 3, z: 5, expiresAt: 40 };
 
     const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn, undefined, floor);
     if (!taken.ok) throw new Error();
@@ -143,7 +143,24 @@ describe("PlayerRegistry", () => {
     const back = r.join({ name: "Jorge", token: "x", sessionId: "s3" }, spawn, undefined, floor);
     if (!back.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", tier: 3, nature: "none", x: 3, z: 5, expiresAt: 40 }]);
+    expect(back.record.floorWeapons).toEqual([{ kind: "weapon" as const, weaponId: "kingslayer-sword", tier: 3, nature: "none", x: 3, z: 5, expiresAt: 40 }]);
+  });
+
+  it("el equipo y la reliquia empiezan vacíos y se conservan al reconectar y al tomar el control", () => {
+    const r = new PlayerRegistry();
+    const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn);
+    if (!first.ok) throw new Error();
+    expect(first.record.gear).toEqual({});
+    expect(first.record.relic).toBeNull();
+    first.record.gear.boots = { slot: "boots", tier: 2, stats: [{ stat: "moveSpeed", value: 0.075 }], legendary: null };
+    first.record.relic = "oakHeart";
+    const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn);
+    if (!taken.ok) throw new Error();
+    r.leave("s2");
+    const back = r.join({ name: "Jorge", token: "x", sessionId: "s3" }, spawn);
+    if (!back.ok) throw new Error();
+    expect(back.record.gear.boots!.tier).toBe(2);
+    expect(back.record.relic).toBe("oakHeart");
   });
 
   it("sin fábrica, un registro nuevo no tiene armas del suelo", () => {
@@ -227,14 +244,14 @@ describe("pruneFloorWeapons", () => {
   it("quita las vencidas (expiresAt ≤ floorTime) y dice si cambió la lista", () => {
     const r = new PlayerRegistry();
     const res = r.join({ name: "Ana", token: "t", sessionId: "s" }, spawn, undefined, () => [
-      { weaponId: "great-sword", tier: 1, nature: "none", x: 0, z: 0, expiresAt: 40 },
-      { weaponId: "guard-sword", tier: 1, nature: "none", x: 0, z: 0, expiresAt: 50 },
+      { kind: "weapon" as const, weaponId: "great-sword", tier: 1, nature: "none", x: 0, z: 0, expiresAt: 40 },
+      { kind: "weapon" as const, weaponId: "guard-sword", tier: 1, nature: "none", x: 0, z: 0, expiresAt: 50 },
     ]);
     if (!res.ok) throw new Error();
     expect(pruneFloorWeapons(res.record, 39.9)).toBe(false);
     expect(res.record.floorWeapons).toHaveLength(2);
     expect(pruneFloorWeapons(res.record, 40)).toBe(true);
-    expect(res.record.floorWeapons.map((f) => f.weaponId)).toEqual(["guard-sword"]);
+    expect(res.record.floorWeapons.map((f) => (f.kind === "weapon" ? f.weaponId : f.kind))).toEqual(["guard-sword"]);
     expect(pruneFloorWeapons(res.record, 45)).toBe(false);
   });
 });
