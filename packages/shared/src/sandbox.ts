@@ -2,6 +2,7 @@ import { ABILITIES, STAT_CARDS, type AbilityId, type CardOffer, type StatCardId 
 import { ENEMY_DEFS, type EnemyKind } from "./combat";
 import { ELEMENTS, type Nature } from "./natures";
 import { WEAPONS, type WeaponId, type WeaponTier } from "./weapons";
+import { GEAR_SLOTS, RELICS, type GearSlot, type RelicId } from "./gear";
 import type { CasterTier } from "./spells";
 
 /** Más enemigos por comando no sirven para probar nada y solo ahogan el servidor. */
@@ -29,6 +30,8 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `freeze`: congela a los enemigos que no preparan un ataque (proyectiles y peligros siguen).
  * - `castNow`: todos los hechiceros libres lanzan ya su hechizo sobre el jugador más cercano.
  * - `chest`: un cofre cerrado nuevo delante del jugador.
+ * - `gear`: equipa una pieza nueva de esa ranura y tier (`equip`) o la suelta delante del jugador (`drop`).
+ * - `relic`: equipa esa reliquia.
  * - `weapon`: equipa el arma con su tier y naturaleza (`"none"` si no se indica).
  */
 export type DevCommand =
@@ -46,7 +49,9 @@ export type DevCommand =
   | { cmd: "castNow" }
   | { cmd: "chest" }
   | { cmd: "status"; kind: "burn" | "slow" | "stun" }
-  | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature };
+  | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature }
+  | { cmd: "gear"; slot: GearSlot; tier: WeaponTier; action: "equip" | "drop" }
+  | { cmd: "relic"; id: RelicId };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -110,6 +115,12 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
         ? { cmd: "weapon", weaponId: m.weaponId as WeaponId, tier: m.tier, nature }
         : null;
     }
+    case "gear":
+      return (GEAR_SLOTS as readonly unknown[]).includes(m.slot) && isWeaponTierCmd(m.tier) && (m.action === "equip" || m.action === "drop")
+        ? { cmd: "gear", slot: m.slot as GearSlot, tier: m.tier, action: m.action }
+        : null;
+    case "relic":
+      return has(RELICS, m.id) ? { cmd: "relic", id: m.id as RelicId } : null;
     default:
       return null;
   }

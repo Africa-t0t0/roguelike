@@ -13,3 +13,4 @@ export * from "./sandbox";
 export * from "./natures";
 export * from "./chests";
 export * from "./start";
+export * from "./gear";

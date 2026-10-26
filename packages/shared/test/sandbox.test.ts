@@ -23,6 +23,9 @@ describe("parseDevCommand", () => {
       { cmd: "weapon", weaponId: "great-sword", tier: 2, nature: "none" },
       { cmd: "weapon", weaponId: "great-sword", tier: 3, nature: "ice" },
       { cmd: "weapon", weaponId: "great-sword", tier: 4, nature: "fire" },
+      { cmd: "gear", slot: "boots", tier: 4, action: "equip" },
+      { cmd: "gear", slot: "helmet", tier: 1, action: "drop" },
+      { cmd: "relic", id: "glassHeart" },
     ];
     for (const c of ok) expect(parseDevCommand(c)).toEqual(c);
   });
@@ -82,5 +85,15 @@ describe("parseDevCommand: élites y estados", () => {
     for (const kind of ["burn", "slow", "stun"]) expect(parseDevCommand({ cmd: "status", kind })).toEqual({ cmd: "status", kind });
     expect(parseDevCommand({ cmd: "status", kind: "poison" })).toBeNull();
     expect(parseDevCommand({ cmd: "status" })).toBeNull();
+  });
+});
+
+describe("parseDevCommand gear y relic", () => {
+  it("rechaza ranura, tier, acción o id desconocidos", () => {
+    expect(parseDevCommand({ cmd: "gear", slot: "cape", tier: 1, action: "equip" })).toBeNull();
+    expect(parseDevCommand({ cmd: "gear", slot: "boots", tier: 5, action: "equip" })).toBeNull();
+    expect(parseDevCommand({ cmd: "gear", slot: "boots", tier: 1, action: "sell" })).toBeNull();
+    expect(parseDevCommand({ cmd: "relic", id: "nope" })).toBeNull();
+    expect(parseDevCommand({ cmd: "relic", id: "toString" })).toBeNull();
   });
 });

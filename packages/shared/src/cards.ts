@@ -242,6 +242,10 @@ export interface PlayerMods {
   cooldownMult: number;
   /** cartas de Afinidad; multiplica los efectos de naturaleza en `natureEffects` */
   affinity: number;
+  /** resistencia elemental (0..0,6); las cartas no dan: `combinedMods` suma equipo y reliquia */
+  resist: { fire: number; ice: number; lightning: number };
+  /** multiplicador final de la vida máxima (1; el Corazón de cristal lo baja a 0,75); lo aplica quien calcula la vida */
+  maxHpMult: number;
 }
 
 /** Multiplicadores de las cartas de stat; el Grito y el Bloqueo los aplica el servidor encima. */
@@ -260,6 +264,8 @@ export function playerMods(p: Progress): PlayerMods {
     xpMult: 1 + 0.15 * n("learning"),
     cooldownMult: Math.max(MIN_COOLDOWN_MULT, 0.9 ** n("haste")),
     affinity: n("affinity"),
+    resist: { fire: 0, ice: 0, lightning: 0 },
+    maxHpMult: 1,
   };
 }
 
