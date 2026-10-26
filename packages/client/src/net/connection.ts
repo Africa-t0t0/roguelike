@@ -44,6 +44,8 @@ export type PlayerSnapshot = KinematicState & {
   /** multiplicador de movimiento de sus cartas (sin el del Bloqueo) */
   moveSpeedMult: number;
   attackSpeedMult: number;
+  /** multiplicador de enfriamiento de habilidades (Celeridad) */
+  cooldownMult: number;
   /** tiene una elección de carta abierta */
   choosing: boolean;
 };
@@ -257,6 +259,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       buffDamage: p.buffDamage ?? 0,
       moveSpeedMult: p.moveSpeedMult || 1,
       attackSpeedMult: p.attackSpeedMult || 1,
+      cooldownMult: Number.isFinite(p.cooldownMult) && p.cooldownMult > 0 ? p.cooldownMult : 1,
       choosing: p.choosing ?? false,
     });
   });

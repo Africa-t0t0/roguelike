@@ -28,7 +28,8 @@ describe("textos del HUD", () => {
 
   it("formatXp", () => {
     expect(formatXp(14, 30)).toBe("14/30 XP");
-    expect(formatXp(14.6, 30)).toBe("15/30 XP"); // la XP puede ser fraccionaria (Aprendizaje)
+    expect(formatXp(14.6, 30)).toBe("14/30 XP"); // la XP puede ser fraccionaria (Aprendizaje)
+    expect(formatXp(29.6, 30)).toBe("29/30 XP"); // sin subir de nivel no se muestra el lleno
   });
 
   it("formatRespawn cuenta segundos enteros hacia arriba, mínimo 1", () => {

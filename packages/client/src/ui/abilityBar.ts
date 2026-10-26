@@ -46,12 +46,13 @@ export type AbilitySlotModel =
 
 /**
  * Las 4 casillas de la barra (lógica pura): las habilidades en orden de casilla y el resto vacías.
- * `cooldownOf`: enfriamiento que queda (s); `blocking`: el Bloqueo está activo.
+ * `cooldownOf`: enfriamiento que queda (s); `blocking`: el Bloqueo está activo; `cooldownMult`: el de Celeridad (denominador del barrido).
  */
 export function abilityBarModel(
   slots: readonly { id: AbilityId; rank: number }[],
   cooldownOf: (id: AbilityId) => number,
   blocking: boolean,
+  cooldownMult = 1,
 ): AbilitySlotModel[] {
   const out: AbilitySlotModel[] = [];
   for (let i = 0; i < MAX_ACTIVE_ABILITIES; i++) {
@@ -71,7 +72,7 @@ export function abilityBarModel(
       name: def.name,
       pips: rankPips(s.rank),
       cooldownText: formatCooldown(cd),
-      sweep: def.cooldownS > 0 ? Math.min(1, cd / def.cooldownS) : 0,
+      sweep: def.cooldownS > 0 ? Math.min(1, cd / (def.cooldownS * cooldownMult)) : 0,
       active: def.kind === "held" && blocking,
     });
   }

@@ -296,6 +296,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         // servidor: al tomar otra, el combo local vuelve a empezar.
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
         combo.advance(weaponId);
+        ability.setCooldownMult(mine?.cooldownMult ?? 1);
         ability.tick(sampled.abilities, { dead, swingTimer: combo.state().swingTimer }, now);
         combo.attack(sampled.attack, { dead, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
@@ -343,7 +344,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     playerShots.render(renderAt);
     // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
     abilityBar.render(
-      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), ability.isBlocking),
+      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), ability.isBlocking, mine?.cooldownMult ?? 1),
       mine?.passiveRank ?? 0,
     );
     orbs.render(dt, now);

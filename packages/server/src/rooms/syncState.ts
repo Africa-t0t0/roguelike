@@ -34,6 +34,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.choosing = choosing;
   ps.moveSpeedMult = c.mods.moveSpeedMult;
   ps.attackSpeedMult = c.mods.attackSpeedMult;
+  ps.cooldownMult = c.mods.cooldownMult;
   ps.passiveRank = abilityRank(c, "cleave");
   ps.blocking = c.blocking;
   ps.buffDamage = c.buffDamage;

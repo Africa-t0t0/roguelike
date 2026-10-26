@@ -70,6 +70,24 @@ describe("abilityBarModel", () => {
   });
 });
 
+describe("Celeridad (cooldownMult)", () => {
+  it("con 0.5 predice la repetición del Empuje a los 3.6 s y la barra la muestra lista", () => {
+    const a = new LocalAbility();
+    a.setCooldownMult(0.5);
+    a.setServer([{ id: "thrust", cooldown: 0 }], 0);
+    expect(a.tick(0b1, { dead: false, swingTimer: 0 }, 0)).toBe("thrust");
+    a.tick(0, { dead: false, swingTimer: 0 }, 1);
+    const ms = 3600;
+    for (let t = 0; t < 3.6; t += SIM_DT) a.tick(0, { dead: false, swingTimer: 0 }, ms);
+    expect(a.cooldownLeft("thrust", ms)).toBe(0);
+    const [s] = abilityBarModel([{ id: "thrust", rank: 1 }], (id) => a.cooldownLeft(id, ms), false, 0.5);
+    expect(filled(s)).toMatchObject({ cooldownText: "", sweep: 0 });
+    expect(a.tick(0b1, { dead: false, swingTimer: 0 }, ms)).toBe("thrust");
+    const half = filled(abilityBarModel([{ id: "thrust", rank: 1 }], () => ABILITIES.thrust.cooldownS * 0.25, false, 0.5)[0]);
+    expect(half.sweep).toBeCloseTo(0.5);
+  });
+});
+
 describe("LocalAbility.cooldownLeft", () => {
   it("al apretar la tecla manda el enfriamiento local (mayor) aunque el servidor aún diga 0", () => {
     const a = new LocalAbility();

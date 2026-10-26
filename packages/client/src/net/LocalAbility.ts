@@ -39,6 +39,12 @@ export class LocalAbility {
   /** animación a dibujar (`startMs` en el reloj de `tick`) */
   private shown: { id: AbilityId; startMs: number } | null = null;
   private blockingNow = false;
+  /** multiplicador de enfriamiento (Celeridad), el sincronizado del servidor */
+  private cooldownMult = 1;
+
+  setCooldownMult(m: number): void {
+    this.cooldownMult = Number.isFinite(m) && m > 0 ? m : 1;
+  }
 
   /** Casillas y enfriamientos del último estado propio del servidor (en orden de casilla, sin la pasiva). */
   setServer(slots: AbilitySlotView[], nowMs: number): void {
@@ -71,7 +77,7 @@ export class LocalAbility {
       const { id } = this.slots[i]!;
       const def = ABILITIES[id];
       if (def.kind !== "active" || !this.ready(id, nowMs) || ctx.swingTimer > 0 || this.anim) continue;
-      this.localCd.set(id, def.cooldownS);
+      this.localCd.set(id, def.cooldownS * this.cooldownMult);
       this.lastCastMs.set(id, nowMs);
       this.anim = { id, left: def.animS };
       this.shown = { id, startMs: nowMs };
@@ -105,7 +111,7 @@ export class LocalAbility {
    */
   fromServer(id: AbilityId, nowMs: number): void {
     const last = this.lastCastMs.get(id);
-    if (last !== undefined && nowMs < last + ABILITIES[id].cooldownS * 1000 + ECHO_WINDOW_MS) return;
+    if (last !== undefined && nowMs < last + ABILITIES[id].cooldownS * this.cooldownMult * 1000 + ECHO_WINDOW_MS) return;
     this.shown = { id, startMs: nowMs };
   }
 
@@ -139,7 +145,7 @@ export class LocalAbility {
   private ready(id: AbilityId, nowMs: number): boolean {
     if ((this.localCd.get(id) ?? 0) > 0) return false;
     const last = this.lastCastMs.get(id);
-    if (last !== undefined && nowMs < last + ABILITIES[id].cooldownS * 1000 + ECHO_WINDOW_MS) return true;
+    if (last !== undefined && nowMs < last + ABILITIES[id].cooldownS * this.cooldownMult * 1000 + ECHO_WINDOW_MS) return true;
     const s = this.server.get(id);
     return !s || s.cd - (nowMs - s.atMs) / 1000 <= EPS;
   }

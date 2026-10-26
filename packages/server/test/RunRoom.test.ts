@@ -1155,6 +1155,16 @@ describe("RunRoom: efectos de las mejoras de stat", () => {
     expect(player("ana").attackSpeedMult).toBeCloseTo(1.1, 12);
   });
 
+  it("haste sincroniza cooldownMult", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await room.waitForNextTimestep();
+    expect(player("ana").cooldownMult).toBe(1);
+    grant("ana", stat("haste"));
+    await room.waitForNextTimestep();
+    expect(player("ana").cooldownMult).toBeCloseTo(0.9, 12);
+  });
+
   it("regenera BASE_REGEN por segundo fuera de la pausa y nada en la pausa", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;

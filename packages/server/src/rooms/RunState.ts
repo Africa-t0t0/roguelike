@@ -38,6 +38,8 @@ export const PlayerState = schema(
     moveSpeedMult: t.number(),
     /** multiplicador de velocidad de ataque de sus cartas (la predicción del combo lo usa) */
     attackSpeedMult: t.number(),
+    /** multiplicador de enfriamiento de habilidades (Celeridad; la predicción del cliente lo usa) */
+    cooldownMult: t.number(),
     /** habilidades en orden de casilla (la tecla i+1 usa la i-ésima), sin la pasiva */
     abilities: t.array(AbilitySlotState),
     /** rango de la Onda de corte; 0 si no la tiene */

@@ -293,8 +293,9 @@ export class AbilityFx {
     const fwdZ = Math.cos(at.facing);
     switch (step.kind) {
       case "ring": {
-        // Toro de diámetro 1: se escala en XZ (el grosor vertical no cambia).
-        const mesh = CreateTorus(`fx-ring-${n}`, { diameter: 1, thickness: 0.05, tessellation: 48 }, this.scene);
+        // Toro construido al radio final (tubo de 0.05 m) y escalado por igual en los 3 ejes: el tubo solo
+        // adelgaza al achicarse (nunca pasa de 0.05 m), así el anillo se mantiene fino.
+        const mesh = CreateTorus(`fx-ring-${n}`, { diameter: 2 * step.to, thickness: 0.05, tessellation: 48 }, this.scene);
         const mat = this.glow(`fx-ringMat-${n}`, step.color);
         mesh.material = mat;
         mesh.position.set(at.x, step.y, at.z);
@@ -302,7 +303,8 @@ export class AbilityFx {
         const apply = (t: number) => {
           const r = RING_START_M + (step.to - RING_START_M) * (1 - (1 - t) * (1 - t));
           piece.ring = r;
-          mesh.scaling.set(2 * r, 1, 2 * r);
+          const k = r / step.to;
+          mesh.scaling.set(k, k, k);
           mat.alpha = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
         };
         Object.assign(piece, { mesh, mat, apply });
@@ -374,7 +376,7 @@ export class AbilityFx {
         const ps = new ParticleSystem(`fx-sparks-${n}`, 300, this.scene);
         ps.particleTexture = this.spark;
         ps.emitter = new Vector3(at.x, WHIRL_RING_Y, at.z);
-        ps.createCylinderEmitter(step.radius, 0.3, 0, 0.2);
+        ps.createCylinderEmitter(step.radius, 0.3, 1, 0.2);
         ps.color1 = new Color4(1, 0.75, 0.3, 1);
         ps.color2 = new Color4(1, 0.4, 0.08, 1);
         ps.colorDead = new Color4(0.6, 0.1, 0, 0);
