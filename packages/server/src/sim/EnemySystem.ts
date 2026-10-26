@@ -4,6 +4,7 @@ import {
   SPELLS,
   ENEMY_DEFS,
   ENEMY_SPAWN_MIN_PLAYER_DIST_TILES,
+  NATURE,
   FlowField,
   PLAYER_RADIUS,
   TIERS,
@@ -19,11 +20,13 @@ import {
   isCaster,
   isWalkableTile,
   moveCircle,
+  natureEffects,
   rollTier,
   tileCenter,
   type Dungeon,
   type EnemyKind,
   type EnemyLoadout,
+  type Nature,
   type Rng,
   type CasterTier,
 } from "@roguelike/shared";
@@ -51,6 +54,18 @@ export interface Enemy {
   spellTier: 0 | CasterTier;
   /** segundos que le quedan aturdido (Patada): ni se mueve ni ataca */
   stunned: number;
+  /** segundos que le quedan congelado (hielo): como el aturdimiento, pero se avisa aparte al cliente */
+  frozen: number;
+  /** segundos de inmunidad a volver a congelarse tras descongelarse */
+  freezeImmune: number;
+  /** élite: no se congela (Task 4 lo asigna) */
+  elite: boolean;
+  /** quemadura (fuego): daño por segundo, segundos restantes y quién la prendió */
+  burn: { left: number; dps: number; ownerKey: string } | null;
+  /** ralentización (hielo): fracción de velocidad que pierde y segundos restantes */
+  slow: { left: number; frac: number } | null;
+  /** instantes (reloj del sistema) de los últimos golpes de hielo, para contar hasta congelar */
+  iceHits: number[];
   /** multiplicador de daño de sus golpes y proyectiles, fijado al crearlo (escalado) */
   damageMult: number;
 }
@@ -90,6 +105,16 @@ export interface EnemyDamageResult {
   drop: EnemyLoadout | null;
 }
 
+/** Quién golpea y con qué naturaleza; `affinity` es el conteo de cartas de Afinidad. */
+export interface StrikeSource {
+  key: string;
+  nature: Nature;
+  affinity: number;
+}
+
+/** Resultado de un golpe: el primero es el golpeado y los siguientes, los encadenados por el rayo. */
+export type StrikeResult = EnemyDamageResult & { enemyId: string; amount: number };
+
 export interface EnemyHit {
   targetKey: string;
   damage: number;
@@ -103,6 +128,7 @@ const MELEE_TOLERANCE = 0.3;
 const DEAD_LINGER_S = 2;
 const SEPARATION_EPS = 1e-4;
 const STUN_EPS = 1e-9;
+const STATUS_EPS = 1e-9;
 
 function tileOf(v: number): number {
   return Math.floor(v / TILE_SIZE);
@@ -122,6 +148,10 @@ export class EnemySystem {
   private floorTime = 0;
   private floor: number;
   private partyLevel = 1;
+  /** reloj del sistema (solo avanza en `step`, así que se detiene en la pausa) */
+  private clock = 0;
+  private statusDamage: { key: string; result: StrikeResult }[] = [];
+  private chains: { points: [number, number][] }[] = [];
 
   constructor(
     private readonly dungeon: Dungeon,
@@ -209,7 +239,8 @@ export class EnemySystem {
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout, spellTier, stunned: 0, damageMult,
+      loadout, spellTier, stunned: 0, frozen: 0, freezeImmune: 0, elite: false, burn: null, slow: null, iceHits: [],
+      damageMult,
     };
     this.list.push(e);
     return e;
@@ -293,11 +324,20 @@ export class EnemySystem {
     const hits: EnemyHit[] = [];
     const alive = players.filter((p) => p.alive);
     this.refreshFlow(alive);
+    this.clock += dt;
 
     for (const e of this.list) {
       e.aiTime += dt;
       if (e.ai === "dead") continue;
+      this.stepStatus(e, dt);
+      // La quemadura pudo matarlo (TS no ve que stepStatus cambia `ai`).
+      if ((e.ai as EnemyAi) === "dead") continue;
       e.cooldown = Math.max(0, e.cooldown - dt);
+      if (e.frozen > 0) {
+        // Congelado: igual que aturdido.
+        e.frozen = e.frozen - dt > STUN_EPS ? e.frozen - dt : 0;
+        continue;
+      }
       if (e.stunned > 0) {
         // Aturdido: el tiempo corre, pero ni se mueve ni ataca.
         e.stunned = e.stunned - dt > STUN_EPS ? e.stunned - dt : 0;
@@ -311,6 +351,23 @@ export class EnemySystem {
     this.stepProjectiles(alive, dt, hits);
     this.stepHazards(alive, dt, hits);
     return hits;
+  }
+
+  /** Avanza la quemadura (daño por tick), la ralentización y la inmunidad al congelamiento. */
+  private stepStatus(e: Enemy, dt: number): void {
+    if (e.freezeImmune > 0) e.freezeImmune = Math.max(0, e.freezeImmune - dt);
+    if (e.slow) {
+      e.slow.left -= dt;
+      if (e.slow.left <= STATUS_EPS) e.slow = null;
+    }
+    const burn = e.burn;
+    if (!burn) return;
+    const span = Math.min(dt, burn.left);
+    burn.left -= dt;
+    if (burn.left <= STATUS_EPS) e.burn = null;
+    const amount = burn.dps * span;
+    const r = this.damage(e.id, amount);
+    this.statusDamage.push({ key: burn.ownerKey, result: { ...r, enemyId: e.id, amount } });
   }
 
   /** Recalcula el flujo solo si cambió el conjunto de casillas de los jugadores vivos. */
@@ -429,6 +486,7 @@ export class EnemySystem {
     if (e.ai === "idle") this.setAi(e, "chase");
 
     const def = ENEMY_DEFS[e.kind];
+    const speed = def.speed * (1 - (e.slow?.frac ?? 0));
     const atk = enemyAttack(e.kind, e.loadout);
     const dx = target.x - e.x;
     const dz = target.z - e.z;
@@ -479,14 +537,14 @@ export class EnemySystem {
         return;
       }
       if (!los) {
-        this.chaseMove(e, target, d, def.speed * dt, def.radius);
+        this.chaseMove(e, target, d, speed * dt, def.radius);
         return;
       }
       if (d < def.ranged.preferredMin) {
         // Retrocede en línea recta; si un muro no lo deja o al retroceder perdería la vista, dispara desde ahí
         // (si no, quedaba yendo y viniendo contra la esquina o arrinconado sin disparar nunca).
         const [px, pz] = [e.x, e.z];
-        if (d > 0) this.moveEnemy(e, -dx / d, -dz / d, def.speed * dt, def.radius);
+        if (d > 0) this.moveEnemy(e, -dx / d, -dz / d, speed * dt, def.radius);
         const moved = Math.hypot(e.x - px, e.z - pz) > 1e-3;
         if (!moved || !hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r)) {
           e.x = px;
@@ -495,14 +553,14 @@ export class EnemySystem {
         }
         return;
       }
-      this.chaseMove(e, target, d, def.speed * dt, def.radius);
+      this.chaseMove(e, target, d, speed * dt, def.radius);
       return;
     }
     if (d - PLAYER_RADIUS <= atk.attackRange && e.cooldown <= 0) {
       this.startTelegraph(e, target);
       return;
     }
-    this.chaseMove(e, target, d, Math.min(def.speed * dt, d), def.radius);
+    this.chaseMove(e, target, d, Math.min(speed * dt, d), def.radius);
   }
 
   /** Con línea de vista va directo al objetivo; sin ella, hacia el centro de la siguiente casilla del flujo. */
@@ -598,6 +656,72 @@ export class EnemySystem {
     if (e.ai === "telegraph") this.setAi(e, "chase");
   }
 
+  /** Congela `s` segundos y cancela su telegrafía; no afecta a muertos, élites ni `stunImmune`. */
+  private freeze(e: Enemy, s: number): void {
+    if (e.ai === "dead" || e.elite || ENEMY_DEFS[e.kind].stunImmune) return;
+    e.frozen = Math.max(e.frozen, s);
+    e.freezeImmune = NATURE.freezeImmuneS;
+    e.iceHits = [];
+    if (e.ai === "telegraph") this.setAi(e, "chase");
+  }
+
+  /**
+   * Golpe de un jugador: daño más el efecto de la naturaleza de su arma sobre el golpeado (fuego quema, hielo
+   * ralentiza y congela, rayo salta a vecinos). El primer resultado es el golpeado; los demás, los encadenados.
+   */
+  strike(enemyId: string, amount: number, src: StrikeSource): StrikeResult[] {
+    const e = this.list.find((x) => x.id === enemyId);
+    const fx = natureEffects(src.nature, src.affinity);
+    // Se sortea antes del daño para que el orden de la RNG no dependa de si hay arma que soltar.
+    const chain = fx.chainChance > 0 && this.rng.next() < fx.chainChance;
+    const r = this.damage(enemyId, amount);
+    const out: StrikeResult[] = [{ ...r, enemyId, amount }];
+    if (!e) return out;
+    if (e.ai !== "dead") {
+      if (fx.burnFrac > 0) {
+        const dps = amount * fx.burnFrac;
+        if (!e.burn || dps >= e.burn.dps) e.burn = { left: NATURE.burnS, dps, ownerKey: src.key };
+        else e.burn.left = NATURE.burnS;
+      }
+      if (fx.slowFrac > 0) {
+        e.slow = { left: NATURE.slowS, frac: Math.max(fx.slowFrac, e.slow?.frac ?? 0) };
+        this.countIceHit(e);
+      }
+    }
+    if (chain) {
+      const points: [number, number][] = [[r.x, r.z]];
+      const near = this.list
+        .filter((x) => x !== e && x.ai !== "dead" && Math.hypot(x.x - r.x, x.z - r.z) <= NATURE.chainRangeM)
+        .sort((a, b) => Math.hypot(a.x - r.x, a.z - r.z) - Math.hypot(b.x - r.x, b.z - r.z))
+        .slice(0, NATURE.chainTargets);
+      for (const n of near) {
+        const dmg = Math.round(amount * NATURE.chainFrac);
+        out.push({ ...this.damage(n.id, dmg), enemyId: n.id, amount: dmg });
+        points.push([n.x, n.z]);
+      }
+      if (near.length > 0) this.chains.push({ points });
+    }
+    return out;
+  }
+
+  /** Cuenta un golpe de hielo; a los `freezeHits` dentro de `freezeWindowS` lo congela (si no es inmune). */
+  private countIceHit(e: Enemy): void {
+    if (e.freezeImmune > 0 || e.elite || ENEMY_DEFS[e.kind].stunImmune) return;
+    e.iceHits.push(this.clock);
+    e.iceHits = e.iceHits.filter((t) => this.clock - t <= NATURE.freezeWindowS + STATUS_EPS);
+    if (e.iceHits.length >= NATURE.freezeHits) this.freeze(e, NATURE.freezeS);
+  }
+
+  /** Daño y muertes por quemadura desde la última llamada. */
+  takeStatusDamage(): { key: string; result: StrikeResult }[] {
+    return this.statusDamage.splice(0);
+  }
+
+  /** Cadenas del rayo desde la última llamada (para el evento `chain`). */
+  takeChains(): { points: [number, number][] }[] {
+    return this.chains.splice(0);
+  }
+
   /** Empuja `m` metros en la dirección (dirX, dirZ) contra los muros. */
   knockback(enemyId: string, dirX: number, dirZ: number, m: number): void {
     const e = this.list.find((x) => x.id === enemyId);
@@ -613,6 +737,7 @@ export class EnemySystem {
     e.hp = Math.max(0, e.hp - amount);
     if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null };
     this.setAi(e, "dead");
+    e.burn = null;
     // solo los armados sortean soltar su arma
     const drop = e.loadout && this.rng.next() < TIERS[e.loadout.tier].dropChance ? { ...e.loadout } : null;
     return { killed: true, xp: ENEMY_DEFS[e.kind].xp, x: e.x, z: e.z, drop };

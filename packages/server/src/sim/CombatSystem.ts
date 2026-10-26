@@ -175,10 +175,11 @@ export class CombatSystem {
     nowTick: number,
     enemies: EnemySystem,
     history: PositionHistory,
+    key = "",
   ): InputResult {
     const step = c.comboStep;
     const due = advanceCombo(c, SIM_DT);
-    const impact = due && !c.dead ? this.resolveImpact(c, k, step, input, nowTick, enemies, history) : null;
+    const impact = due && !c.dead ? this.resolveImpact(c, k, step, input, nowTick, enemies, history, key) : null;
 
     if (c.dead || c.pendingHits.length === 0) return { damage: 0, died: false, impact };
     if (c.invulnFor > 0) {
@@ -209,6 +210,7 @@ export class CombatSystem {
     nowTick: number,
     enemies: EnemySystem,
     history: PositionHistory,
+    key: string,
   ): ImpactResult {
     const strike = strikeOf(c.weaponId, step, c.mods.attackSpeedMult);
     const range = strike.range * c.mods.reachMult;
@@ -220,14 +222,17 @@ export class CombatSystem {
     const origin = { x: k.x, z: k.z, facing: c.swingFacing };
     const result: ImpactResult = { step, hits: [], kills: [] };
 
-    // Se copia la lista: damage() puede cambiar el estado interno.
+    // Se copia la lista: strike() puede cambiar el estado interno.
     for (const e of [...enemies.enemies]) {
       if (e.ai === "dead" || e.hp <= 0) continue;
       const pos = history.at(t, e.id) ?? { x: e.x, z: e.z };
       if (!inArc(origin, { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius }, range, arcDeg)) continue;
-      const r = enemies.damage(e.id, amount);
-      result.hits.push({ enemyId: e.id, amount, killed: r.killed, x: e.x, z: e.z });
-      if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
+      const src = { key, nature: c.weaponNature, affinity: c.mods.affinity };
+      // El primero es el golpeado (posición actual en el golpe); los demás, encadenados por el rayo.
+      enemies.strike(e.id, amount, src).forEach((r, i) => {
+        result.hits.push({ enemyId: r.enemyId, amount: r.amount, killed: r.killed, x: i === 0 ? e.x : r.x, z: i === 0 ? e.z : r.z });
+        if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
+      });
     }
     // Sed de sangre: cada kill propio cura.
     this.heal(c, c.mods.lifeOnKill * result.kills.length);

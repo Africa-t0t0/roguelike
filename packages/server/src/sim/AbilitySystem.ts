@@ -143,6 +143,7 @@ export class AbilitySystem {
     enemies: EnemySystem,
     history: PositionHistory,
     party: CombatState[],
+    key = "",
   ): AbilityResult {
     const res: AbilityResult = { hits: [], kills: [] };
     const pressed = input.abilities & ~c.heldMask;
@@ -160,7 +161,7 @@ export class AbilitySystem {
       for (const t of anim.impacts) {
         const left = countDown(t, SIM_DT);
         if (left > 0) keep.push(left);
-        else this.resolveImpact(c, k, anim, input, nowTick, enemies, history, res);
+        else this.resolveImpact(c, k, anim, input, nowTick, enemies, history, res, key);
       }
       anim.impacts = keep;
       if (anim.left === 0 && keep.length === 0) c.abilityAnim = null;
@@ -238,13 +239,15 @@ export class AbilitySystem {
           r = { key: s.ownerKey, hits: [], kills: [] };
           out.set(s.ownerKey, r);
         }
-        const d = enemies.damage(e.id, s.damage);
-        r.hits.push({ enemyId: e.id, amount: s.damage, killed: d.killed, x: e.x, z: e.z });
-        if (d.killed) {
-          r.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop });
-          // Sed de sangre también con las kills de la onda.
-          this.combat.heal(s.owner, s.owner.mods.lifeOnKill);
-        }
+        const src = { key: s.ownerKey, nature: s.owner.weaponNature, affinity: s.owner.mods.affinity };
+        enemies.strike(e.id, s.damage, src).forEach((d, i) => {
+          r.hits.push({ enemyId: d.enemyId, amount: d.amount, killed: d.killed, x: i === 0 ? e.x : d.x, z: i === 0 ? e.z : d.z });
+          if (d.killed) {
+            r.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop });
+            // Sed de sangre también con las kills de la onda.
+            this.combat.heal(s.owner, s.owner.mods.lifeOnKill);
+          }
+        });
       }
       if (s.life > EPS) keep.push(s);
     }
@@ -276,6 +279,7 @@ export class AbilitySystem {
     enemies: EnemySystem,
     history: PositionHistory,
     res: AbilityResult,
+    key: string,
   ): void {
     const { id, facing } = anim;
     const r = ABILITIES[id].ranks[anim.rank - 1];
@@ -298,13 +302,16 @@ export class AbilitySystem {
             hasLineOfSight(this.dungeon, origin.x, origin.z, pos.x, pos.z, 0)
           : inArc(origin, target, r.radius!, arcDeg);
       if (!inside) continue;
-      const d = enemies.damage(e.id, amount);
-      res.hits.push({ enemyId: e.id, amount, killed: d.killed, x: e.x, z: e.z });
-      if (d.killed) {
-        res.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop });
-        kills++;
-        continue;
-      }
+      const src = { key, nature: c.weaponNature, affinity: c.mods.affinity };
+      const results = enemies.strike(e.id, amount, src);
+      results.forEach((d, i) => {
+        res.hits.push({ enemyId: d.enemyId, amount: d.amount, killed: d.killed, x: i === 0 ? e.x : d.x, z: i === 0 ? e.z : d.z });
+        if (d.killed) {
+          res.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop });
+          kills++;
+        }
+      });
+      if (results[0]!.killed) continue;
       if (id === "kick") {
         // Lejos del jugador, desde la posición rebobinada con la que se decidió el cono; encima de él, hacia
         // donde mira.

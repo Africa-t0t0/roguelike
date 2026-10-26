@@ -85,6 +85,9 @@ export function syncWorld(
     es.ai = e.ai;
     es.aiTime = e.aiTime;
     es.stunned = e.stunned;
+    es.burning = e.burn !== null;
+    es.slowed = e.slow !== null;
+    es.frozen = e.frozen > 0;
     es.spellTier = e.spellTier;
   }
   for (const id of [...state.enemies.keys()]) if (!liveEnemies.has(id)) state.enemies.delete(id);

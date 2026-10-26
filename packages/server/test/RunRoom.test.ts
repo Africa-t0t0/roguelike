@@ -1283,6 +1283,92 @@ describe("RunRoom: habilidades", () => {
   });
 });
 
+describe("RunRoom: efectos de naturaleza", () => {
+  const sides = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
+
+  /** Ana en una sala de combate con sus 4 enemigos, todos con mucha vida y quietos lejos de ella. */
+  async function setupFight() {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const events = collect(ana.client);
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await ticksUntil(() => room["enemySystem"].enemies.length >= 4, 5);
+    const sys = room["enemySystem"];
+    for (const e of sys.enemies) e.hp = e.maxHp = 9999;
+    return { ana, events, d, sys };
+  }
+
+  it("un enemigo muerto por quemadura deja orbes y el daño lleva el sourceKey de quien quemó", async () => {
+    const { events, sys } = await setupFight();
+    const stepSpy = vi.spyOn(room["orbs"], "step").mockReturnValue(0);
+    const target = sys.enemies[0]!;
+    const before = room["orbs"].orbs.length;
+    target.hp = 3;
+    target.burn = { left: 3, dps: 30, ownerKey: "ana" };
+    await ticksUntil(() => target.ai === "dead", 10);
+    await ticksUntil(() => events.some((e) => e.type === "damage" && e.targetId === target.id), 5);
+    expect(room["orbs"].orbs.length).toBeGreaterThan(before);
+    expect(events.find((e) => e.type === "damage" && e.targetId === target.id)).toMatchObject({
+      targetKind: "enemy", sourceKey: "ana",
+    });
+    stepSpy.mockRestore();
+  });
+
+  it("la quemadura agrupa su daño: un evento por segundo", async () => {
+    const { events, sys } = await setupFight();
+    const target = sys.enemies[0]!;
+    target.burn = { left: 3, dps: 2, ownerKey: "ana" };
+    for (let i = 0; i < 95; i++) await room.waitForNextTimestep();
+    await ticksUntil(() => !target.burn, 30);
+    await ticksUntil(() => events.filter((e) => e.type === "damage" && e.targetId === target.id).length >= 3, 40);
+    const dmg = events.filter((e) => e.type === "damage" && e.targetId === target.id);
+    expect(dmg.length).toBeLessThanOrEqual(4);
+    expect(dmg[0]).toMatchObject({ amount: 2, sourceKey: "ana" });
+  });
+
+  it("un golpe de rayo que encadena emite chain", async () => {
+    const { ana, events, d, sys } = await setupFight();
+    const c = record("ana").combat;
+    c.weaponNature = "lightning";
+    c.mods = { ...c.mods, affinity: 20 };
+    const target = sys.enemies.find((e) => sides.some(([dx, dz]) => isWalkableTile(d, tileOf(e.x) + dx, tileOf(e.z) + dz)))!;
+    const [dx, dz] = sides.find(([dx, dz]) => isWalkableTile(d, tileOf(target.x) + dx, tileOf(target.z) + dz))!;
+    // Un vecino pegado al golpeado y el resto lejos.
+    const other = sys.enemies.find((e) => e !== target)!;
+    other.x = target.x + 1;
+    other.z = target.z;
+    teleport("ana", tileCenter(tileOf(target.x) + dx, tileOf(target.z) + dz));
+    let seq = 1;
+    for (let attempt = 0; attempt < 5 && !events.some((e) => e.type === "chain"); attempt++) {
+      await room.waitForNextTimestep();
+      const me = record("ana").kinematic;
+      const facing = Math.atan2(target.x - me.x, target.z - me.z);
+      ana.client.send(MSG.input, attackInput(seq++, facing, room.state.tick));
+      for (let j = 0; j < 11; j++) ana.client.send(MSG.input, { ...attackInput(seq++, facing, room.state.tick), attack: false });
+      const last = seq - 1;
+      await ticksUntil(() => player("ana").lastSeq === last, 10);
+      await room.waitForNextTimestep();
+    }
+    const chain = events.find((e) => e.type === "chain");
+    expect(chain).toBeDefined();
+    expect(chain!.type === "chain" && chain!.points.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("en la pausa de elección la quemadura no avanza", async () => {
+    const { sys } = await setupFight();
+    const target = sys.enemies[0]!;
+    target.burn = { left: 3, dps: 1, ownerKey: "ana" };
+    room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => room.state.paused, 5);
+    const left = target.burn!.left;
+    const hp = target.hp;
+    for (let i = 0; i < 20; i++) await room.waitForNextTimestep();
+    expect(target.burn!.left).toBe(left);
+    expect(target.hp).toBe(hp);
+  });
+});
+
 describe("HTTP", () => {
   it("GET /health responde 200", async () => {
     const res = await fetch("http://localhost:2568/health");

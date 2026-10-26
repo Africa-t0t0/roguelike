@@ -63,6 +63,8 @@ const ORB_RNG_SALT = 0x0b5e;
 const CARD_RNG_SALT = 0xca7d;
 /** lo que cura la carta Vitalidad al aplicarse */
 const VITALITY_HEAL = 20;
+/** ticks entre números de daño de la quemadura de un mismo enemigo (1 s) */
+const BURN_EVENT_TICKS = SIM_HZ;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -94,6 +96,8 @@ export class RunRoom extends Room<{ state: RunState }> {
   private abilities!: AbilitySystem;
   /** Sala de pruebas (`?sandbox=1`): atiende `MSG.dev`. */
   private sandbox = false;
+  /** daño de quemadura aún sin avisar, por enemigo */
+  private readonly burnAcc = new Map<string, { key: string; amount: number; since: number; x: number; z: number }>();
   /** Oleadas y llenado de salas; en el sandbox empiezan apagados. */
   private wavesOn = true;
   /** Interruptores del panel de pruebas por jugador. */
@@ -373,7 +377,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT, { speedMult: moveSpeedMult(c) });
         record.lastSeq = input.seq;
         // Combo, impacto y golpes pendientes avanzan por input, antes de empezar el swing de ese input.
-        const res = this.combat.onInputProcessed(c, record.kinematic, input, this.state.tick, this.enemySystem, this.history);
+        const res = this.combat.onInputProcessed(c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, record.key);
         if (res.impact) {
           this.impact(record.key, res.impact);
           this.abilities.onComboImpact(c, record.kinematic, res.impact.step, record.key);
@@ -381,7 +385,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
         // Habilidades después del combo y antes del ataque (que no se puede durante su animación).
         const ab = this.abilities.onInput(
-          c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party,
+          c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party, record.key,
         );
         if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started });
         this.impact(record.key, ab);
@@ -408,6 +412,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (connected.length > 0 && this.wavesOn) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
+    this.burnTick();
     // Enfriamientos, Grito y ondas (por tick: se congelan en la pausa).
     for (const r of this.abilities.step(states, this.enemySystem, SIM_DT)) this.impact(r.key, r);
     // Orbes: los atraen y recogen los vivos; la xp es del grupo y sube la vida máxima de todos los registros.
@@ -477,10 +482,47 @@ export class RunRoom extends Room<{ state: RunState }> {
         sourceKey: key,
       });
     }
-    for (const k of res.kills) {
+    this.spawnKills(res.kills);
+    for (const c of this.enemySystem.takeChains()) this.emit({ type: "chain", points: c.points });
+  }
+
+  private spawnKills(kills: Pick<ImpactResult, "kills">["kills"]): void {
+    for (const k of kills) {
       this.orbs.spawn(k.x, k.z, k.xp, this.state.tick);
       if (k.drop) this.dropWeapon({ ...k.drop, x: k.x, z: k.z });
     }
+  }
+
+  /**
+   * Daño de quemadura del tick: las muertes dejan orbes y armas ya; los números de daño se agrupan en un
+   * evento por enemigo y segundo (o al morir), con el acumulado. Sin curación por Sed de sangre.
+   */
+  private burnTick(): void {
+    const kills: ImpactResult["kills"] = [];
+    for (const { key, result: r } of this.enemySystem.takeStatusDamage()) {
+      const acc = this.burnAcc.get(r.enemyId) ?? { key, amount: 0, since: this.state.tick, x: r.x, z: r.z };
+      acc.amount += r.amount;
+      acc.key = key;
+      acc.x = r.x;
+      acc.z = r.z;
+      this.burnAcc.set(r.enemyId, acc);
+      if (r.killed) {
+        kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop });
+        this.flushBurn(r.enemyId);
+      }
+    }
+    for (const [id, acc] of [...this.burnAcc]) if (this.state.tick - acc.since >= BURN_EVENT_TICKS) this.flushBurn(id);
+    this.spawnKills(kills);
+  }
+
+  private flushBurn(enemyId: string): void {
+    const acc = this.burnAcc.get(enemyId);
+    if (!acc) return;
+    this.burnAcc.delete(enemyId);
+    this.emit({
+      type: "damage", targetKind: "enemy", targetId: enemyId, amount: Math.max(1, Math.round(acc.amount)),
+      x: acc.x, z: acc.z, sourceKey: acc.key,
+    });
   }
 
   /**

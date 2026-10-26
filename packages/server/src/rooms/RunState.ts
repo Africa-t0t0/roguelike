@@ -73,6 +73,10 @@ export const EnemyState = schema(
     weaponNature: t.string(),
     /** segundos que le quedan aturdido */
     stunned: t.number(),
+    /** quemándose, ralentizado o congelado (para los efectos del cliente) */
+    burning: t.boolean(),
+    slowed: t.boolean(),
+    frozen: t.boolean(),
     /** tier de sus hechizos (1..3); 0 si no es hechicero */
     spellTier: t.number(),
   },

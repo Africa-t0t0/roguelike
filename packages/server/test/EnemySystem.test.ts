@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ARMED_CHANCE,
   ENEMY_DEFS,
   PLAYER_RADIUS,
   enemyAttack,
@@ -14,6 +15,7 @@ import {
   type Dungeon,
   type EnemyKind,
   type EnemyLoadout,
+  type Rng,
 } from "@roguelike/shared";
 import { EnemySystem, type Enemy, type EnemyHit, type SimPlayer } from "../src/sim/EnemySystem";
 
@@ -672,5 +674,151 @@ describe("peligros de los hechiceros", () => {
     const h = sys.hazards[0]!;
     expect(h.length).toBeLessThan(dist(e, a));
     expect(run(sys, [a], 60)).toEqual([]);
+  });
+});
+
+
+describe("EnemySystem: naturaleza de las armas", () => {
+  const FIRE = { key: "ana", nature: "fire", affinity: 0 } as const;
+  const ICE = { key: "ana", nature: "ice", affinity: 0 } as const;
+  const LIGHT = { key: "ana", nature: "lightning", affinity: 0 } as const;
+  /** Suma el daño de estado de `steps` ticks. */
+  function burned(sys: EnemySystem, p: SimPlayer[], steps: number): number {
+    let total = 0;
+    for (let i = 0; i < steps; i++) {
+      sys.step(p, SIM_DT);
+      for (const s of sys.takeStatusDamage()) total += s.result.amount;
+    }
+    return total;
+  }
+  const far = [P("a", 2 * TILE_SIZE, 2 * TILE_SIZE)];
+
+  it("fuego: un golpe de 20 quema 12 en 3 s y no más", () => {
+    const { sys, e } = setup("brute", IN_ROOM.x, IN_ROOM.z);
+    e.hp = e.maxHp = 9999;
+    sys.strike(e.id, 20, FIRE);
+    expect(e.burn).toMatchObject({ dps: 4, ownerKey: "ana" });
+    expect(burned(sys, far, 120)).toBeCloseTo(12, 0);
+    expect(e.burn).toBeNull();
+  });
+
+  it("fuego: un segundo golpe renueva a 3 s con el mayor dps", () => {
+    const { sys, e } = setup("brute", IN_ROOM.x, IN_ROOM.z);
+    e.hp = e.maxHp = 9999;
+    sys.strike(e.id, 20, FIRE);
+    burned(sys, far, 45);
+    sys.strike(e.id, 10, FIRE);
+    expect(e.burn!.dps).toBe(4);
+    expect(e.burn!.left).toBe(3);
+    // Un golpe más fuerte sube el dps.
+    sys.strike(e.id, 50, FIRE);
+    expect(e.burn!.dps).toBe(10);
+  });
+
+  it("fuego: si la quemadura mata, el resultado trae killed, xp y drop", () => {
+    const { sys, e } = setup("brute", IN_ROOM.x, IN_ROOM.z);
+    e.hp = 2;
+    e.loadout = { weaponId: ARMED_CHANCE.brute!.weaponId, tier: 3, nature: "none" };
+    const dropRoll = vi.spyOn(sys["rng"], "next").mockReturnValue(0);
+    sys.strike(e.id, 0, FIRE);
+    // 0 de daño no enciende nada útil: se enciende a mano un dps que mate.
+    e.burn = { left: 3, dps: 4, ownerKey: "ana" };
+    const out: { key: string; result: ReturnType<EnemySystem["takeStatusDamage"]>[number]["result"] }[] = [];
+    for (let i = 0; i < 30 && e.ai !== "dead"; i++) {
+      sys.step(far, SIM_DT);
+      out.push(...sys.takeStatusDamage());
+    }
+    const last = out.at(-1)!;
+    expect(last.key).toBe("ana");
+    expect(last.result).toMatchObject({ killed: true, xp: ENEMY_DEFS.brute.xp, enemyId: e.id });
+    expect(e.ai).toBe("dead");
+    expect(last.result.drop).not.toBeNull();
+    expect(e.burn).toBeNull();
+    dropRoll.mockRestore();
+  });
+
+  it("hielo: un golpe lo ralentiza al 70 % durante 2 s", () => {
+    const far0 = setup("minion", IN_ROOM.x, IN_ROOM.z);
+    const slow = setup("minion", IN_ROOM.x, IN_ROOM.z);
+    const target = [P("a", 36, 18)];
+    slow.e.hp = slow.e.maxHp = 9999;
+    slow.sys.strike(slow.e.id, 1, ICE);
+    run(far0.sys, target, 30);
+    run(slow.sys, target, 30);
+    const d0 = dist({ x: IN_ROOM.x, z: IN_ROOM.z }, far0.e);
+    const d1 = dist({ x: IN_ROOM.x, z: IN_ROOM.z }, slow.e);
+    expect(d1 / d0).toBeCloseTo(0.7, 1);
+    run(slow.sys, target, 40);
+    expect(slow.e.slow).toBeNull();
+  });
+
+  it("hielo: 3 golpes en 2 s congelan 0,8 s y cancelan la telegrafía; el 4.º no repite (inmunidad 4 s)", () => {
+    const { sys, e } = setup("brute", IN_ROOM.x, IN_ROOM.z);
+    e.hp = e.maxHp = 9999;
+    sys.strike(e.id, 1, ICE);
+    run(sys, far, 30);
+    sys.strike(e.id, 1, ICE);
+    run(sys, far, 30);
+    expect(e.frozen).toBe(0);
+    e.ai = "telegraph";
+    e.aiTime = 0;
+    sys.strike(e.id, 1, ICE);
+    expect(e.frozen).toBeCloseTo(0.8, 5);
+    expect(e.ai).toBe("chase");
+    const [x, z] = [e.x, e.z];
+    run(sys, [P("a", x + 1, z)], 20);
+    expect([e.x, e.z]).toEqual([x, z]);
+    run(sys, far, 10);
+    expect(e.frozen).toBe(0);
+    // En el segundo siguiente: tres golpes más no lo vuelven a congelar.
+    for (let i = 0; i < 4; i++) sys.strike(e.id, 1, ICE);
+    expect(e.frozen).toBe(0);
+  });
+
+  it("hielo: un élite no se congela", () => {
+    const { sys, e } = setup("brute", IN_ROOM.x, IN_ROOM.z);
+    e.hp = e.maxHp = 9999;
+    e.elite = true;
+    for (let i = 0; i < 5; i++) sys.strike(e.id, 1, ICE);
+    expect(e.frozen).toBe(0);
+    expect(e.slow).not.toBeNull();
+  });
+
+  /** Sistema con 4 enemigos de mucha vida: el golpeado en (18,18) y vecinos a las distancias dadas. */
+  function chainSetup(roll: number, dists: number[]) {
+    const rng: Rng = { next: () => roll, int: (a) => a, pick: (arr) => arr[0]! };
+    const sys = new EnemySystem(arena(), rng);
+    const made = sys.spawnWave(
+      [{ x: 18, z: 18 }, ...dists.map((d) => ({ x: 18 - d, z: 18 }))],
+      ["brute"],
+    );
+    for (const m of made) m.hp = m.maxHp = 9999;
+    return { sys, made };
+  }
+
+  it("rayo: encadena solo a los vecinos a ≤ 4 m (máx. 2) con el 50 %", () => {
+    const { sys, made } = chainSetup(0.1, [2, 3, 6]);
+    const out = sys.strike(made[0]!.id, 20, LIGHT);
+    expect(out.map((r) => r.enemyId)).toEqual([made[0]!.id, made[1]!.id, made[2]!.id]);
+    expect(out.map((r) => r.amount)).toEqual([20, 10, 10]);
+    expect(made[3]!.hp).toBe(9999);
+    expect(made[1]!.hp).toBe(9989);
+    const chains = sys.takeChains();
+    expect(chains).toHaveLength(1);
+    expect(chains[0]!.points).toHaveLength(3);
+    expect(sys.takeChains()).toEqual([]);
+  });
+
+  it("rayo: si el golpeado muere, la cadena igual sale; sin vecinos o sin suerte solo el golpeado", () => {
+    const { sys, made } = chainSetup(0.1, [2]);
+    made[0]!.hp = 1;
+    const out = sys.strike(made[0]!.id, 20, LIGHT);
+    expect(out[0]!.killed).toBe(true);
+    expect(out).toHaveLength(2);
+    const alone = chainSetup(0.1, []);
+    expect(alone.sys.strike(alone.made[0]!.id, 20, LIGHT)).toHaveLength(1);
+    expect(alone.sys.takeChains()).toEqual([]);
+    const unlucky = chainSetup(0.9, [2]);
+    expect(unlucky.sys.strike(unlucky.made[0]!.id, 20, LIGHT)).toHaveLength(1);
   });
 });
