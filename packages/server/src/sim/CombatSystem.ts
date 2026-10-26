@@ -1,4 +1,5 @@
 import {
+  type Nature,
   ABILITIES,
   BASE_REGEN,
   BLOCK_HALF_ARC_DEG,
@@ -63,6 +64,7 @@ export interface CombatState extends ComboTimers {
   cls: ClassId;
   weaponId: WeaponId;
   weaponTier: WeaponTier;
+  weaponNature: Nature;
   /** dirección del clic que empezó el swing en curso; el impacto la usa aunque el jugador gire */
   swingFacing: number;
   hp: number;
@@ -113,6 +115,7 @@ export function newCombatState(
     cls,
     weaponId,
     weaponTier: tier,
+    weaponNature: "none",
     swingFacing: 0,
     hp: maxHp,
     maxHp,

@@ -862,6 +862,42 @@ describe("RunRoom: orbes y botín", () => {
     await ticksUntil(() => beto.client.state.players.get("beto")?.weaponTier === 2, 5);
   });
 
+  it("un arma del suelo con naturaleza se toma, y la anterior queda con la suya", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    const r = record("ana");
+    r.combat.weaponNature = "ice";
+    const me = r.kinematic;
+    r.floorWeapons = [{ weaponId: "great-sword", tier: 2, nature: "fire", x: me.x + 1, z: me.z, expiresAt: room["floorTime"] + 30 }];
+    const sent = ana.floors.length;
+    ana.client.send(MSG.input, idle(1, { interact: true }));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    expect(r.combat).toMatchObject({ weaponId: "great-sword", weaponTier: 2, weaponNature: "fire" });
+    expect(r.floorWeapons[0]).toMatchObject({ nature: "ice" });
+    await ticksUntil(() => player("ana").weaponNature === "fire" && ana.floors.length > sent, 5);
+    expect(ana.floors.at(-1)!.items[0]).toMatchObject({ nature: "ice" });
+  });
+
+  it("un arma soltada por un enemigo con naturaleza la conserva en floorWeapons", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    await ticksUntil(() => ana.floors.length >= 1, 10);
+    const tier2 = TIERS[2] as { dropChance: number };
+    const chance = tier2.dropChance;
+    tier2.dropChance = 1;
+    try {
+      await killOne("ana", ana.client, (e) => {
+        e.loadout = { weaponId: "great-sword", tier: 2, nature: "lightning" };
+      });
+    } finally {
+      tier2.dropChance = chance;
+    }
+    await ticksUntil(() => ana.floors.length >= 2, 10);
+    expect(ana.floors.at(-1)!.items.at(-1)).toMatchObject({ weaponId: "great-sword", tier: 2, nature: "lightning" });
+    expect(record("ana").floorWeapons.at(-1)).toMatchObject({ nature: "lightning" });
+  });
+
   it("los enemigos llevan su arma y su tier en el estado (\"\" y 0 si van desarmados)", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
@@ -872,6 +908,7 @@ describe("RunRoom: orbes y botín", () => {
       const es = room.state.enemies.get(e.id)!;
       expect(es.weaponId).toBe(e.loadout?.weaponId ?? "");
       expect(es.weaponTier).toBe(e.loadout?.tier ?? 0);
+      expect(es.weaponNature).toBe(e.loadout?.nature ?? "none");
     }
   });
 
@@ -1049,7 +1086,7 @@ describe("RunRoom: vencimiento de las armas del suelo", () => {
     await ticksUntil(() => ana.floors.length >= 1, 10);
     record("ana").floorWeapons = [];
     const me = record("ana").kinematic;
-    room["dropWeapon"]({ weaponId: "great-sword", tier: 2, x: me.x + 5, z: me.z });
+    room["dropWeapon"]({ weaponId: "great-sword", tier: 2, nature: "none", x: me.x + 5, z: me.z });
     await ticksUntil(() => ana.floors.length >= 2, 10);
     const f = record("ana").floorWeapons[0]!;
     expect(f.expiresAt).toBeCloseTo(room["floorTime"] + FLOOR_WEAPON_TTL_S, 0);
@@ -1310,6 +1347,14 @@ describe("RunRoom: sandbox", () => {
     await settle();
     expect(room["enemySystem"].enemies.every((e) => e.ai === "dead")).toBe(true);
     expect(room["orbs"].orbs).toHaveLength(0);
+  });
+
+  it("weapon con nature la sincroniza en el estado del jugador", async () => {
+    const { ana } = await sandboxRoom();
+    expect(player("ana").weaponNature).toBe("none");
+    dev(ana.client, { cmd: "weapon", weaponId: "great-sword", tier: 3, nature: "ice" });
+    await ticksUntil(() => player("ana").weaponNature === "ice", 10);
+    expect(record("ana").combat).toMatchObject({ weaponId: "great-sword", weaponTier: 3, weaponNature: "ice" });
   });
 
   it("levelUp sin elegir sube niveles sin pausa; con elegir abre la elección con pausa", async () => {

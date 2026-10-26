@@ -33,6 +33,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.swingTimer = c.swingTimer;
   ps.weaponId = c.weaponId;
   ps.weaponTier = c.weaponTier;
+  ps.weaponNature = c.weaponNature;
   ps.choosing = choosing;
   ps.moveSpeedMult = c.mods.moveSpeedMult;
   ps.attackSpeedMult = c.mods.attackSpeedMult;
@@ -73,6 +74,7 @@ export function syncWorld(
       // El arma de un enemigo no cambia en su vida.
       es.weaponId = e.loadout?.weaponId ?? "";
       es.weaponTier = e.loadout?.tier ?? 0;
+      es.weaponNature = e.loadout?.nature ?? "none";
       state.enemies.set(e.id, es);
     }
     es.x = e.x;

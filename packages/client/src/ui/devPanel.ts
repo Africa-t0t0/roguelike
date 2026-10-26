@@ -116,7 +116,7 @@ export class DevPanel {
     const weaponSel = this.select(weapon, weapons.map((w) => weaponDisplayName(w.id, w.tier)));
     this.button(weapon, "Equipar", () => {
       const w = weapons[weaponSel.selectedIndex]!;
-      return { cmd: "weapon", weaponId: w.id, tier: w.tier };
+      return { cmd: "weapon", weaponId: w.id, tier: w.tier, nature: "none" };
     });
   }
 

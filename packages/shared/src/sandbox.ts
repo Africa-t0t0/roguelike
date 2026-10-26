@@ -1,5 +1,6 @@
 import { ABILITIES, STAT_CARDS, type AbilityId, type CardOffer, type StatCardId } from "./cards";
 import { ENEMY_DEFS, type EnemyKind } from "./combat";
+import { ELEMENTS, type Nature } from "./natures";
 import { WEAPONS, type WeaponId, type WeaponTier } from "./weapons";
 import type { CasterTier } from "./spells";
 
@@ -25,7 +26,7 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `clock`: adelanta el reloj del piso `seconds`.
  * - `freeze`: congela a los enemigos que no preparan un ataque (proyectiles y peligros siguen).
  * - `castNow`: todos los hechiceros libres lanzan ya su hechizo sobre el jugador más cercano.
- * - `weapon`: equipa el arma con su tier.
+ * - `weapon`: equipa el arma con su tier y naturaleza (`"none"` si no se indica).
  */
 export type DevCommand =
   | { cmd: "levelUp"; count: number; choose: boolean }
@@ -40,11 +41,12 @@ export type DevCommand =
   | { cmd: "clock"; seconds: number }
   | { cmd: "freeze"; on: boolean }
   | { cmd: "castNow" }
-  | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier };
+  | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 const isTier = (v: unknown): v is 1 | 2 | 3 => isInt(v, 1, 3);
+const isNature = (v: unknown): v is Nature => v === "none" || (ELEMENTS as readonly unknown[]).includes(v);
 const has = <T extends object>(o: T, k: unknown): k is keyof T => typeof k === "string" && Object.hasOwn(o, k);
 
 /** Valida un mensaje del cliente; null si no es un comando conocido y bien formado. */
@@ -83,8 +85,12 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
       return typeof m.seconds === "number" && Number.isFinite(m.seconds) && m.seconds > 0 && m.seconds <= SANDBOX_MAX_CLOCK_STEP_S
         ? { cmd: "clock", seconds: m.seconds }
         : null;
-    case "weapon":
-      return has(WEAPONS, m.weaponId) && isTier(m.tier) ? { cmd: "weapon", weaponId: m.weaponId as WeaponId, tier: m.tier } : null;
+    case "weapon": {
+      const nature = m.nature ?? "none";
+      return has(WEAPONS, m.weaponId) && isTier(m.tier) && isNature(nature)
+        ? { cmd: "weapon", weaponId: m.weaponId as WeaponId, tier: m.tier, nature }
+        : null;
+    }
     default:
       return null;
   }

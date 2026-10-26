@@ -328,6 +328,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       case "weapon":
         c.weaponId = cmd.weaponId;
         c.weaponTier = cmd.tier;
+        c.weaponNature = cmd.nature;
         Object.assign(c, newComboTimers());
         break;
     }
@@ -518,14 +519,14 @@ export class RunRoom extends Room<{ state: RunState }> {
     const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + ids.length).slice(MAX_PLAYERS);
     if (points.length < ids.length) throw new Error("la sala inicial no tiene sitio para las armas del suelo");
     const expiresAt = this.floorWeaponExpiry();
-    return ids.map((weaponId, i) => ({ weaponId, tier: 1, x: points[i]!.x, z: points[i]!.z, expiresAt }));
+    return ids.map((weaponId, i) => ({ weaponId, tier: 1, nature: "none", x: points[i]!.x, z: points[i]!.z, expiresAt }));
   }
 
   /** `ttl`: segundos simulados que le quedan a cada arma al enviarla. */
   private sendFloorWeapons(client: Client, record: PlayerRecord): void {
     client.send(MSG.floorWeapons, {
-      items: record.floorWeapons.map(({ weaponId, tier, x, z, expiresAt }) => ({
-        weaponId, tier, x, z, ttl: expiresAt - this.floorTime,
+      items: record.floorWeapons.map(({ weaponId, tier, nature, x, z, expiresAt }) => ({
+        weaponId, tier, nature, x, z, ttl: expiresAt - this.floorTime,
       })),
     });
   }
@@ -543,11 +544,12 @@ export class RunRoom extends Room<{ state: RunState }> {
     const taken = record.floorWeapons[best]!;
     // La que se deja vence a los FLOOR_WEAPON_TTL_S desde ahora.
     record.floorWeapons[best] = {
-      weaponId: record.combat.weaponId, tier: record.combat.weaponTier, x: taken.x, z: taken.z,
+      weaponId: record.combat.weaponId, tier: record.combat.weaponTier, nature: record.combat.weaponNature, x: taken.x, z: taken.z,
       expiresAt: this.floorWeaponExpiry(),
     };
     record.combat.weaponId = taken.weaponId;
     record.combat.weaponTier = taken.tier;
+    record.combat.weaponNature = taken.nature;
     Object.assign(record.combat, newComboTimers());
     const client = this.clients.find((c) => c.sessionId === record.sessionId);
     if (client) this.sendFloorWeapons(client, record);

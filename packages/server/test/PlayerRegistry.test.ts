@@ -129,13 +129,13 @@ describe("PlayerRegistry", () => {
     const seen: string[] = [];
     const floor = (equipped: WeaponId) => {
       seen.push(equipped);
-      return [{ weaponId: "great-sword" as const, tier: 2 as const, x: 3, z: 5, expiresAt: 40 }];
+      return [{ weaponId: "great-sword" as const, tier: 2 as const, nature: "none" as const, x: 3, z: 5, expiresAt: 40 }];
     };
     const first = r.join({ name: "Jorge", token: "t1", sessionId: "s1" }, spawn, undefined, floor);
     if (!first.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", tier: 2, x: 3, z: 5, expiresAt: 40 }]);
-    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5, expiresAt: 40 };
+    expect(first.record.floorWeapons).toEqual([{ weaponId: "great-sword", tier: 2, nature: "none", x: 3, z: 5, expiresAt: 40 }]);
+    first.record.floorWeapons[0] = { weaponId: "kingslayer-sword", tier: 3, nature: "none", x: 3, z: 5, expiresAt: 40 };
 
     const taken = r.join({ name: "Jorge", token: "t1", sessionId: "s2" }, spawn, undefined, floor);
     if (!taken.ok) throw new Error();
@@ -143,7 +143,7 @@ describe("PlayerRegistry", () => {
     const back = r.join({ name: "Jorge", token: "x", sessionId: "s3" }, spawn, undefined, floor);
     if (!back.ok) throw new Error();
     expect(seen).toEqual(["kingslayer-sword"]);
-    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", tier: 3, x: 3, z: 5, expiresAt: 40 }]);
+    expect(back.record.floorWeapons).toEqual([{ weaponId: "kingslayer-sword", tier: 3, nature: "none", x: 3, z: 5, expiresAt: 40 }]);
   });
 
   it("sin fábrica, un registro nuevo no tiene armas del suelo", () => {
@@ -227,8 +227,8 @@ describe("pruneFloorWeapons", () => {
   it("quita las vencidas (expiresAt ≤ floorTime) y dice si cambió la lista", () => {
     const r = new PlayerRegistry();
     const res = r.join({ name: "Ana", token: "t", sessionId: "s" }, spawn, undefined, () => [
-      { weaponId: "great-sword", tier: 1, x: 0, z: 0, expiresAt: 40 },
-      { weaponId: "guard-sword", tier: 1, x: 0, z: 0, expiresAt: 50 },
+      { weaponId: "great-sword", tier: 1, nature: "none", x: 0, z: 0, expiresAt: 40 },
+      { weaponId: "guard-sword", tier: 1, nature: "none", x: 0, z: 0, expiresAt: 50 },
     ]);
     if (!res.ok) throw new Error();
     expect(pruneFloorWeapons(res.record, 39.9)).toBe(false);

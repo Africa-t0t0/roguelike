@@ -7,6 +7,7 @@ import {
   type KinematicState,
   type PlayerInput,
   type Progress,
+  type Nature,
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
@@ -16,6 +17,7 @@ import { newCombatState, type CombatState } from "../sim/CombatSystem";
 export interface FloorWeapon {
   weaponId: WeaponId;
   tier: WeaponTier;
+  nature: Nature;
   x: number;
   z: number;
   /** `floorTime` en que vence (tiempo simulado: se congela en la pausa) */

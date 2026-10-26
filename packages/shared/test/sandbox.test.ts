@@ -19,9 +19,16 @@ describe("parseDevCommand", () => {
       { cmd: "freeze", on: true },
       { cmd: "castNow" },
       { cmd: "clock", seconds: 60 },
-      { cmd: "weapon", weaponId: "great-sword", tier: 2 },
+      { cmd: "weapon", weaponId: "great-sword", tier: 2, nature: "none" },
+      { cmd: "weapon", weaponId: "great-sword", tier: 3, nature: "ice" },
     ];
     for (const c of ok) expect(parseDevCommand(c)).toEqual(c);
+  });
+
+  it("weapon sin nature da \"none\"", () => {
+    expect(parseDevCommand({ cmd: "weapon", weaponId: "great-sword", tier: 2 })).toEqual({
+      cmd: "weapon", weaponId: "great-sword", tier: 2, nature: "none",
+    });
   });
 
   it("descarta campos de más", () => {
@@ -50,6 +57,7 @@ describe("parseDevCommand", () => {
       { cmd: "clock", seconds: Number.NaN },
       { cmd: "weapon", weaponId: "axe", tier: 1 },
       { cmd: "weapon", weaponId: "great-sword", tier: 0 },
+      { cmd: "weapon", weaponId: "great-sword", tier: 1, nature: "water" },
     ];
     for (const c of bad) expect(parseDevCommand(c)).toBeNull();
   });

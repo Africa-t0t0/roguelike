@@ -32,6 +32,8 @@ export const PlayerState = schema(
     weaponId: t.string(),
     /** WeaponTier del arma equipada */
     weaponTier: t.number(),
+    /** Nature del arma equipada */
+    weaponNature: t.string(),
     /** tiene una elección de carta abierta sin elegir */
     choosing: t.boolean(),
     /** multiplicador de velocidad de movimiento de sus cartas (la predicción del cliente lo usa) */
@@ -67,6 +69,8 @@ export const EnemyState = schema(
     weaponId: t.string(),
     /** WeaponTier de esa arma; 0 si va desarmado */
     weaponTier: t.number(),
+    /** Nature de esa arma; "none" si va desarmado */
+    weaponNature: t.string(),
     /** segundos que le quedan aturdido */
     stunned: t.number(),
     /** tier de sus hechizos (1..3); 0 si no es hechicero */
