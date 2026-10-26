@@ -12,7 +12,7 @@ import {
 } from "@roguelike/shared";
 import { InputState, withoutActions } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
-import { connect, parseFloorTimeStart, type GameConnection, type PlayerSnapshot } from "./net/connection";
+import { connect, parseFloorTimeStart, parseSandbox, type GameConnection, type PlayerSnapshot } from "./net/connection";
 import { FixedStep } from "./net/fixedStep";
 import { parseLagParams } from "./net/LagSimulator";
 import { LocalAbility } from "./net/LocalAbility";
@@ -43,6 +43,7 @@ import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
 import { CardPanel } from "./ui/cardPanel";
 import { joinErrorMessage } from "./ui/errors";
 import { Compass } from "./ui/compass";
+import { DevPanel } from "./ui/devPanel";
 import { Hud } from "./ui/hud";
 import { Minimap } from "./ui/minimap";
 import { Lobby } from "./ui/lobby";
@@ -55,6 +56,8 @@ window.addEventListener("resize", () => engine.resize());
 const lag = parseLagParams(location.search);
 // Solo en desarrollo: crear la sala con el reloj del piso adelantado (`?floorTimeStart=300`).
 const floorTimeStart = import.meta.env.DEV ? parseFloorTimeStart(location.search) : undefined;
+// Solo en desarrollo: sala de pruebas con el panel de F2 (`?sandbox=1`).
+const sandbox = import.meta.env.DEV && parseSandbox(location.search);
 
 let lastJoin: { code: string; name: string } | undefined;
 const lobby = new Lobby(
@@ -79,7 +82,7 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
   }
   let conn: GameConnection;
   try {
-    conn = await connect({ ...opts, lag, floorTimeStart });
+    conn = await connect({ ...opts, lag, floorTimeStart, sandbox });
   } catch (err) {
     lobby.showLobby(joinErrorMessage(err));
     return;
@@ -157,6 +160,13 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const clock = new PauseClock();
   const steps = new FixedStep();
   const cardPanel = new CardPanel((index) => conn.chooseCard(index));
+  const devPanel = conn.sandbox
+    ? new DevPanel((cmd) => {
+        // Lo que vacía los enfriamientos en el servidor también los vacía en la predicción.
+        if (cmd.cmd === "heal" || cmd.cmd === "clearCards" || (cmd.cmd === "noCooldown" && cmd.on)) ability.resetCooldowns();
+        conn.sendDev(cmd);
+      })
+    : undefined;
   let pause = { paused: false, pauseLeft: 0 };
   let group: { name: string; choosing: boolean }[] = [];
   let panelShown = false;
@@ -359,6 +369,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     engine.stopRenderLoop(frame);
     browserInput.detach();
     cardPanel.dispose();
+    devPanel?.dispose();
     hud.dispose();
     abilityBar.dispose();
     compass.dispose();

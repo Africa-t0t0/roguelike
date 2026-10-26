@@ -197,6 +197,21 @@
       .fx-player { color: #ff4a3d; }
       .fx-hurt { position: absolute; inset: 0; pointer-events: none; opacity: 0;
         box-shadow: inset 0 0 6rem 1.5rem rgba(220, 20, 10, 0.75); }
+
+      /* Panel de pruebas (?sandbox=1): a la derecha, bajo el minimapa; F2 lo abre y cierra. */
+      .dev-tab { position: absolute; top: 12.6rem; right: 1.4rem; padding: 0.25rem 0.6rem; pointer-events: none;
+        font: 700 0.72rem var(--caps); letter-spacing: 0.12em; color: var(--gold); background: var(--ink);
+        border: 1px solid var(--gold-dim); }
+      .dev-panel { position: absolute; top: 12.6rem; right: 1.4rem; width: 14rem; max-height: calc(100% - 26rem);
+        min-height: 8rem; overflow-y: auto; padding: 0.6rem 0.7rem; display: flex; flex-direction: column; gap: 0.6rem;
+        background: rgba(9, 8, 7, 0.9); border: 1px solid var(--gold-dim); box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.7);
+        font: 600 0.9rem var(--serif); color: #e9dcc0; }
+      .dev-section { display: flex; flex-direction: column; gap: 0.3rem; }
+      .dev-title { font: 700 0.7rem var(--caps); letter-spacing: 0.14em; color: var(--gold-hi); text-transform: uppercase; }
+      .dev-panel button, .dev-panel select { font: 600 0.85rem var(--serif); padding: 0.3rem 0.5rem; border-radius: 0.25rem;
+        border: 1px solid var(--gold-dim); background: #15110c; color: #e9dcc0; text-align: left; }
+      .dev-panel button:hover { border-color: var(--gold); }
+      .dev-panel button.on { background: #3a2c14; border-color: var(--gold); color: var(--gold-hi); }
     </style>
   </head>
   <body>

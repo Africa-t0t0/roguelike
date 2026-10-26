@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PICKUP_RANGE } from "@roguelike/shared";
-import { parseFloorTimeStart, parseFloorWeapons } from "../src/net/connection";
+import { parseFloorTimeStart, parseFloorWeapons, parseSandbox } from "../src/net/connection";
 import { floorWeaponBlink, nearestPickup, pickupPrompt } from "../src/render/floorWeaponViews";
 
 describe("armas del suelo", () => {
@@ -57,5 +57,14 @@ describe("parámetro de prueba floorTimeStart", () => {
     expect(parseFloorTimeStart("?floorTimeStart=")).toBeUndefined();
     expect(parseFloorTimeStart("?floorTimeStart=-5")).toBeUndefined();
     expect(parseFloorTimeStart("?floorTimeStart=abc")).toBeUndefined();
+  });
+});
+
+describe("parseSandbox", () => {
+  it("solo ?sandbox=1 activa la sala de pruebas", () => {
+    expect(parseSandbox("?sandbox=1")).toBe(true);
+    expect(parseSandbox("?lag=100&sandbox=1")).toBe(true);
+    expect(parseSandbox("?sandbox=0")).toBe(false);
+    expect(parseSandbox("")).toBe(false);
   });
 });

@@ -46,6 +46,12 @@ export class LocalAbility {
     this.cooldownMult = Number.isFinite(m) && m > 0 ? m : 1;
   }
 
+  /** Panel de pruebas: el servidor puso los enfriamientos a cero; aquí se olvidan los predichos. */
+  resetCooldowns(): void {
+    this.localCd.clear();
+    this.lastCastMs.clear();
+  }
+
   /** Casillas y enfriamientos del último estado propio del servidor (en orden de casilla, sin la pasiva). */
   setServer(slots: AbilitySlotView[], nowMs: number): void {
     this.slots = slots.map((s) => ({ ...s }));

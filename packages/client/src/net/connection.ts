@@ -11,6 +11,7 @@ import {
   type AbilityId,
   type CardOffer,
   type CombatEvent,
+  type DevCommand,
   type EnemyKind,
   type JoinOptions,
   type KinematicState,
@@ -176,6 +177,8 @@ export type DisconnectReason = "takeover" | "lost";
 export interface GameConnection {
   roomCode: string;
   myKey: string;
+  /** sala de pruebas: el servidor atiende `sendDev` */
+  sandbox: boolean;
   seed: number;
   floor: number;
   sendInput(i: PlayerInput): void;
@@ -192,6 +195,8 @@ export interface GameConnection {
   onLevelChoice(cb: (choice: LevelChoice) => void): void;
   /** Elige la carta `index` de la última oferta recibida (el servidor ignora una oferta vieja). */
   chooseCard(index: number): void;
+  /** Comando del panel de pruebas (solo hace algo en una sala sandbox). */
+  sendDev(cmd: DevCommand): void;
   onDisconnect(cb: (reason: DisconnectReason) => void): void;
   leave(): void;
 }
@@ -325,21 +330,30 @@ export function parseFloorTimeStart(search: string): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
+/** Solo para pruebas en desarrollo: `?sandbox=1` crea una sala de pruebas con el panel (F2). */
+export function parseSandbox(search: string): boolean {
+  return new URLSearchParams(search).get("sandbox") === "1";
+}
+
 /**
  * Crea una sala (sin `code`) o entra a una existente. Rechaza con el `MatchMakeError` del SDK.
- * `floorTimeStart` solo se manda al crear (es una opción de prueba).
+ * `floorTimeStart` y `sandbox` solo se mandan al crear (son opciones de prueba).
  */
 export async function connect(opts: {
   code?: string;
   name: string;
   lag: LagConfig;
   floorTimeStart?: number;
+  sandbox?: boolean;
 }): Promise<GameConnection> {
   const client = new Client(serverUrl());
   const joinOptions: JoinOptions = { name: opts.name, token: browserToken(), version: PROTOCOL_VERSION };
   const code = opts.code?.trim().toUpperCase();
-  const createOptions =
-    opts.floorTimeStart === undefined ? joinOptions : { ...joinOptions, floorTimeStart: opts.floorTimeStart };
+  const createOptions = {
+    ...joinOptions,
+    ...(opts.floorTimeStart === undefined ? {} : { floorTimeStart: opts.floorTimeStart }),
+    ...(opts.sandbox ? { sandbox: true } : {}),
+  };
   const room = code ? await client.joinById(code, joinOptions) : await client.create(ROOM_NAME, createOptions);
   const lag = new LagSimulator(opts.lag);
   // LagSimulator no se puede cancelar: tras salir, sus entregas pendientes no hacen nada.
@@ -380,13 +394,13 @@ export async function connect(opts: {
       choiceCb?.(choice);
     });
   });
-  const welcome = new Promise<string>((resolve, reject) => {
-    room.onMessage(MSG.welcome, (msg: { key: string }) => resolve(msg.key));
+  const welcome = new Promise<{ key: string; sandbox?: boolean }>((resolve, reject) => {
+    room.onMessage(MSG.welcome, (msg: { key: string; sandbox?: boolean }) => resolve(msg));
     room.onLeave.once((leaveCode) => reject(new Error(`la sala se cerró antes de entrar (${leaveCode})`)));
   });
   // Reconectamos por nombre + token, no con el token de reconexión del SDK.
   room.reconnection.enabled = false;
-  const myKey = await welcome;
+  const { key: myKey, sandbox = false } = await welcome;
 
   const deliverPlayers = () => {
     const players = snapshotPlayers(room);
@@ -413,6 +427,7 @@ export async function connect(opts: {
   return {
     roomCode: room.roomId,
     myKey,
+    sandbox,
     seed: room.state.seed,
     floor: room.state.floor,
     sendInput(input) {
@@ -449,6 +464,11 @@ export async function connect(opts: {
       if (offerId === undefined) return;
       lag.outbound(() => {
         if (!closed) room.send(MSG.chooseCard, { offerId, index });
+      });
+    },
+    sendDev(cmd) {
+      lag.outbound(() => {
+        if (!closed) room.send(MSG.dev, cmd);
       });
     },
     onDisconnect(cb) {

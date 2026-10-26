@@ -49,6 +49,18 @@ describe("LocalAbility", () => {
     expect(a.tick(1, free, (cdTicks + 1) * TICK_MS)).toBe("kick");
   });
 
+  it("resetCooldowns (panel de pruebas) deja relanzarla en cuanto termina la animación", () => {
+    const a = withSlots("kick");
+    expect(a.tick(1, free, 0)).toBe("kick");
+    const animTicks = Math.ceil(ABILITIES.kick.animS / SIM_DT) + 1;
+    run(a, animTicks, 0, TICK_MS);
+    expect(a.tick(1, free, (animTicks + 1) * TICK_MS)).toBeUndefined();
+    a.resetCooldowns();
+    a.setServer([{ id: "kick", cooldown: 0 }], (animTicks + 2) * TICK_MS);
+    a.tick(0, free, (animTicks + 2) * TICK_MS);
+    expect(a.tick(1, free, (animTicks + 3) * TICK_MS)).toBe("kick");
+  });
+
   it("con el enfriamiento que informa el servidor (sin lanzarla localmente) no la predice", () => {
     const a = new LocalAbility();
     a.setServer([{ id: "slam", cooldown: 3 }], 0);
