@@ -30,6 +30,7 @@ import {
   BASE_REGEN,
   applyCard,
   playerMods,
+  SANDBOX_COOLDOWN_MULT,
   type CardOffer,
   type CombatEvent,
 } from "@roguelike/shared";
@@ -144,8 +145,8 @@ describe("RunRoom", () => {
   it("Ana y Beto entran, reciben su clave y Beto aparece cerca de Ana", async () => {
     const ana = await join("Ana", "t-ana");
     const beto = await join("Beto", "t-beto");
-    expect(await ana.welcome).toEqual({ key: "ana" });
-    expect(await beto.welcome).toEqual({ key: "beto" });
+    expect(await ana.welcome).toEqual({ key: "ana", sandbox: false });
+    expect(await beto.welcome).toEqual({ key: "beto", sandbox: false });
     await room.waitForNextPatch();
     expect([...room.state.players.keys()].sort()).toEqual(["ana", "beto"]);
     await ticksUntil(() => ana.client.state.players.size === 2);
@@ -218,7 +219,7 @@ describe("RunRoom", () => {
 
     const oldLeft = new Promise<number>((resolve) => ana.client.onLeave((code) => resolve(code)));
     const ana2 = await join("ANA", "t-ana");
-    expect(await ana2.welcome).toEqual({ key: "ana" });
+    expect(await ana2.welcome).toEqual({ key: "ana", sandbox: false });
     expect(await oldLeft).toBe(TAKEOVER_CLOSE_CODE);
 
     await ticksUntil(() => room.clients.length === 1);
@@ -236,7 +237,7 @@ describe("RunRoom", () => {
     await ticksUntil(() => !room.state.players.has("beto"));
 
     const beto2 = await join("Beto", "t-otro");
-    expect(await beto2.welcome).toEqual({ key: "beto" });
+    expect(await beto2.welcome).toEqual({ key: "beto", sandbox: false });
     expect(room.state.players.has("beto")).toBe(true);
   });
 
@@ -248,7 +249,7 @@ describe("RunRoom", () => {
     await ticksUntil(() => !room.state.players.has("beto"));
 
     const beto2 = await join("Beto", "t-otro");
-    expect(await beto2.welcome).toEqual({ key: "beto" });
+    expect(await beto2.welcome).toEqual({ key: "beto", sandbox: false });
     expect(room.state.players.has("beto")).toBe(true);
   });
 
@@ -1256,5 +1257,131 @@ describe("HTTP", () => {
     // Colyseus responde "/" con su saludo; lo que no debe llegar es el index.html del cliente.
     const body = await (await fetch("http://localhost:2568/")).text();
     expect(body).not.toMatch(/<script/i);
+  });
+});
+
+describe("RunRoom: sandbox", () => {
+  const sandboxRoom = async () => {
+    await colyseus.cleanup();
+    room = await colyseus.createRoom<RunRoom>("run", { seed: SEED, emptyRoomTtlMs: 200, sandbox: true });
+    const ana = await join("Ana", "t-ana");
+    return { ana, welcome: (await ana.welcome) as { key: string; sandbox: boolean } };
+  };
+  const dev = (client: ClientRoom, cmd: unknown) => client.send(MSG.dev, cmd);
+  const settle = async (n = 3) => {
+    for (let i = 0; i < n; i++) await room.waitForNextTimestep();
+  };
+
+  it("una sala normal avisa sandbox: false e ignora los comandos", async () => {
+    const ana = await join("Ana", "t-ana");
+    expect(await ana.welcome).toEqual({ key: "ana", sandbox: false });
+    dev(ana.client, { cmd: "spawn", kind: "minion", count: 3, tier: 1 });
+    dev(ana.client, { cmd: "levelUp", count: 2, choose: false });
+    await settle();
+    expect(room["enemySystem"].enemies).toHaveLength(0);
+    expect(room.state.level).toBe(1);
+  });
+
+  it("en el sandbox no hay oleadas ni llenado de salas hasta encenderlas", async () => {
+    const { ana, welcome } = await sandboxRoom();
+    expect(welcome.sandbox).toBe(true);
+    room["floorTime"] = 300;
+    const { d, cr } = combatRoom();
+    teleport("ana", roomSpawnPoints(d, cr.id, 1)[0]!);
+    await settle(10);
+    expect(room["enemySystem"].enemies).toHaveLength(0);
+    dev(ana.client, { cmd: "waves", on: true });
+    await ticksUntil(() => room["enemySystem"].enemies.length > 0, 10);
+  });
+
+  it("spawn crea enemigos armados con el tier pedido cerca del jugador, y killAll los mata sin orbes", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "spawn", kind: "brute", count: 3, tier: 2 });
+    dev(ana.client, { cmd: "spawn", kind: "mage", count: 1, tier: 3 });
+    await ticksUntil(() => room["enemySystem"].enemies.length === 4, 10);
+    const me = record("ana").kinematic;
+    const [b1, b2, b3, mage] = room["enemySystem"].enemies;
+    for (const e of [b1!, b2!, b3!]) {
+      expect(e).toMatchObject({ kind: "brute", roomId: -1, loadout: { weaponId: "great-sword", tier: 2 } });
+      expect(Math.hypot(e.x - me.x, e.z - me.z)).toBeLessThan(10);
+    }
+    expect(mage).toMatchObject({ kind: "mage", loadout: null });
+    dev(ana.client, { cmd: "killAll" });
+    await settle();
+    expect(room["enemySystem"].enemies.every((e) => e.ai === "dead")).toBe(true);
+    expect(room["orbs"].orbs).toHaveLength(0);
+  });
+
+  it("levelUp sin elegir sube niveles sin pausa; con elegir abre la elección con pausa", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "levelUp", count: 3, choose: false });
+    await settle();
+    expect(room.state.level).toBe(4);
+    expect(room.state.paused).toBe(false);
+    expect(record("ana").pendingChoices).toBe(0);
+    expect(ana.choices).toHaveLength(0);
+    dev(ana.client, { cmd: "levelUp", count: 1, choose: true });
+    await ticksUntil(() => room.state.paused && ana.choices.length === 1, 10);
+    expect(room.state.level).toBe(5);
+    // En la pausa se ignora (salvo los interruptores).
+    dev(ana.client, { cmd: "levelUp", count: 1, choose: false });
+    await settle();
+    expect(room.state.level).toBe(5);
+  });
+
+  it("card da cartas y habilidades (sin pasar de 4 activas) y clearCards las quita", async () => {
+    const { ana } = await sandboxRoom();
+    for (const id of ["whirlwind", "kick", "warcry", "slam", "thrust"]) {
+      dev(ana.client, { cmd: "card", card: { kind: "ability", id, rank: 3 } });
+    }
+    dev(ana.client, { cmd: "card", card: { kind: "ability", id: "cleave", rank: 2 } });
+    dev(ana.client, { cmd: "card", card: { kind: "stat", id: "haste" } });
+    await settle();
+    const p = record("ana").progress;
+    expect(p.abilities).toEqual([
+      { id: "whirlwind", rank: 3 }, { id: "kick", rank: 3 }, { id: "warcry", rank: 3 }, { id: "slam", rank: 3 },
+      { id: "cleave", rank: 2 },
+    ]);
+    expect(player("ana").cooldownMult).toBeCloseTo(0.9, 12);
+    expect(player("ana").abilities.map((a) => a.id)).toEqual(["whirlwind", "kick", "warcry", "slam"]);
+
+    dev(ana.client, { cmd: "clearCards" });
+    await settle();
+    expect(record("ana").progress).toEqual({ stats: {}, abilities: [] });
+    expect(record("ana").combat.abilities).toHaveLength(0);
+    expect(player("ana").cooldownMult).toBe(1);
+  });
+
+  it("god anula el daño recibido y noCooldown sincroniza el multiplicador del sandbox", async () => {
+    const { ana } = await sandboxRoom();
+    dev(ana.client, { cmd: "god", on: true });
+    dev(ana.client, { cmd: "noCooldown", on: true });
+    dev(ana.client, { cmd: "spawn", kind: "minion", count: 5, tier: 3 });
+    await settle();
+    expect(player("ana").cooldownMult).toBe(SANDBOX_COOLDOWN_MULT);
+    const hp = player("ana").hp;
+    for (let i = 0; i < 120; i++) await room.waitForNextTimestep();
+    expect(player("ana").hp).toBe(hp);
+    // Una carta después no borra los interruptores.
+    dev(ana.client, { cmd: "card", card: { kind: "stat", id: "ironskin" } });
+    await settle();
+    expect(record("ana").combat.mods.damageTakenMult).toBe(0);
+    dev(ana.client, { cmd: "god", on: false });
+    await settle();
+    expect(record("ana").combat.mods.damageTakenMult).toBeCloseTo(0.92, 12);
+  });
+
+  it("clock adelanta el reloj, weapon equipa el arma con su tier y los comandos inválidos se ignoran", async () => {
+    const { ana } = await sandboxRoom();
+    await settle();
+    const t0 = room.state.floorTime;
+    dev(ana.client, { cmd: "clock", seconds: 60 });
+    dev(ana.client, { cmd: "weapon", weaponId: "great-sword", tier: 3 });
+    dev(ana.client, { cmd: "weapon", weaponId: "axe", tier: 1 });
+    dev(ana.client, { cmd: "clock", seconds: -60 });
+    await settle();
+    expect(room.state.floorTime - t0).toBeGreaterThanOrEqual(60);
+    expect(room.state.floorTime - t0).toBeLessThan(61);
+    expect(player("ana")).toMatchObject({ weaponId: "great-sword", weaponTier: 3 });
   });
 });

@@ -126,6 +126,11 @@ export function syncWorld(
   }
   for (const id of [...state.playerShots.keys()]) if (!liveWaves.has(id)) state.playerShots.delete(id);
 
+  syncLevel(state, combat);
+}
+
+/** Nivel y xp del grupo; también en la pausa (los niveles del panel de pruebas llegan entre ticks). */
+export function syncLevel(state: RunState, combat: CombatSystem): void {
   state.level = combat.level;
   state.xp = combat.xp;
   state.xpToNext = xpToNext(combat.level);

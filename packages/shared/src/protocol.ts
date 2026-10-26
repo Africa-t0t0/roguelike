@@ -2,7 +2,7 @@ import type { AbilityId } from "./cards";
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export interface JoinOptions {
   name: string;
@@ -22,7 +22,7 @@ export const JOIN_ERROR_STATUS: Record<JoinErrorCode, number> = {
 /** Código de cierre que recibe la conexión vieja cuando otra pestaña toma el control del jugador. */
 export const TAKEOVER_CLOSE_CODE = 4005;
 
-/** Mensajes cliente/servidor. `welcome` lleva `{ key: string }`. */
+/** Mensajes cliente/servidor. `welcome` lleva `{ key: string; sandbox: boolean }`; `dev` lleva un `DevCommand`. */
 export const MSG = {
   input: "input",
   welcome: "welcome",
@@ -30,6 +30,7 @@ export const MSG = {
   floorWeapons: "floorWeapons",
   levelChoice: "levelChoice",
   chooseCard: "chooseCard",
+  dev: "dev",
 } as const;
 
 const NAME_CHARS = /^[\p{L}\p{N} _-]+$/u;

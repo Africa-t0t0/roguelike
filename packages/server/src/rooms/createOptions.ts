@@ -5,16 +5,17 @@ export interface RunRoomCreateOptions {
   seed?: number;
   emptyRoomTtlMs?: number;
   floorTimeStart?: number;
+  sandbox?: boolean;
 }
 
 const MIN_EMPTY_ROOM_TTL_MS = 100;
 
-/** `seed`, `emptyRoomTtlMs` y `floorTimeStart` son solo para pruebas: en producción cualquier cliente podría mandarlos. */
+/** `seed`, `emptyRoomTtlMs`, `floorTimeStart` y `sandbox` son solo para pruebas: en producción cualquier cliente podría mandarlos. */
 export function resolveCreateOptions(
   options: RunRoomCreateOptions | undefined,
   env: string | undefined,
   randomSeed: () => number = () => randomInt(2 ** 32),
-): { seed: number; emptyRoomTtlMs: number; floorTimeStart: number } {
+): { seed: number; emptyRoomTtlMs: number; floorTimeStart: number; sandbox: boolean } {
   const honor = env !== "production";
   const rawSeed = honor ? options?.seed : undefined;
   const rawTtl = honor ? options?.emptyRoomTtlMs : undefined;
@@ -27,5 +28,7 @@ export function resolveCreateOptions(
         : EMPTY_ROOM_TTL_MS,
     // Reloj inicial del piso, para probar oleadas avanzadas sin esperar minutos.
     floorTimeStart: typeof rawStart === "number" && Number.isFinite(rawStart) ? Math.max(0, rawStart) : 0,
+    // Sala de pruebas: acepta los comandos del panel (`MSG.dev`).
+    sandbox: honor && options?.sandbox === true,
   };
 }

@@ -1,6 +1,10 @@
 import { randomInt } from "node:crypto";
 import { matchMaker, Room, ServerError, type Client } from "colyseus";
 import {
+  activeAbilityCount,
+  ABILITIES,
+  ARMED_CHANCE,
+  applyCard,
   createRng,
   EMPTY_ROOM_TTL_MS,
   FLOOR_WEAPON_TTL_S,
@@ -9,15 +13,18 @@ import {
   JOIN_ERROR_STATUS,
   MAX_INPUTS_PER_TICK,
   MAX_PLAYERS,
+  MAX_ACTIVE_ABILITIES,
   MAX_QUEUED_INPUTS,
   MSG,
   newComboTimers,
   normalizeName,
+  parseDevCommand,
   PATCH_RATE_MS,
   playerMods,
   PICKUP_RANGE,
   PROTOCOL_VERSION,
   roomSpawnPoints,
+  SANDBOX_COOLDOWN_MULT,
   sanitizeInput,
   SIM_DT,
   SIM_HZ,
@@ -26,7 +33,9 @@ import {
   TILE_SIZE,
   tileCenter,
   WEAPONS,
+  xpToNext,
   type CombatEvent,
+  type DevCommand,
   type Dungeon,
   type KinematicState,
   type PlayerInput,
@@ -42,8 +51,9 @@ import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
 import { PlayerRegistry, pruneFloorWeapons, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
+import { sandboxSpawnSpots } from "./sandbox";
 import { PlayerState, RunState } from "./RunState";
-import { syncPlayer, syncWorld } from "./syncState";
+import { syncLevel, syncPlayer, syncWorld } from "./syncState";
 
 const ROOM_CODE_ATTEMPTS = 5;
 const ALLY_SPAWN_RADIUS = 2;
@@ -83,6 +93,12 @@ export class RunRoom extends Room<{ state: RunState }> {
   private readonly history = new PositionHistory();
   private readonly combat = new CombatSystem();
   private abilities!: AbilitySystem;
+  /** Sala de pruebas (`?sandbox=1`): atiende `MSG.dev`. */
+  private sandbox = false;
+  /** Oleadas y llenado de salas; en el sandbox empiezan apagados. */
+  private wavesOn = true;
+  /** Interruptores del panel de pruebas por jugador. */
+  private readonly devFlags = new Map<string, { god: boolean; noCooldown: boolean }>();
 
   async onCreate(options: RunRoomCreateOptions = {}): Promise<void> {
     const rng = createRng(randomInt(2 ** 32));
@@ -91,8 +107,10 @@ export class RunRoom extends Room<{ state: RunState }> {
       if ((await matchMaker.query({ roomId: this.roomId })).length === 0) break;
     }
 
-    const { seed, emptyRoomTtlMs, floorTimeStart } = resolveCreateOptions(options, process.env.NODE_ENV);
+    const { seed, emptyRoomTtlMs, floorTimeStart, sandbox } = resolveCreateOptions(options, process.env.NODE_ENV);
     this.emptyRoomTtlMs = emptyRoomTtlMs;
+    this.sandbox = sandbox;
+    this.wavesOn = !sandbox;
     this.dungeon = generateDungeon(seed, 1);
     this.enemySystem = new EnemySystem(this.dungeon, createRng(seed ^ ENEMY_RNG_SALT));
     this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
@@ -110,6 +128,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.setTimestep(() => this.tick(), 1000 / SIM_HZ);
     this.onMessage(MSG.input, (client, raw) => this.enqueueInput(client, raw));
     this.onMessage(MSG.chooseCard, (client, raw) => this.chooseCard(client, raw));
+    if (sandbox) this.onMessage(MSG.dev, (client, raw) => this.devCommand(client, raw));
     // Una sala creada a la que nadie llega a entrar (reserva vencida) no pasa por onLeave.
     this.armEmptyTimer();
   }
@@ -145,7 +164,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       this.state.players.set(record.key, ps);
     }
     ps.name = record.displayName;
-    client.send(MSG.welcome, { key: record.key });
+    client.send(MSG.welcome, { key: record.key, sandbox: this.sandbox });
     // Nuevo, reconexión o toma de control: sus armas del suelo, solo a él.
     this.sendFloorWeapons(client, record);
     // Sus elecciones pendientes, sin pausa; en una pausa entra en la siguiente elección del grupo o al final.
@@ -210,9 +229,106 @@ export class RunRoom extends Room<{ state: RunState }> {
           offerId: e.offerId, cards: e.cards, index: e.index, total: e.total, deadlineS: e.deadlineS,
         });
       } else {
-        this.combat.setMods(record.combat, playerMods(record.progress));
+        this.refreshMods(record);
         if (e.card.kind === "stat" && e.card.id === "vitality") this.combat.heal(record.combat, VITALITY_HEAL);
       }
+    }
+  }
+
+  /** Multiplicadores de sus cartas, con los interruptores del panel de pruebas encima. */
+  private refreshMods(record: PlayerRecord): void {
+    const mods = playerMods(record.progress);
+    const flags = this.devFlags.get(record.key);
+    if (flags?.god) mods.damageTakenMult = 0;
+    if (flags?.noCooldown) mods.cooldownMult = SANDBOX_COOLDOWN_MULT;
+    this.combat.setMods(record.combat, mods);
+  }
+
+  /**
+   * Panel de pruebas: solo se registra en una sala sandbox. Se ignora en la pausa de elección (salvo los
+   * interruptores, que no tocan la simulación compartida) y si el comando no es válido.
+   */
+  private devCommand(client: Client, raw: unknown): void {
+    const record = this.registry.bySession(client.sessionId);
+    const cmd = parseDevCommand(raw);
+    if (!record || !cmd) return;
+    if (this.levelUp.paused && cmd.cmd !== "god" && cmd.cmd !== "noCooldown") return;
+    this.applyDev(record, cmd);
+  }
+
+  private applyDev(record: PlayerRecord, cmd: DevCommand): void {
+    const c = record.combat;
+    const flags = this.devFlags.get(record.key) ?? { god: false, noCooldown: false };
+    this.devFlags.set(record.key, flags);
+    switch (cmd.cmd) {
+      case "levelUp": {
+        const all = new Map(this.registry.all().map((r) => [r.key, r.combat] as const));
+        const levels: number[] = [];
+        for (let i = 0; i < cmd.count; i++) {
+          levels.push(...this.combat.grantXp(all, xpToNext(this.combat.level) - this.combat.xp));
+        }
+        for (const level of levels) this.emit({ type: "levelUp", level });
+        // Sin `choose` los niveles llegan sin cartas: solo suben la vida y el escalado de enemigos.
+        if (cmd.choose) this.levelUp.onLevelsGained(levels.length, this.registry.connected(), this.registry.all());
+        break;
+      }
+      case "card": {
+        const { card } = cmd;
+        const p = record.progress;
+        const newActive =
+          card.kind === "ability" && ABILITIES[card.id].kind !== "passive" && !p.abilities.some((a) => a.id === card.id);
+        if (newActive && activeAbilityCount(p) >= MAX_ACTIVE_ABILITIES) return;
+        applyCard(p, card);
+        this.handleChoices([{ type: "applied", key: record.key, card }]);
+        break;
+      }
+      case "clearCards":
+        record.progress.stats = {};
+        // En su sitio: el combate lee las habilidades del mismo arreglo.
+        record.progress.abilities.length = 0;
+        c.abilityCd = {};
+        c.abilityAnim = null;
+        c.blocking = false;
+        this.refreshMods(record);
+        break;
+      case "god":
+        flags.god = cmd.on;
+        if (cmd.on) c.pendingHits = [];
+        this.refreshMods(record);
+        break;
+      case "noCooldown":
+        flags.noCooldown = cmd.on;
+        if (cmd.on) c.abilityCd = {};
+        this.refreshMods(record);
+        break;
+      case "waves":
+        this.wavesOn = cmd.on;
+        break;
+      case "heal":
+        this.combat.heal(c, c.maxHp);
+        c.abilityCd = {};
+        break;
+      case "spawn": {
+        // El arma es la que llevaría ese tipo; los magos van siempre desarmados.
+        const armed = ARMED_CHANCE[cmd.kind];
+        const tier = cmd.tier;
+        for (const spot of sandboxSpawnSpots(this.dungeon, record.kinematic, cmd.count)) {
+          const loadout = tier === 0 || !armed ? null : { weaponId: armed.weaponId, tier };
+          this.enemySystem.spawnAt(cmd.kind, spot.x, spot.z, loadout);
+        }
+        break;
+      }
+      case "killAll":
+        this.enemySystem.killAll();
+        break;
+      case "clock":
+        this.floorTime += cmd.seconds;
+        break;
+      case "weapon":
+        c.weaponId = cmd.weaponId;
+        c.weaponTier = cmd.tier;
+        Object.assign(c, newComboTimers());
+        break;
     }
   }
 
@@ -281,8 +397,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (connected.length > 0) this.floorTime += SIM_DT;
     this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor, this.combat.level);
     this.pruneFloorWeapons();
-    this.enemySystem.activateRooms(alive, this.registry.size());
-    if (connected.length > 0) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
+    if (this.wavesOn) this.enemySystem.activateRooms(alive, this.registry.size());
+    if (connected.length > 0 && this.wavesOn) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
     // Enfriamientos, Grito y ondas (por tick: se congelan en la pausa).
@@ -325,6 +441,7 @@ export class RunRoom extends Room<{ state: RunState }> {
       if (last) record.lastSeq = last.seq;
     }
     this.syncPlayers(connected);
+    syncLevel(this.state, this.combat);
   }
 
   private syncPlayers(connected: PlayerRecord[]): void {

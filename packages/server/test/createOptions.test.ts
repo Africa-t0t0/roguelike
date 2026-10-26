@@ -10,6 +10,7 @@ describe("resolveCreateOptions", () => {
       seed: 123,
       emptyRoomTtlMs: 200,
       floorTimeStart: 0,
+      sandbox: false,
     });
   });
 
@@ -20,6 +21,14 @@ describe("resolveCreateOptions", () => {
     expect(start(Number.NaN)).toBe(0);
     expect(start("9")).toBe(0);
     expect(start(120, "production")).toBe(0);
+  });
+
+  it("sandbox: solo con true y fuera de producción", () => {
+    const sandbox = (v: unknown, env = dev) => resolveCreateOptions({ sandbox: v as boolean }, env, () => 7).sandbox;
+    expect(sandbox(true)).toBe(true);
+    expect(sandbox(undefined)).toBe(false);
+    expect(sandbox("true")).toBe(false);
+    expect(sandbox(true, "production")).toBe(false);
   });
 
   it("acota emptyRoomTtlMs a [100, EMPTY_ROOM_TTL_MS] y descarta NaN", () => {
@@ -44,6 +53,7 @@ describe("resolveCreateOptions", () => {
       seed: 7,
       emptyRoomTtlMs: EMPTY_ROOM_TTL_MS,
       floorTimeStart: 0,
+      sandbox: false,
     });
   });
 });

@@ -151,14 +151,37 @@ export class EnemySystem {
     return created;
   }
 
-  private createEnemy(kind: EnemyKind, roomId: number, x: number, z: number): Enemy {
+  /**
+   * Solo sandbox: un enemigo persiguiendo, sin sala, con el arma pedida en vez de sortearla (null = desarmado;
+   * los magos van siempre desarmados).
+   */
+  spawnAt(kind: EnemyKind, x: number, z: number, loadout: EnemyLoadout | null): Enemy {
+    return this.createEnemy(kind, -1, x, z, ARMED_CHANCE[kind] ? loadout : null);
+  }
+
+  /** Solo sandbox: mata a todos los vivos sin orbes ni armas soltadas. */
+  killAll(): void {
+    for (const e of this.list) {
+      if (e.ai === "dead") continue;
+      e.hp = 0;
+      this.setAi(e, "dead");
+    }
+  }
+
+  private createEnemy(
+    kind: EnemyKind,
+    roomId: number,
+    x: number,
+    z: number,
+    loadout: EnemyLoadout | null = this.rollLoadout(kind),
+  ): Enemy {
     const def = ENEMY_DEFS[kind];
     const { hpMult, damageMult } = enemyScale(this.floorTime, this.partyLevel);
     const hp = Math.round(def.hp * hpMult);
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout: this.rollLoadout(kind), stunned: 0, damageMult,
+      loadout, stunned: 0, damageMult,
     };
     this.list.push(e);
     return e;
