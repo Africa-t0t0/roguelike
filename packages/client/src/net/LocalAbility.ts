@@ -60,9 +60,11 @@ export class LocalAbility {
 
   /**
    * Un input: después de avanzar el combo y antes del ataque, como el servidor. `mask`: teclas 1-4
-   * mantenidas; `swingTimer`: el del combo ya avanzado. Devuelve la habilidad que arrancó, si alguna.
+   * mantenidas; `swingTimer`: el del combo ya avanzado. `stunned`: aturdido, no puede empezar habilidades
+   * nuevas ni bloquear, pero la animación en curso sigue (como en el servidor, donde el aturdimiento no la corta).
+   * Devuelve la habilidad que arrancó, si alguna.
    */
-  tick(mask: number, ctx: { dead: boolean; swingTimer: number }, nowMs: number): AbilityId | undefined {
+  tick(mask: number, ctx: { dead: boolean; swingTimer: number; stunned?: boolean }, nowMs: number): AbilityId | undefined {
     for (const [id, cd] of this.localCd) this.localCd.set(id, countDown(cd, SIM_DT));
     const pressed = mask & ~this.heldMask;
     this.heldMask = mask;
@@ -82,7 +84,7 @@ export class LocalAbility {
       if ((pressed & (1 << i)) === 0) continue;
       const { id } = this.slots[i]!;
       const def = ABILITIES[id];
-      if (def.kind !== "active" || !this.ready(id, nowMs) || ctx.swingTimer > 0 || this.anim) continue;
+      if (def.kind !== "active" || ctx.stunned || !this.ready(id, nowMs) || ctx.swingTimer > 0 || this.anim) continue;
       this.localCd.set(id, def.cooldownS * this.cooldownMult);
       this.lastCastMs.set(id, nowMs);
       this.anim = { id, left: def.animS };
@@ -91,7 +93,7 @@ export class LocalAbility {
       break;
     }
 
-    this.blockingNow = this.blocking(mask) && ctx.swingTimer === 0 && !this.anim;
+    this.blockingNow = this.blocking(mask) && !ctx.stunned && ctx.swingTimer === 0 && !this.anim;
     return started;
   }
 

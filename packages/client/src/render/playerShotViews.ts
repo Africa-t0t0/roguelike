@@ -74,15 +74,12 @@ export class PlayerShotViews {
     return look;
   }
 
-  /**
-   * `natureAt(x, z)`: naturaleza del arma de quien lanzó la onda. La onda no dice de quién es, así que se
-   * pregunta al ver una nueva por el jugador más cercano a ella (su dueño, que acaba de lanzarla).
-   */
-    push(world: WorldSnapshot, receivedAtMs: number, natureAt: (x: number, z: number) => Nature = () => "none"): void {
+  /** `receivedAtMs`: instante de recepción en el reloj de juego. La naturaleza (color) viene en cada onda. */
+  push(world: WorldSnapshot, receivedAtMs: number): void {
     for (const [id, s] of world.playerShots) {
       let view = this.views.get(id);
       if (!view) {
-        const mesh = this.look(natureAt(s.x, s.z)).template.createInstance(`cleaveWave-${id}`);
+        const mesh = this.look(s.nature).template.createInstance(`cleaveWave-${id}`);
         mesh.isPickable = false;
         mesh.scaling.set(s.radius, 1, s.radius);
         mesh.rotation.y = Math.atan2(s.dirX, s.dirZ);

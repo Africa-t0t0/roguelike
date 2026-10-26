@@ -59,6 +59,11 @@ function isWeaponPart(mesh: TransformNode): boolean {
   return false;
 }
 
+/** Marca una malla que cuelga del personaje pero no es su cuerpo (barra, aros, aura, rótulo…): `applyTint` la salta. */
+export function markNoTint(mesh: TransformNode): void {
+  mesh.metadata = { ...(mesh.metadata as object | null), noTint: true };
+}
+
 /**
  * Tiñe el emisivo de las mallas del cuerpo bajo `root` con `color` × `strength` (sin luces: solo material), o
  * con `tint = null` las devuelve a su material original. Cada material se clona como mucho una vez por
@@ -66,7 +71,7 @@ function isWeaponPart(mesh: TransformNode): boolean {
  */
 export function applyTint(root: TransformNode, tint: { key: string; color: Color3; strength: number } | null): void {
   for (const mesh of root.getChildMeshes(false)) {
-    if (mesh.getClassName() === "InstancedMesh" || isWeaponPart(mesh)) continue;
+    if (mesh.getClassName() === "InstancedMesh" || isWeaponPart(mesh) || (mesh.metadata as { noTint?: boolean } | null)?.noTint) continue;
     const current = mesh.material;
     if (!current) continue;
     const original = sourceOf.get(current) ?? current;

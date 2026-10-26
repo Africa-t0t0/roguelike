@@ -329,6 +329,14 @@ describe("Onda de corte", () => {
     return steps;
   }
 
+  it("la onda lleva la naturaleza del arma del dueño al lanzarla", () => {
+    const env = setup([{ id: "cleave", rank: 1 }]);
+    env.c.weaponNature = "ice";
+    const k = kin({ x: 20, facing: Math.PI / 2 });
+    comboUntilShot(env, k);
+    expect(env.ab.playerShots[0]!.nature).toBe("ice");
+  });
+
   it("el 3.er golpe de la Kingslayer lanza una onda que daña una vez a 2 enemigos alineados a 4 y 5 m", () => {
     const env = setup([{ id: "cleave", rank: 1 }]);
     const k = kin({ x: 20, facing: Math.PI / 2 });

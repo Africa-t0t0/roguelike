@@ -45,6 +45,6 @@ describe("FogOfWar", () => {
 describe("cofres en el minimapa", () => {
   it("cerrado y abierto se pintan distinto", () => {
     expect(chestStyle(false)).not.toBe(chestStyle(true));
-    expect(chestStyle(false)).toBe("#f0c040");
+    expect(chestStyle(false)).toBe("#ffb000");
   });
 });

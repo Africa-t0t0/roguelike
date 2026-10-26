@@ -56,7 +56,7 @@ import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
 import { PlayerRegistry, pruneFloorWeapons, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
-import { SANDBOX_CHEST_AHEAD_M, sandboxSpawnSpots } from "./sandbox";
+import { SANDBOX_CHEST_AHEAD_M, SANDBOX_CHEST_MIN_M, sandboxSpawnSpots } from "./sandbox";
 import { ChestState, PlayerState, RunState } from "./RunState";
 import { syncLevel, syncPlayer, syncWorld } from "./syncState";
 
@@ -355,7 +355,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         this.enemySystem.castNow(this.simPlayers());
         break;
       case "chest": {
-        const [spot] = sandboxSpawnSpots(this.dungeon, record.kinematic, 1, SANDBOX_CHEST_AHEAD_M);
+        const [spot] = sandboxSpawnSpots(this.dungeon, record.kinematic, 1, SANDBOX_CHEST_AHEAD_M, SANDBOX_CHEST_MIN_M);
         if (spot) this.addChest(spot.x, spot.z);
         break;
       }

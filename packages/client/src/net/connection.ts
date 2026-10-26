@@ -165,6 +165,8 @@ export interface PlayerShotSnapshot {
   dirX: number;
   dirZ: number;
   radius: number;
+  /** naturaleza del arma de quien la lanzó */
+  nature: Nature;
 }
 
 /** Todo lo del estado que no son jugadores. */
@@ -409,8 +411,8 @@ function snapshotWorld(room: Room): WorldSnapshot {
     orbs.set(id, { x: o.x, z: o.z, value: o.value });
   });
   const playerShots = new Map<string, PlayerShotSnapshot>();
-  room.state.playerShots?.forEach((w: PlayerShotSnapshot, id: string) => {
-    playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius });
+  room.state.playerShots?.forEach((w: Omit<PlayerShotSnapshot, "nature"> & { nature: string }, id: string) => {
+    playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius, nature: toNature(w.nature) });
   });
   const hazards = new Map<string, HazardSnapshot>();
   room.state.hazards?.forEach((raw: unknown, id: string) => {

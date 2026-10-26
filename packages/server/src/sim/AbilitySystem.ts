@@ -23,6 +23,7 @@ import {
   type AbilityId,
   type Dungeon,
   type KinematicState,
+  type Nature,
   type PlayerInput,
 } from "@roguelike/shared";
 import { abilityRank, rewindTick, type AbilityAnim, type CombatState, type CombatSystem, type ImpactResult } from "./CombatSystem";
@@ -47,6 +48,8 @@ export interface PlayerShot {
   dirZ: number;
   speed: number;
   radius: number;
+  /** naturaleza del arma del dueño al lanzarla (el cliente la dibuja de ese color) */
+  nature: Nature;
   damage: number;
   life: number;
   hit: Set<string>;
@@ -204,6 +207,7 @@ export class AbilitySystem {
       dirZ: Math.cos(c.swingFacing),
       speed: CLEAVE_SPEED,
       radius: r.radius!,
+      nature: c.weaponNature,
       damage: this.abilityDamage(c, r.damageMult!),
       life: CLEAVE_LIFE_S,
       hit: new Set(),

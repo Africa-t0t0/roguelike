@@ -375,10 +375,11 @@ export class AbilityFx {
           ps.color2 = new Color4(1, 0.4, 0.08, 1);
           ps.colorDead = new Color4(0.6, 0.1, 0, 0);
         } else {
-          // Chispas del color de la naturaleza: más claras en un extremo y apagándose a su tono oscuro.
+          // Chispas del tono de la naturaleza (sin aclararlas hacia el blanco: sumadas en aditivo, cientos de chispas
+          // claras viran el aro y la nube a amarillo) y apagándose a su tono oscuro.
           const c = natureTint(FIRE, step.nature);
-          ps.color1 = new Color4(Math.min(1, c.r + 0.3), Math.min(1, c.g + 0.3), Math.min(1, c.b + 0.3), 1);
-          ps.color2 = new Color4(c.r, c.g, c.b, 1);
+          ps.color1 = new Color4(c.r, c.g, c.b, 1);
+          ps.color2 = new Color4(c.r * 0.8, c.g * 0.8, c.b * 0.8, 1);
           ps.colorDead = new Color4(c.r * 0.5, c.g * 0.5, c.b * 0.5, 0);
         }
         ps.minSize = 0.06;

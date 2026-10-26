@@ -47,9 +47,9 @@ const VIEW_RADIUS_TILES = 13; // lo que cabe del centro al borde del círculo
 const FLOOR = "rgba(150, 132, 104, 0.55)";
 const EDGE = "rgba(214, 178, 112, 0.85)";
 
-/** Cofre cerrado: punto dorado; abierto: gris. */
+/** Cofre cerrado: rombo dorado intenso con borde oscuro (los aliados son puntos pálidos); abierto: gris. */
 export function chestStyle(open: boolean): string {
-  return open ? "#8a8a8a" : "#f0c040";
+  return open ? "#8a8a8a" : "#ffb000";
 }
 
 /**
@@ -132,9 +132,17 @@ export class Minimap {
       ctx.fillStyle = chestStyle(ch.open);
       const cx = c + ((ch.x - me.x) / TILE_SIZE) * PX_PER_TILE * scale;
       const cy = c - ((ch.z - me.z) / TILE_SIZE) * PX_PER_TILE * scale;
+      const h = (ch.open ? 3 : 4.5) * dpr;
       ctx.beginPath();
-      ctx.arc(cx, cy, 2.5 * dpr, 0, Math.PI * 2);
+      ctx.moveTo(cx, cy - h);
+      ctx.lineTo(cx + h, cy);
+      ctx.lineTo(cx, cy + h);
+      ctx.lineTo(cx - h, cy);
+      ctx.closePath();
       ctx.fill();
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.strokeStyle = "rgba(20, 12, 4, 0.95)";
+      ctx.stroke();
     }
     ctx.restore();
     // Flecha del jugador: apunta hacia donde mira la cámara (yaw 0 = arriba, π/2 = derecha).

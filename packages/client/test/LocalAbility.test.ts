@@ -134,3 +134,22 @@ describe("LocalAbility", () => {
     expect(b.heroAbility(900)).toBeNull();
   });
 });
+
+describe("LocalAbility: aturdimiento", () => {
+  it("aturdido no arranca habilidades nuevas ni bloquea", () => {
+    const a = withSlots("kick", "block");
+    expect(a.tick(0b01, { ...free, stunned: true }, 0)).toBeUndefined();
+    a.tick(0, free, TICK_MS);
+    a.tick(0b10, { ...free, stunned: true }, 2 * TICK_MS);
+    expect(a.isBlocking).toBe(false);
+    expect(a.locked()).toBe(false);
+  });
+
+  it("el aturdimiento no corta la animación en curso ni el bloqueo de locked()", () => {
+    const a = withSlots("whirlwind");
+    expect(a.tick(0b1, free, 0)).toBe("whirlwind");
+    a.tick(0b1, { ...free, stunned: true }, TICK_MS);
+    expect(a.locked()).toBe(true);
+    expect(a.heroAbility(TICK_MS)).not.toBeNull();
+  });
+});

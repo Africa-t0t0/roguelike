@@ -250,16 +250,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     hazards.push(world, at);
     chests.push(world, at);
     chestList = [...world.chests.values()];
-    // La onda no dice de quién es: lleva la naturaleza del jugador más cercano (su dueño, que la acaba de lanzar).
-    playerShots.push(world, at, (x, z) => {
-      let best: PlayerSnapshot | undefined;
-      let bestD2 = Infinity;
-      for (const p of lastPlayers.values()) {
-        const d2 = (p.x - x) ** 2 + (p.z - z) ** 2;
-        if (d2 < bestD2) [best, bestD2] = [p, d2];
-      }
-      return best?.weaponNature ?? "none";
-    });
+    playerShots.push(world, at);
   });
 
   // La cuenta sin pausa es local, en tiempo real (el juego sigue).
@@ -331,7 +322,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
         combo.advance(weaponId);
         ability.setCooldownMult(mine?.cooldownMult ?? 1);
-        ability.tick(sampled.abilities, { dead: dead || stunned, swingTimer: combo.state().swingTimer }, now);
+        ability.tick(sampled.abilities, { dead, stunned, swingTimer: combo.state().swingTimer }, now);
         combo.attack(sampled.attack, { dead: dead || stunned, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
       }
@@ -361,7 +352,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
       const canPickUp = !(mine?.dead ?? true) && swing.swingTimer <= 0 && !heroAbility;
-      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp }, now);
+      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp }, now, chestList);
     }
 
     const renderAt = now - INTERP_DELAY_MS;

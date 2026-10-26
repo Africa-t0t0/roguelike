@@ -264,7 +264,8 @@ export class EnemySystem {
       : tier === undefined ? rollTier(this.rng, this.floorTime, this.floor) : tier === 0 ? 1 : tier;
     // El sorteo de élite consume RNG solo cuando hay probabilidad (desde el minuto 3), para no mover las
     // secuencias sembradas anteriores. Los de sandbox (tier pedido) solo lo son si se pide.
-    const chance = eliteChance(this.floorTime);
+    // En las salas no hay élites: solo las oleadas (roomId -1).
+    const chance = roomId === -1 ? eliteChance(this.floorTime) : 0;
     const isElite = forceElite !== undefined || (tier === undefined && chance > 0 && this.rng.next() < chance);
     const nature: Nature = isElite ? (forceElite?.nature ?? this.rng.pick(ELEMENTS)) : "none";
     if (isElite && armed) {
@@ -719,7 +720,8 @@ export class EnemySystem {
   private freeze(e: Enemy, s: number): void {
     if (e.ai === "dead" || e.elite || ENEMY_DEFS[e.kind].stunImmune) return;
     e.frozen = Math.max(e.frozen, s);
-    e.freezeImmune = NATURE.freezeImmuneS;
+    // La inmunidad cuenta desde que se descongela: dura lo congelado más freezeImmuneS.
+    e.freezeImmune = e.frozen + NATURE.freezeImmuneS;
     e.iceHits = [];
     if (e.ai === "telegraph") this.setAi(e, "chase");
   }
@@ -797,6 +799,10 @@ export class EnemySystem {
     if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null };
     this.setAi(e, "dead");
     e.burn = null;
+    e.frozen = 0;
+    e.slow = null;
+    e.iceHits = [];
+    e.freezeImmune = 0;
     return { killed: true, xp: ENEMY_DEFS[e.kind].xp * (e.elite ? ELITE.xpMult : 1), x: e.x, z: e.z, drop: this.rollDrop(e) };
   }
 

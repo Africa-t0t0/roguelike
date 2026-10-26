@@ -243,3 +243,22 @@ describe("LevelUpSystem: elección sin pausa", () => {
     expect(offers(after)).toMatchObject([{ key: "ana", index: 1, total: 1 }]);
   });
 });
+
+describe("LevelUpSystem: Afinidad", () => {
+  it("solo se ofrece si el arma equipada tiene naturaleza", () => {
+    const seen = (nature: "none" | "fire") => {
+      const sys = new LevelUpSystem(createRng(7));
+      const r: ChoiceRecord = { ...rec("ana"), combat: { weaponNature: nature } };
+      let found = false;
+      for (let i = 0; i < 300 && !found; i++) {
+        r.pendingChoices = 1;
+        const [o] = sys.offerSolo(r);
+        if (o?.type === "offer" && o.cards.some((c) => c.kind === "stat" && c.id === "affinity")) found = true;
+        sys.choose(r, o?.type === "offer" ? o.offerId : -1, 0);
+      }
+      return found;
+    };
+    expect(seen("none")).toBe(false);
+    expect(seen("fire")).toBe(true);
+  });
+});

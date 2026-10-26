@@ -22,6 +22,8 @@ const BLINK_HZ = 6;
 const GLOW_DIAMETER_M = 1.3;
 const BASE_GLOW: readonly [number, number, number] = [1, 0.8, 0.35]; // aro de las tier 1
 const PROMPT_HEIGHT_M = 0.7; // el aviso se ancla un poco por encima del arma
+const CHEST_PROMPT_HEIGHT_M = 0.9; // ...y del cofre (mide ~0,6 m)
+export const OPEN_CHEST_PROMPT = "Abrir cofre";
 
 /** Parpadeo de vencimiento: siempre visible con ttl > 5 s; con ttl ≤ 5 s alterna a 6 Hz según el reloj de juego. */
 export function floorWeaponBlink(ttl: number, nowS: number): boolean {
@@ -54,6 +56,17 @@ export function nearestPickup(items: readonly FloorWeapon[], x: number, z: numbe
   return best;
 }
 
+/** El cofre cerrado más cercano a ≤ PICKUP_RANGE de (x, z), como lo elige el servidor; o undefined. */
+export function nearestClosedChest<T extends { x: number; z: number; open: boolean }>(chests: Iterable<T>, x: number, z: number): T | undefined {
+  let best: T | undefined;
+  let bestD2 = Infinity;
+  for (const c of chests) {
+    const d2 = (c.x - x) ** 2 + (c.z - z) ** 2;
+    if (!c.open && d2 <= PICKUP_RANGE ** 2 && d2 < bestD2) [best, bestD2] = [c, d2];
+  }
+  return best;
+}
+
 /**
  * Armas del suelo del propio jugador (las manda solo a él el servidor): de pie (punta clavada en el suelo, algo inclinadas), girando
  * despacio y oscilando sobre un disco que brilla. Desde tier 2, el disco y el arma brillan con el color del tier. Cerca de una se
@@ -69,6 +82,7 @@ export class FloorWeaponViews {
   private readonly glows = new Map<string, StandardMaterial>(); // material del velo y del aro por tier
   private readonly hint = document.createElement("div");
   private readonly hintName = document.createElement("span");
+  private readonly hintVerb = document.createElement("span");
   private readonly world = new Vector3();
 
   constructor(
@@ -81,11 +95,10 @@ export class FloorWeaponViews {
     const key = document.createElement("span");
     key.className = "pickup-key";
     key.textContent = "E";
-    const verb = document.createElement("span");
-    verb.className = "pickup-verb";
-    verb.textContent = "Recoger";
+    this.hintVerb.className = "pickup-verb";
+    this.hintVerb.textContent = "Recoger";
     this.hintName.className = "pickup-name";
-    this.hint.append(key, verb, this.hintName);
+    this.hint.append(key, this.hintVerb, this.hintName);
     parent.append(this.hint);
   }
 
@@ -102,9 +115,15 @@ export class FloorWeaponViews {
 
   /**
    * Gira y hace oscilar las armas, las hace parpadear si vencen pronto, y muestra el aviso si (x, z)
-   * está a alcance de una y se puede tomar. `nowMs` es el reloj de juego (quieto en la pausa).
+   * está a alcance de una y se puede tomar. Con un cofre cerrado a alcance, el aviso es "Abrir cofre" (el
+   * servidor abre el cofre antes de recoger armas). `nowMs` es el reloj de juego (quieto en la pausa).
    */
-  render(dt: number, me: { x: number; z: number; canPickUp: boolean } | undefined, nowMs: number): void {
+  render(
+    dt: number,
+    me: { x: number; z: number; canPickUp: boolean } | undefined,
+    nowMs: number,
+    chests: Iterable<{ x: number; z: number; open: boolean }> = [],
+  ): void {
     const nowS = nowMs / 1000;
     const elapsedS = Math.max(0, (nowMs - this.setAtMs) / 1000);
     this.nodes.forEach((n, i) => {
@@ -112,6 +131,18 @@ export class FloorWeaponViews {
       n.weapon.position.y = BOB_AMPLITUDE_M * Math.sin(2 * Math.PI * BOB_HZ * nowS + i);
       n.pivot.setEnabled(floorWeaponBlink(this.ttls[i]! - elapsedS, nowS));
     });
+    const chest = me?.canPickUp ? nearestClosedChest(chests, me.x, me.z) : undefined;
+    if (chest) {
+      const cat = this.project(chest.x, chest.z, CHEST_PROMPT_HEIGHT_M);
+      this.hint.hidden = !cat;
+      if (!cat) return;
+      this.hintVerb.textContent = OPEN_CHEST_PROMPT;
+      this.hintName.textContent = "";
+      this.hint.setAttribute("aria-label", OPEN_CHEST_PROMPT);
+      this.hint.style.transform = `translate(${cat.x}px, ${cat.y}px)`;
+      return;
+    }
+    this.hintVerb.textContent = "Recoger";
     const near = me?.canPickUp ? nearestPickup(this.items, me.x, me.z) : undefined;
     const at = near && this.project(near.x, near.z);
     this.hint.hidden = !at;
@@ -133,13 +164,13 @@ export class FloorWeaponViews {
     for (const n of this.nodes) n.fx?.setPaused(paused);
   }
 
-  /** Posición en pantalla (px CSS) del punto sobre el arma; undefined si queda fuera de la vista. */
-  private project(x: number, z: number): { x: number; y: number } | undefined {
+  /** Posición en pantalla (px CSS) del punto sobre el objeto; undefined si queda fuera de la vista. */
+  private project(x: number, z: number, y = PROMPT_HEIGHT_M): { x: number; y: number } | undefined {
     const camera = this.scene.activeCamera;
     const canvas = this.scene.getEngine().getRenderingCanvas();
     if (!camera || !canvas) return undefined;
     const viewport = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
-    this.world.set(x, PROMPT_HEIGHT_M, z);
+    this.world.set(x, y, z);
     const p = Vector3.Project(this.world, Matrix.IdentityReadOnly, this.scene.getTransformMatrix(), viewport);
     return p.z >= 0 && p.z <= 1 ? { x: p.x, y: p.y } : undefined;
   }

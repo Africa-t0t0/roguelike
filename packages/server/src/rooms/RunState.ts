@@ -98,7 +98,7 @@ export type ProjectileState = SchemaType<typeof ProjectileState>;
 
 /** Onda de corte de un jugador. */
 export const PlayerShotState = schema(
-  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number() },
+  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number(), nature: t.string() },
   "PlayerShotState",
 );
 export type PlayerShotState = SchemaType<typeof PlayerShotState>;

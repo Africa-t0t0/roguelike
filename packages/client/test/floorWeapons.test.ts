@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PICKUP_RANGE } from "@roguelike/shared";
 import { parseFloorTimeStart, parseFloorWeapons, parseSandbox } from "../src/net/connection";
-import { floorWeaponBlink, nearestPickup, pickupPrompt } from "../src/render/floorWeaponViews";
+import { floorWeaponBlink, nearestClosedChest, nearestPickup, pickupPrompt } from "../src/render/floorWeaponViews";
 
 describe("armas del suelo", () => {
   it("parseFloorWeapons acepta la lista del servidor y descarta lo que no encaja", () => {
@@ -33,6 +33,18 @@ describe("armas del suelo", () => {
     expect(nearestPickup(items, 1 + PICKUP_RANGE, 0)?.weaponId).toBe("great-sword"); // justo en el borde
     expect(nearestPickup(items, 1 + PICKUP_RANGE + 0.01, 0)).toBeUndefined();
     expect(nearestPickup([], 0, 0)).toBeUndefined();
+  });
+
+  it("nearestClosedChest: el cerrado más cercano a ≤ PICKUP_RANGE; los abiertos y lejanos no cuentan", () => {
+    const chests = [
+      { x: 1, z: 0, open: false },
+      { x: 0.2, z: 0, open: true },
+      { x: -0.8, z: 0, open: false },
+    ];
+    expect(nearestClosedChest(chests, 0, 0)).toBe(chests[2]);
+    expect(nearestClosedChest(chests, 1 + PICKUP_RANGE, 0)).toBe(chests[0]);
+    expect(nearestClosedChest(chests, 1 + PICKUP_RANGE + 0.01, 0)).toBeUndefined();
+    expect(nearestClosedChest([{ x: 0, z: 0, open: true }], 0, 0)).toBeUndefined();
   });
 
   it("floorWeaponBlink: visible con ttl > 5 y alterna a 6 Hz con ttl <= 5", () => {

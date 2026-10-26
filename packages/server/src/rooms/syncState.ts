@@ -134,6 +134,7 @@ export function syncWorld(
       ws.dirX = w.dirX;
       ws.dirZ = w.dirZ;
       ws.radius = w.radius;
+      ws.nature = w.nature;
       state.playerShots.set(w.id, ws);
     }
     ws.x = w.x;

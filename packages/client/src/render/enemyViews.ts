@@ -18,7 +18,7 @@ import { SnapshotBuffer } from "../net/SnapshotBuffer";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseEnemyAnim, SpeedMeter, type ClipLengths } from "./animState";
 import type { Assets } from "./assets";
-import { applyCasterTint, applyTint, CASTER_COLORS, chargeScale } from "./casterLooks";
+import { applyCasterTint, applyTint, CASTER_COLORS, chargeScale, markNoTint } from "./casterLooks";
 import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 import { eliteName, NATURE_COLORS } from "./natureLooks";
 import { CharacterView } from "./characterView";
@@ -48,9 +48,10 @@ const CHARGE_DIAMETER = 0.35; // m, a carga completa
 const ELITE_GOLD = new Color3(1, 0.8, 0.25);
 const ELITE_AURA_EXTRA = 0.8; // m sobre el radio del enemigo ya escalado
 const ELITE_LABEL_ABOVE_BAR = 0.3; // m
-const ELITE_LABEL_W = 3;
-const ELITE_LABEL_H = 0.375;
-const ELITE_TINT = 0.5;
+const ELITE_LABEL_W = 4;
+const ELITE_LABEL_H = 0.5; // letras de ~0,25 m: se leen a la distancia de juego
+/** Brillo suave: el cuerpo conserva su color oscuro y su detalle; el emisivo solo lo "calienta". */
+const ELITE_TINT = 0.2;
 /** Estados: tinte cian suave al ralentizar y fuerte al congelar; brasas al arder. */
 const SLOW_TINT = 0.3;
 const FROZEN_TINT = 0.85;
@@ -151,11 +152,23 @@ export class EnemyViews {
     let m = this.labelMats.get(key);
     if (!m) {
       const text = eliteName(kind, nature);
-      const tex = new DynamicTexture(`eliteLabel-${key}`, { width: 768, height: 96 }, this.scene, false);
+      const tex = new DynamicTexture(`eliteLabel-${key}`, { width: 1024, height: 128 }, this.scene, false);
       tex.hasAlpha = true;
       const c = nature === "none" ? ELITE_GOLD : NATURE_COLORS[nature];
       const css = `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
-      tex.drawText(text, null, 66, "700 40px Cinzel, Georgia, serif", css, "transparent", true);
+      // Texto con contorno oscuro sobre fondo transparente (legible contra el suelo y las paredes).
+      const ctx = tex.getContext() as CanvasRenderingContext2D;
+      ctx.clearRect(0, 0, 1024, 128);
+      ctx.font = "700 76px Cinzel, Georgia, serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 12;
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+      ctx.strokeText(text, 512, 66);
+      ctx.fillStyle = css;
+      ctx.fillText(text, 512, 66);
+      tex.update();
       m = flatMaterial(this.scene, `eliteLabelMat-${key}`, Color3.White());
       m.diffuseTexture = tex;
       m.useAlphaFromDiffuseTexture = true;
@@ -244,7 +257,7 @@ export class EnemyViews {
       if (!e) continue;
       view.character.setPose(e.x, 0, e.z, e.facing);
       view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, nature: e.weaponNature, gripScale: ENEMY_LOOKS[e.kind].gripScale });
-      view.character.setFrozen(e.frozen);
+      view.character.setFrozen(e.frozen && e.ai !== "dead");
       view.character.play(
         chooseEnemyAnim(
           {
@@ -260,7 +273,7 @@ export class EnemyViews {
         ),
       );
 
-      const tintState: TintState = e.frozen ? "frozen" : e.slowed ? "slowed" : "base";
+      const tintState: TintState = e.frozen && e.ai !== "dead" ? "frozen" : e.slowed ? "slowed" : "base";
       if (tintState !== view.tint) this.applyBodyTint(view, tintState);
       this.setBurning(view, e.burning && e.ai !== "dead");
       view.label?.setEnabled(e.ai !== "dead");
@@ -337,6 +350,7 @@ export class EnemyViews {
     const k = e.elite ? ELITE.scale : 1;
     const height = look.height * k;
     if (e.elite) character.setBodyScale(k);
+    const bodyMeshes = new Set(character.root.getChildMeshes(false));
 
     // Barra de vida: fondo + relleno, siempre de cara a la cámara.
     const bar = new TransformNode(`enemyBar-${id}`, scene);
@@ -453,6 +467,8 @@ export class EnemyViews {
       tint: "base",
       burnEmitter,
     };
+    // Todo lo creado tras el cuerpo (barra, aros, estrellas, aura, rótulo…) no se tiñe con él.
+    for (const m of character.root.getChildMeshes(false)) if (!bodyMeshes.has(m)) markNoTint(m);
     if (e.elite && e.nature !== "none") this.applyBodyTint(view, "base");
     return view;
   }

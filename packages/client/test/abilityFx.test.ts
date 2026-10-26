@@ -150,6 +150,16 @@ describe("efectos de habilidades", () => {
     expect(ring("none")!.asArray()).toEqual([1, 0.45, 0.1]);
   });
 
+  it("el Grito de guerra también toma el color de la naturaleza; sin ella, dorado", () => {
+    const ring = (n: "fire" | "ice" | "lightning" | "none") => {
+      const step = abilityTimeline("warcry", 1, n).find((s) => s.kind === "ring");
+      return step?.kind === "ring" ? step.color : undefined;
+    };
+    expect(ring("ice")).toBe(NATURE_COLORS.ice);
+    expect(ring("fire")).toBe(NATURE_COLORS.fire);
+    expect(ring("none")!.asArray()).toEqual([1, 0.78, 0.25]);
+  });
+
   it("todas las habilidades con naturaleza terminan sin mallas, partículas ni texturas huérfanas", () => {
     const { scene, fx, meshes0 } = setup();
     for (const nature of ["fire", "ice", "lightning"] as const) {

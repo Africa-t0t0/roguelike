@@ -18,8 +18,9 @@ const FLASH_COUNT = 24;
 const W = 0.9;
 const D = 0.6;
 const BODY_H = 0.4;
-const LID_H = 0.2;
-const GOLD = new Color3(0.95, 0.75, 0.2);
+const LID_H = 0.14;
+const CAP_H = 0.06; // losa sobre la tapa: la abomba en escalón (alto total ~0,6 m)
+const GOLD = new Color3(0.78, 0.58, 0.14); // dorado apagado: herrajes finos, no bloques amarillos
 
 /** Ángulo (rad, sobre el eje x de la bisagra) de la tapa: 0 cerrada, −55° a 0,2 s y −110° desde 0,4 s. */
 export function lidAngle(openSinceS: number): number {
@@ -30,7 +31,8 @@ interface ChestView {
   data: ChestSnapshot;
   root: TransformNode;
   meshes: Mesh[];
-  body: Mesh;
+  /** piezas de madera (cuerpo, tapa y losa): cambian a la madera "abierta" */
+  woods: Mesh[];
   hinge: TransformNode;
   /** instante (reloj de dibujo) en que se abrió; −Infinity si ya venía abierto (sin destello) */
   openAtMs?: number;
@@ -58,13 +60,13 @@ export class ChestViews {
       const m = new StandardMaterial(name, scene);
       m.diffuseColor = color;
       m.specularColor = Color3.Black();
-      m.emissiveColor = color.scale(0.35);
+      m.emissiveColor = color.scale(0.2);
       return m;
     };
-    this.wood = mat("chestWood", new Color3(0.28, 0.15, 0.07));
-    this.woodOpen = mat("chestWoodOpen", new Color3(0.12, 0.07, 0.04));
+    this.wood = mat("chestWood", new Color3(0.2, 0.11, 0.055));
+    this.woodOpen = mat("chestWoodOpen", new Color3(0.1, 0.06, 0.035));
     this.gold = mat("chestGold", GOLD);
-    this.gold.emissiveColor = GOLD.scale(0.5);
+    this.gold.emissiveColor = GOLD.scale(0.3);
     this.spark = sparkTexture(scene, "chest-spark");
   }
 
@@ -95,8 +97,7 @@ export class ChestViews {
       view.hinge.rotation.x = lidAngle((nowMs - at) / 1000);
       if (!view.flashed) {
         view.flashed = true;
-        view.body.material = this.woodOpen;
-        view.meshes[1]!.material = this.woodOpen;
+        for (const m of view.woods) m.material = this.woodOpen;
         if (at !== -Infinity) this.flash(view.data, nowMs);
       }
     }
@@ -139,13 +140,19 @@ export class ChestViews {
     hinge.parent = root;
     hinge.position.set(0, BODY_H, -D / 2);
     const lid = box("chestLid", W, LID_H, D, this.wood, hinge, 0, LID_H / 2, D / 2);
-    const meshes: Mesh[] = [body, lid];
+    // Losa más estrecha encima de la tapa (abombado en escalón).
+    const cap = box("chestCap", W - 0.1, CAP_H, D - 0.1, this.wood, hinge, 0, LID_H + CAP_H / 2, D / 2);
+    const woods: Mesh[] = [body, lid, cap];
+    const meshes: Mesh[] = [...woods];
+    // Herrajes finos: dos flejes que rodean cuerpo y tapa, el borde del cuerpo y el cierre.
     for (const x of [-W * 0.32, W * 0.32]) {
-      meshes.push(box("chestStrapBody", 0.1, BODY_H + 0.02, D + 0.02, this.gold, root, x, BODY_H / 2, 0));
-      meshes.push(box("chestStrapLid", 0.1, LID_H + 0.02, D + 0.02, this.gold, hinge, x, LID_H / 2, D / 2));
+      meshes.push(box("chestStrapBody", 0.05, BODY_H + 0.02, D + 0.02, this.gold, root, x, BODY_H / 2, 0));
+      meshes.push(box("chestStrapLid", 0.05, LID_H + 0.02, D + 0.02, this.gold, hinge, x, LID_H / 2, D / 2));
+      meshes.push(box("chestStrapCap", 0.05, CAP_H + 0.02, D - 0.08, this.gold, hinge, x, LID_H + CAP_H / 2, D / 2));
     }
-    meshes.push(box("chestClasp", 0.12, 0.14, 0.04, this.gold, hinge, 0, 0.02, D + 0.01));
-    return { data: c, root, meshes, body, hinge, flashed: false };
+    meshes.push(box("chestRim", W + 0.02, 0.03, D + 0.02, this.gold, root, 0, BODY_H - 0.015, 0));
+    meshes.push(box("chestClasp", 0.08, 0.1, 0.04, this.gold, hinge, 0, 0.04, D + 0.01));
+    return { data: c, root, meshes, woods, hinge, flashed: false };
   }
 
   /** Destello dorado corto al abrirse. */

@@ -767,6 +767,8 @@ describe("EnemySystem: naturaleza de las armas", () => {
     e.aiTime = 0;
     sys.strike(e.id, 1, ICE);
     expect(e.frozen).toBeCloseTo(0.8, 5);
+    // La inmunidad cuenta 4 s después de descongelar: 0,8 + 4.
+    expect(e.freezeImmune).toBeCloseTo(4.8, 5);
     expect(e.ai).toBe("chase");
     const [x, z] = [e.x, e.z];
     run(sys, [P("a", x + 1, z)], 20);
@@ -776,6 +778,20 @@ describe("EnemySystem: naturaleza de las armas", () => {
     // En el segundo siguiente: tres golpes más no lo vuelven a congelar.
     for (let i = 0; i < 4; i++) sys.strike(e.id, 1, ICE);
     expect(e.frozen).toBe(0);
+  });
+
+  it("al morir se limpian congelado, ralentización, golpes de hielo e inmunidad", () => {
+    const { sys, e } = setup("brute", IN_ROOM.x, IN_ROOM.z);
+    e.hp = e.maxHp = 9999;
+    for (let i = 0; i < 3; i++) sys.strike(e.id, 1, ICE);
+    expect(e.frozen).toBeGreaterThan(0);
+    e.slow = { left: 2, frac: 0.5 };
+    e.iceHits = [0.1];
+    expect(sys.damage(e.id, 99999).killed).toBe(true);
+    expect(e.frozen).toBe(0);
+    expect(e.slow).toBeNull();
+    expect(e.iceHits).toEqual([]);
+    expect(e.freezeImmune).toBe(0);
   });
 
   it("hielo: un élite no se congela", () => {
@@ -838,6 +854,14 @@ describe("élites", () => {
     const { list } = wave(100, ["minion", "brute"]);
     expect(list.some((e) => e.elite)).toBe(false);
     expect(list.every((e) => e.nature === "none")).toBe(true);
+  });
+
+  it("las salas nunca generan élites, ni con floorTime alto", () => {
+    const sys = new EnemySystem(arena(), createRng(4));
+    sys.setFloorClock(3000, 1, 1);
+    const made = sys.activateRooms([P("a", 38, 38)], 4);
+    expect(made.length).toBeGreaterThan(0);
+    expect(made.some((e) => e.elite)).toBe(false);
   });
 
   it("con eliteChance > 0 hay élites: vida x3 del escalado, armados con su naturaleza e inmunes al aturdimiento", () => {
