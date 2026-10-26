@@ -8,6 +8,8 @@ export const AbilitySlotState = schema(
     rank: t.number(),
     /** segundos de enfriamiento que le quedan */
     cooldown: t.number(),
+    /** cargas disponibles (el Torbellino con `whirlCharges` tiene hasta 2; 1 si la habilidad no tiene cargas) */
+    charges: t.number(),
   },
   "AbilitySlotState",
 );
@@ -144,6 +146,13 @@ export const HazardState = schema(
 );
 export type HazardState = SchemaType<typeof HazardState>;
 
+/** Zona del jugador (grietas del Golpe sísmico): círculo que dura `total` s; el visual lo dibuja el cliente. */
+export const PlayerZoneState = schema(
+  { x: t.number(), z: t.number(), radius: t.number(), left: t.number(), total: t.number() },
+  "PlayerZoneState",
+);
+export type PlayerZoneState = SchemaType<typeof PlayerZoneState>;
+
 export const OrbState = schema({ x: t.number(), z: t.number(), value: t.number() }, "OrbState");
 export type OrbState = SchemaType<typeof OrbState>;
 
@@ -175,6 +184,8 @@ export const RunState = schema(
     chests: t.map(ChestState),
     /** ondas de los jugadores, indexadas por id ("w1", …) */
     playerShots: t.map(PlayerShotState),
+    /** zonas de los jugadores (grietas), indexadas por id ("z1", …) */
+    playerZones: t.map(PlayerZoneState),
     /** el grupo está eligiendo cartas: la simulación no avanza */
     paused: t.boolean(),
     /** La partida ya empezó (un jugador cruzó los sellos de la sala inicial). Una vez true no vuelve a false. */

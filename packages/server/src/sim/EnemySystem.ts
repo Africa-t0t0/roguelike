@@ -154,14 +154,22 @@ export interface EnemyHit {
   nature?: Nature;
   /** daño por segundo de la quemadura que deja un élite de fuego (4 × su `damageMult`) */
   burnDps?: number;
+  /** elemento del golpe, para la resistencia del jugador: la naturaleza del élite o, si no es élite, "fire" en la zona del pirómano y "lightning" en el rayo del tormentoso */
+  element?: Exclude<Nature, "none">;
 }
 
 /** Siguiente tipo de hechizo del hechicero élite al alternar: mage → pyromancer → stormcaller → mage. */
 const NEXT_SPELL: Partial<Record<EnemyKind, EnemyKind>> = { mage: "pyromancer", pyromancer: "stormcaller", stormcaller: "mage" };
 
-/** Campos de naturaleza que un proyectil o peligro de élite pasa a sus golpes (nada si no es de élite). */
-function hazardNature(h: { nature?: Nature; burnDps?: number }): Pick<EnemyHit, "nature" | "burnDps"> {
-  return h.nature === undefined ? {} : { nature: h.nature, burnDps: h.burnDps };
+/**
+ * Campos de naturaleza que un proyectil o peligro pasa a sus golpes. Los de un élite llevan su naturaleza y
+ * quemadura (y esa es su elemento); la zona y el rayo, aunque no sean de élite, dan su elemento (sin estado).
+ */
+function hazardNature(h: { kind?: Hazard["kind"]; nature?: Nature; burnDps?: number }): Pick<EnemyHit, "nature" | "burnDps" | "element"> {
+  if (h.nature !== undefined && h.nature !== "none") return { nature: h.nature, burnDps: h.burnDps, element: h.nature };
+  if (h.kind === "zone") return { element: "fire" };
+  if (h.kind === "beam") return { element: "lightning" };
+  return {};
 }
 
 const MELEE_TOLERANCE = 0.3;
@@ -456,6 +464,7 @@ export class EnemySystem {
     if (e.nature !== "none") {
       hit.nature = e.nature;
       hit.burnDps = ELITE.playerBurnDps * e.damageMult;
+      hit.element = e.nature;
     }
     return hit;
   }
@@ -727,6 +736,16 @@ export class EnemySystem {
     if (!e || e.ai === "dead" || e.elite || ENEMY_DEFS[e.kind].stunImmune) return;
     e.stunned = Math.max(e.stunned, s);
     if (e.ai === "telegraph") this.setAi(e, "chase");
+  }
+
+  /**
+   * Ralentiza `frac` durante `s` segundos (se queda el mayor de cada uno si ya lo estaba). Sin congelamiento ni
+   * aturdimiento: es la ralentización de las grietas del Golpe sísmico, que se renueva cada tick.
+   */
+  slow(enemyId: string, frac: number, s: number): void {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (!e || e.ai === "dead") return;
+    e.slow = { left: Math.max(s, e.slow?.left ?? 0), frac: Math.max(frac, e.slow?.frac ?? 0) };
   }
 
   /** Congela `s` segundos y cancela su telegrafía; no afecta a muertos, élites ni `stunImmune`. */

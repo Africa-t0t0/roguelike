@@ -1,5 +1,5 @@
 import { GEAR_SLOTS, xpToNext, type GearItem } from "@roguelike/shared";
-import { abilitySlots, type PlayerShot } from "../sim/AbilitySystem";
+import { abilityCharges, abilityMaxCharges, abilitySlots, type PlayerShot, type PlayerZone } from "../sim/AbilitySystem";
 import { abilityRank, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
 import type { Hazard } from "../sim/hazards";
@@ -12,6 +12,7 @@ import {
   HazardState,
   OrbState,
   PlayerShotState,
+  PlayerZoneState,
   ProjectileState,
   type PlayerState,
   type RunState,
@@ -90,10 +91,11 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
     s.id = slot.id;
     s.rank = slot.rank;
     s.cooldown = c.abilityCd[slot.id] ?? 0;
+    s.charges = abilityMaxCharges(c, slot.id) > 1 ? abilityCharges(c, slot.id) : 1;
   });
 }
 
-/** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles`, `orbs`, `playerShots` y `hazards`. */
+/** Agrega, actualiza y elimina por id las entradas de `enemies`, `projectiles`, `orbs`, `playerShots`, `hazards` y `playerZones`. */
 export function syncWorld(
   state: RunState,
   enemies: readonly Enemy[],
@@ -102,6 +104,7 @@ export function syncWorld(
   orbs: readonly Orb[],
   playerShots: readonly PlayerShot[] = [],
   hazards: readonly Hazard[] = [],
+  playerZones: readonly PlayerZone[] = [],
 ): void {
   const liveEnemies = new Set<string>();
   for (const e of enemies) {
@@ -201,6 +204,22 @@ export function syncWorld(
     hs.phase = h.phase;
   }
   for (const id of [...state.hazards.keys()]) if (!liveHazards.has(id)) state.hazards.delete(id);
+
+  const liveZones = new Set<string>();
+  for (const z of playerZones) {
+    liveZones.add(z.id);
+    let zs = state.playerZones.get(z.id);
+    if (!zs) {
+      zs = new PlayerZoneState();
+      zs.x = z.x;
+      zs.z = z.z;
+      zs.radius = z.radius;
+      zs.total = z.total;
+      state.playerZones.set(z.id, zs);
+    }
+    zs.left = z.left;
+  }
+  for (const id of [...state.playerZones.keys()]) if (!liveZones.has(id)) state.playerZones.delete(id);
 
   syncLevel(state, combat);
 }

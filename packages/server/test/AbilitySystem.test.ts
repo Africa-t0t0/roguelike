@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ENEMY_DEFS,
+  PLAYER_RADIUS,
   SIM_DT,
   createRng,
   newProgress,
@@ -11,7 +12,7 @@ import {
   type KinematicState,
   type PlayerInput,
 } from "@roguelike/shared";
-import { AbilitySystem } from "../src/sim/AbilitySystem";
+import { AbilitySystem, abilityCharges, abilityMaxCharges } from "../src/sim/AbilitySystem";
 import { CombatSystem, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
 import { EnemySystem, type Enemy, type EnemyHit, type SimPlayer } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
@@ -435,5 +436,196 @@ describe("Tajo frontal", () => {
     for (let i = 0; i < 30; i++) hits.push(...feed(env).a.hits.map((h) => h.enemyId));
     expect(hits).toEqual([front!.id]);
     expect(behind!.hp).toBe(9999);
+  });
+});
+
+describe("efectos legendarios y reliquias", () => {
+  const withLegendary = (env: Env, ...ids: string[]) => {
+    env.c.fx = { ...env.c.fx, legendaries: ids as never };
+  };
+  /** Termina la animación en curso y suelta la tecla. */
+  const settle = (env: Env) => {
+    for (let i = 0; i < 40; i++) feed(env);
+  };
+
+  it("whirlCharges: dos Torbellinos seguidos funcionan y el tercero no; cada ciclo de enfriamiento devuelve 1 carga", () => {
+    const env = setup([{ id: "whirlwind", rank: 1 }]);
+    withLegendary(env, "whirlCharges");
+    expect(abilityCharges(env.c, "whirlwind")).toBe(2);
+    expect(feed(env, { abilities: 1 }).a.started).toBe("whirlwind");
+    expect(abilityCharges(env.c, "whirlwind")).toBe(1);
+    expect(env.c.abilityCd.whirlwind).toBe(8);
+    settle(env);
+    expect(feed(env, { abilities: 1 }).a.started).toBe("whirlwind");
+    expect(abilityCharges(env.c, "whirlwind")).toBe(0);
+    settle(env);
+    expect(feed(env, { abilities: 1 }).a.started).toBeUndefined();
+    feed(env);
+    // El enfriamiento sigue corriendo (el segundo lanzamiento no lo reinició): a los 8 s del primero vuelve 1 carga.
+    tickAbilities(env, inputsFor(8));
+    expect(abilityCharges(env.c, "whirlwind")).toBe(1);
+    expect(env.c.abilityCd.whirlwind).toBe(8);
+    expect(feed(env, { abilities: 1 }).a.started).toBe("whirlwind");
+    expect(abilityCharges(env.c, "whirlwind")).toBe(0);
+    settle(env);
+    // Otro ciclo y otro más: vuelve a las 2.
+    tickAbilities(env, inputsFor(8) * 2);
+    expect(abilityCharges(env.c, "whirlwind")).toBe(2);
+    expect(env.c.abilityCd.whirlwind).toBe(0);
+  });
+
+  it("sin whirlCharges (o en otra habilidad) hay 1 carga como siempre", () => {
+    const env = setup([{ id: "whirlwind", rank: 1 }, { id: "kick", rank: 1 }]);
+    expect(abilityMaxCharges(env.c, "whirlwind")).toBe(1);
+    withLegendary(env, "whirlCharges");
+    expect(abilityMaxCharges(env.c, "kick")).toBe(1);
+    withLegendary(env);
+    feed(env, { abilities: 1 });
+    settle(env);
+    expect(feed(env, { abilities: 1 }).a.started).toBeUndefined();
+  });
+
+  it("kickStun: la Patada aturde el doble (rango 1: 2 s)", () => {
+    const env = setup([{ id: "kick", rank: 1 }]);
+    withLegendary(env, "kickStun");
+    const [front] = spawn(env.sys, [{ x: 28, z: 29.5 }]);
+    feed(env, { abilities: 1 });
+    untilHits(env, 1);
+    expect(front!.stunned).toBe(2);
+  });
+
+  it("warcryLong: el bono dura ×1,5 (12 s)", () => {
+    const env = setup([{ id: "warcry", rank: 1 }]);
+    withLegendary(env, "warcryLong");
+    const other = newCombatState("warrior", 1);
+    feed(env, { abilities: 1 }, kin(), env.c, [env.c, other]);
+    expect(env.c.buffLeft).toBe(12);
+    expect(other.buffLeft).toBe(12);
+  });
+
+  it("warcryHeal: cura el 15 % de la vida máxima al aliado y a uno mismo; los muertos no", () => {
+    const env = setup([{ id: "warcry", rank: 1 }]);
+    withLegendary(env, "warcryHeal");
+    const ally = newCombatState("warrior", 1);
+    const dead = newCombatState("warrior", 1);
+    dead.dead = true;
+    dead.hp = 0;
+    env.c.hp = 50;
+    ally.hp = 40;
+    feed(env, { abilities: 1 }, kin(), env.c, [env.c, ally, dead]);
+    expect(ally.hp).toBeCloseTo(40 + 0.15 * ally.maxHp, 9);
+    expect(env.c.hp).toBeCloseTo(50 + 0.15 * env.c.maxHp, 9);
+    expect(dead.hp).toBe(0);
+  });
+
+  it("warcry sin legendarias: ni cura ni dura más", () => {
+    const env = setup([{ id: "warcry", rank: 1 }]);
+    env.c.hp = 50;
+    feed(env, { abilities: 1 });
+    expect(env.c.hp).toBe(50);
+    expect(env.c.buffLeft).toBe(8);
+  });
+
+  it("slamCracks: deja una zona 3 s con el radio del rango; el enemigo dentro avanza al 60 % de lo normal", () => {
+    // Mismo escenario con y sin grietas: el enemigo a 3,2 m del jugador avanza 6 ticks hacia él.
+    const run = (cracks: boolean) => {
+      const env = setup([{ id: "slam", rank: 1 }]);
+      if (cracks) withLegendary(env, "slamCracks");
+      const [e] = spawn(env.sys, [{ x: 28, z: 31.2 }]);
+      feed(env, { abilities: 1 });
+      untilHits(env, 0);
+      e!.hp = 1e9;
+      e!.stunned = e!.frozen = 0;
+      const states = new Map([["a", env.c]]);
+      // El primer tick de las grietas ya ralentiza (la ralentización se aplica tras el paso de los enemigos).
+      env.ab.step(states, env.sys, SIM_DT);
+      const z0 = e!.z;
+      for (let i = 0; i < 6; i++) {
+        env.sys.step([P("a", 28, 28)], SIM_DT);
+        env.ab.step(states, env.sys, SIM_DT);
+      }
+      return { env, moved: z0 - e!.z, e: e!, states };
+    };
+    const free = run(false);
+    const cracked = run(true);
+    expect(free.moved).toBeGreaterThan(0.5);
+    expect(cracked.moved / free.moved).toBeCloseTo(0.6, 1);
+    expect(cracked.env.ab.playerZones).toEqual([expect.objectContaining({ x: 28, z: 28, radius: 3.5, total: 3 })]);
+    expect(cracked.e.slow?.frac).toBe(0.4);
+    // A los 3 s desde el impacto la zona desaparece.
+    for (let i = 0; i < 90; i++) cracked.env.ab.step(cracked.states, cracked.env.sys, SIM_DT);
+    expect(cracked.env.ab.playerZones).toEqual([]);
+  });
+
+  it("slam sin slamCracks no deja zona", () => {
+    const env = setup([{ id: "slam", rank: 1 }]);
+    spawn(env.sys, [{ x: 28, z: 31 }]);
+    feed(env, { abilities: 1 });
+    untilHits(env, 0);
+    expect(env.ab.playerZones).toEqual([]);
+  });
+
+  it("thrustDash: el jugador avanza 3 m en su dirección al impacto (la línea sale del origen) y se detiene en un muro", () => {
+    const env = setup([{ id: "thrust", rank: 1 }]);
+    withLegendary(env, "thrustDash");
+    // Hacia +z desde (28, 28).
+    feed(env, { abilities: 1 });
+    let dash: { x: number; z: number } | undefined;
+    for (let i = 0; i < 30 && !dash; i++) dash = feed(env).a.dash;
+    expect(dash!.x).toBeCloseTo(28, 9);
+    expect(dash!.z).toBeCloseTo(31, 9);
+
+    // Hacia +x desde (38.5, 28): el muro está en x = 40 (borde de la sala) y el jugador mide PLAYER_RADIUS.
+    const env2 = setup([{ id: "thrust", rank: 1 }]);
+    withLegendary(env2, "thrustDash");
+    const k = kin({ x: 38.5, z: 28 });
+    feed(env2, { abilities: 1, facing: Math.PI / 2 }, k);
+    let dash2: { x: number; z: number } | undefined;
+    for (let i = 0; i < 30 && !dash2; i++) dash2 = feed(env2, { facing: Math.PI / 2 }, k).a.dash;
+    expect(dash2!.x).toBeCloseTo(40 - PLAYER_RADIUS, 6);
+    expect(dash2!.z).toBeCloseTo(28, 9);
+  });
+
+  it("thrust sin thrustDash no impulsa", () => {
+    const env = setup([{ id: "thrust", rank: 1 }]);
+    feed(env, { abilities: 1 });
+    for (let i = 0; i < 30; i++) expect(feed(env).a.dash).toBeUndefined();
+  });
+
+  it("legendaria sin la habilidad correspondiente no hace nada", () => {
+    const env = setup([{ id: "kick", rank: 1 }]);
+    withLegendary(env, "slamCracks", "thrustDash", "whirlCharges", "warcryLong");
+    const [e] = spawn(env.sys, [{ x: 28, z: 29.5 }]);
+    feed(env, { abilities: 1 });
+    untilHits(env, 1);
+    expect(env.ab.playerZones).toEqual([]);
+    expect(e!.stunned).toBe(1);
+  });
+
+  it("vampiro: lo hecho por una habilidad cura la fracción; las kills de la onda y el daño de cadena también cuentan", () => {
+    const env = setup([{ id: "slam", rank: 1 }]);
+    env.c.fx = { ...env.c.fx, vampire: 0.05 };
+    spawn(env.sys, [{ x: 28, z: 31 }, { x: 29, z: 31 }]);
+    env.c.hp = 50;
+    feed(env, { abilities: 1 });
+    const { hits } = untilHits(env, 0);
+    const dealt = hits.reduce((a, h) => a + h.amount, 0);
+    expect(hits).toHaveLength(2);
+    expect(env.c.hp).toBeCloseTo(50 + dealt * 0.05, 9);
+  });
+
+  it("Reloj de arena: lanzar una habilidad con 3 de vida deja 1; con la vida llena resta 4; el Bloqueo no cuesta", () => {
+    const env = setup([{ id: "kick", rank: 1 }, { id: "block", rank: 1 }]);
+    env.c.fx = { ...env.c.fx, abilityHpCost: 4 };
+    feed(env, { abilities: 2 });
+    expect(env.c.hp).toBe(env.c.maxHp);
+    feed(env, { abilities: 0 });
+    env.c.hp = 3;
+    expect(feed(env, { abilities: 1 }).a.started).toBe("kick");
+    expect(env.c.hp).toBe(1);
+    const env2 = setup([{ id: "kick", rank: 1 }]);
+    env2.c.fx = { ...env2.c.fx, abilityHpCost: 4 };
+    feed(env2, { abilities: 1 });
+    expect(env2.c.hp).toBe(env2.c.maxHp - 4);
   });
 });

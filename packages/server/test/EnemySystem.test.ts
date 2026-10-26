@@ -983,3 +983,40 @@ describe("élites", () => {
     expect(lose.xp).toBe(ENEMY_DEFS.mage.xp * ELITE.xpMult);
   });
 });
+
+describe("elemento de los golpes (resistencias del jugador)", () => {
+  it("la zona del pirómano da element fire y el rayo del tormentoso lightning, aunque no sean élites; sin estado", () => {
+    const zone = setup("pyromancer", 20, 30);
+    zone.e.spellTier = 1;
+    const zh = run(zone.sys, [P("a", 29, 30)], 90).filter((h) => h.damage > 0);
+    expect(zh).toHaveLength(1);
+    expect(zh[0]).toMatchObject({ element: "fire" });
+    expect(zh[0]).not.toHaveProperty("nature");
+
+    const beam = setup("stormcaller", 18, 30);
+    beam.e.spellTier = 2;
+    const bh = run(beam.sys, [P("a", 22, 30)], 90).filter((h) => h.damage > 0);
+    expect(bh[0]).toMatchObject({ element: "lightning" });
+    expect(bh[0]).not.toHaveProperty("nature");
+  });
+
+  it("un élite marca su naturaleza como elemento (también en su melee); un normal en melee no trae elemento", () => {
+    const sys = new EnemySystem(arena(), createRng(3));
+    sys.spawnAt("minion", 20, 30, 1, { nature: "ice" });
+    expect(run(sys, [P("a", 20.9, 30)], 60)[0]).toMatchObject({ nature: "ice", element: "ice" });
+    const plain = new EnemySystem(arena(), createRng(3));
+    plain.spawnAt("minion", 20, 30, 1);
+    expect(run(plain, [P("a", 20.9, 30)], 60)[0]).not.toHaveProperty("element");
+  });
+
+  it("slow ralentiza (el mayor de cada valor) y no afecta a un muerto", () => {
+    const { sys, e } = setup("minion", 20, 30);
+    sys.slow(e.id, 0.4, 1);
+    sys.slow(e.id, 0.2, 2);
+    expect(e.slow).toEqual({ left: 2, frac: 0.4 });
+    sys.damage(e.id, 9999);
+    e.slow = null;
+    sys.slow(e.id, 0.4, 1);
+    expect(e.slow).toBeNull();
+  });
+});

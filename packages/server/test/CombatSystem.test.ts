@@ -8,6 +8,7 @@ import {
   STARTING_WEAPON,
   BASE_REGEN,
   createRng,
+  combinedMods,
   newProgress,
   playerMods,
   strikeDamage,
@@ -757,5 +758,160 @@ describe("estados que dejan los élites", () => {
     inv.invulnFor = 1;
     queue(cs, inv, "ice");
     expect(inv.slowLeft).toBe(0);
+  });
+});
+
+describe("resistencias, Última resistencia, reflejo y vampiro", () => {
+  const withFx = (legendaries: string[] = [], over: Record<string, unknown> = {}) => {
+    const c = newCombatState("warrior", 1);
+    c.fx = { vampire: 0, abilityHpCost: 0, noRegen: false, legendaries: legendaries as never, ...over };
+    return c;
+  };
+  const hit = (over = {}) => ({ targetKey: "a", damage: 14, sourceId: "e1", sourceX: 0, sourceZ: 5, ...over });
+  const tickN = (cs: CombatSystem, c: CombatState, n: number, from = 100) => {
+    for (let i = 0; i < n; i++) cs.step(new Map([["a", c]]), from + i, SIM_DT, new Map([["a", kin()]]));
+  };
+
+  it("resistencia al fuego 0,5 contra una zona de pirómano de 14 hace 7", () => {
+    const cs = new CombatSystem();
+    const c = withFx();
+    c.mods = { ...c.mods, resist: { fire: 0.5, ice: 0, lightning: 0 } };
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ element: "fire" })], 10);
+    const r = cs.step(new Map([["a", c]]), 10 + 30, SIM_DT, new Map([["a", kin()]]));
+    expect(r.damaged[0]!.amount).toBeCloseTo(7, 9);
+    // Otro elemento no se resiste.
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ element: "ice" })], 50);
+    expect(cs.step(new Map([["a", c]]), 90, SIM_DT, new Map([["a", kin()]])).damaged[0]!.amount).toBeCloseTo(14, 9);
+  });
+
+  it("élite de hielo con resistencia al hielo 0,5: ralentización de 1 s; la quemadura usa la resistencia al fuego", () => {
+    const cs = new CombatSystem();
+    const c = withFx();
+    c.mods = { ...c.mods, resist: { fire: 0.5, ice: 0.5, lightning: 0 } };
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 5, nature: "ice", element: "ice" })], 10);
+    cs.step(new Map([["a", c]]), 40, SIM_DT, new Map([["a", kin()]]));
+    expect(c.slowLeft).toBeCloseTo(1, 9);
+
+    const f = withFx();
+    f.mods = { ...f.mods, resist: { fire: 0.5, ice: 0, lightning: 0 } };
+    f.burnLeft = 3;
+    f.burnDps = 8;
+    f.hp = 50;
+    tickN(cs, f, 1);
+    // 8 dps × 0,5 × 1/30 s, más la regeneración base del tick.
+    expect(50 - f.hp).toBeCloseTo((8 * 0.5) / 30 - BASE_REGEN / 30, 9);
+  });
+
+  it("lastStand: un golpe que deja al 25 % escuda 3 s (x0,2); no se reactiva antes de 30 s", () => {
+    const cs = new CombatSystem();
+    const c = withFx(["lastStand"]);
+    c.hp = 100;
+    const states = new Map([["a", c]]);
+    const strike = (tick: number, damage: number) => {
+      cs.queueEnemyHits(states, [hit({ damage })], tick);
+      return cs.step(states, tick + 30, SIM_DT, new Map([["a", kin()]])).damaged[0]?.amount ?? 0;
+    };
+    expect(strike(10, 70)).toBeCloseTo(70, 9);
+    expect(c.hp / c.maxHp).toBeLessThan(0.3);
+    expect(c.lastStandLeft).toBe(3);
+    expect(c.lastStandCd).toBe(30);
+    expect(strike(50, 10)).toBeCloseTo(2, 9);
+    // A los 3 s termina.
+    c.hp = 100;
+    tickN(cs, c, 90);
+    expect(c.lastStandLeft).toBe(0);
+    expect(strike(500, 10)).toBeCloseTo(10, 9);
+    // Bajar de 30 % otra vez dentro del enfriamiento no lo reactiva.
+    c.hp = 20;
+    expect(strike(600, 5)).toBeCloseTo(5, 9);
+    expect(c.lastStandLeft).toBe(0);
+    // Pasados los 30 s (ya van ~4) vuelve a poder activarse.
+    tickN(cs, c, 30 * 30);
+    c.hp = 100;
+    strike(2000, 80);
+    expect(c.lastStandLeft).toBe(3);
+  });
+
+  it("lastStand sin la legendaria no hace nada", () => {
+    const cs = new CombatSystem();
+    const c = withFx();
+    c.hp = 100;
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 90 })], 10);
+    cs.step(new Map([["a", c]]), 40, SIM_DT, new Map([["a", kin()]]));
+    expect(c.lastStandLeft).toBe(0);
+  });
+
+  it("blockReflect: bloqueando un golpe frontal de 20 con Bloqueo 1, el enemigo pierde el 30 % de lo evitado", () => {
+    const { sys, e } = world(0, 5, 100);
+    const cs = new CombatSystem();
+    const c = withFx(["blockReflect"]);
+    c.abilities = [{ id: "block", rank: 1 }];
+    c.blocking = true;
+    const states = new Map([["a", c]]);
+    cs.queueEnemyHits(states, [hit({ damage: 20, sourceId: e.id, sourceZ: 5 })], 100);
+    const r = cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 }), 101, sys, new PositionHistory());
+    expect(r.damage).toBeCloseTo(6, 9);
+    const out = cs.flushReflects(c, sys, "a");
+    // evitado 14 × 0,3 = 4,2 → 4
+    expect(out.hits).toEqual([expect.objectContaining({ enemyId: e.id, amount: 4, killed: false })]);
+    expect(e.hp).toBe(96);
+    expect(cs.flushReflects(c, sys, "a").hits).toEqual([]);
+  });
+
+  it("blockReflect: si el reflejo mata, hay muerte con botín; sin bloquear de frente o sin la legendaria, nada", () => {
+    const { sys, e } = world(0, 5, 3);
+    const cs = new CombatSystem();
+    const c = withFx(["blockReflect"]);
+    c.abilities = [{ id: "block", rank: 1 }];
+    c.blocking = true;
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 20, sourceId: e.id, sourceZ: 5 })], 100);
+    cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 }), 101, sys, new PositionHistory());
+    expect(cs.flushReflects(c, sys, "a").kills).toHaveLength(1);
+
+    // Por la espalda
+    const w = world(0, -5, 100);
+    const c2 = withFx(["blockReflect"]);
+    c2.abilities = [{ id: "block", rank: 1 }];
+    c2.blocking = true;
+    cs.queueEnemyHits(new Map([["a", c2]]), [hit({ damage: 20, sourceId: w.e.id, sourceZ: -5 })], 100);
+    cs.onInputProcessed(c2, kin(), input({ attack: false, viewTick: 100 }), 101, w.sys, new PositionHistory());
+    expect(c2.pendingReflects).toEqual([]);
+    // Sin legendaria
+    const c3 = withFx();
+    c3.abilities = [{ id: "block", rank: 1 }];
+    c3.blocking = true;
+    cs.queueEnemyHits(new Map([["a", c3]]), [hit({ damage: 20, sourceId: w.e.id, sourceZ: 5 })], 100);
+    cs.onInputProcessed(c3, kin(), input({ attack: false, viewTick: 100 }), 101, w.sys, new PositionHistory());
+    expect(c3.pendingReflects).toEqual([]);
+  });
+
+  it("vampiro: un golpe de 20 cura 1 (golpe del combo); sin vampiro no cura", () => {
+    const { sys } = world(0, 1, 9999);
+    const cs = new CombatSystem();
+    const c = withFx([], { vampire: 0.05 });
+    c.hp = 50;
+    const { impact } = swingToImpact(cs, c, sys, new PositionHistory());
+    const dealt = impact!.hits[0]!.amount;
+    expect(c.hp).toBeCloseTo(50 + dealt * 0.05, 9);
+    cs.vampireHeal(c, 20);
+    expect(c.hp).toBeCloseTo(50 + dealt * 0.05 + 1, 9);
+  });
+
+  it("noRegen anula la regeneración base y la de las cartas", () => {
+    const cs = new CombatSystem();
+    const c = withFx([], { noRegen: true });
+    c.mods = { ...c.mods, regen: 3 };
+    c.hp = 50;
+    tickN(cs, c, 30);
+    expect(c.hp).toBe(50);
+  });
+
+  it("setMods copia vampiro, costo de vida, sin regen y legendarias de combinedMods", () => {
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    cs.setMods(c, combinedMods(newProgress(), {}, "vampireFang"));
+    expect(c.fx).toMatchObject({ vampire: 0.05, noRegen: true, legendaries: [] });
+    cs.setMods(c, combinedMods(newProgress(), {}, "brokenHourglass"));
+    expect(c.fx).toMatchObject({ vampire: 0, abilityHpCost: 4, noRegen: false });
   });
 });

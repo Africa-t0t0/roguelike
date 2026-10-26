@@ -24,6 +24,7 @@ import {
   xpToNext,
   type AbilityId,
   type ClassId,
+  type CombinedMods,
   type ComboTimers,
   type EnemyLoadout,
   type KinematicState,
@@ -46,6 +47,10 @@ export interface PendingHit {
   nature?: Nature;
   /** daño por segundo de la quemadura que deja un golpe de fuego */
   burnDps?: number;
+  /** elemento del golpe: la resistencia del jugador a ese elemento reduce su daño y la duración del estado */
+  element?: Exclude<Nature, "none">;
+  /** enemigo que lo lanzó, para el reflejo del Bloqueo */
+  sourceId?: string;
 }
 
 /** Animación de una habilidad activa en curso; avanza por input procesado, como el combo. */
@@ -64,6 +69,19 @@ export interface AbilityAnim {
   originZ: number;
 }
 
+/** Efectos de equipo y reliquia que no son multiplicadores (`CombinedMods` sin `PlayerMods`); `setMods` los copia. */
+export type GearEffects = Pick<CombinedMods, "vampire" | "abilityHpCost" | "noRegen" | "legendaries">;
+
+export const NO_GEAR_EFFECTS: GearEffects = { vampire: 0, abilityHpCost: 0, noRegen: false, legendaries: [] };
+
+/** Duración del escudo de Última resistencia, su enfriamiento, el umbral de vida que lo activa y su factor de daño. */
+const LAST_STAND_S = 3;
+const LAST_STAND_CD_S = 30;
+const LAST_STAND_HP_FRAC = 0.3;
+const LAST_STAND_DAMAGE_MULT = 0.2;
+/** Fracción del daño evitado por el Bloqueo que devuelve `blockReflect`. */
+const BLOCK_REFLECT_FRAC = 0.3;
+
 /** El combo (ComboTimers) avanza por input procesado; respawnIn, invulnFor y los plazos, por tick. */
 export interface CombatState extends ComboTimers {
   cls: ClassId;
@@ -80,10 +98,19 @@ export interface CombatState extends ComboTimers {
   pendingHits: PendingHit[];
   /** multiplicadores de sus cartas de stat; se recalculan con setMods al aplicar una carta */
   mods: PlayerMods;
+  /** vampiro, costo de vida por habilidad, sin regeneración y efectos legendarios (de `combinedMods`) */
+  fx: GearEffects;
+  /** segundos que le quedan al escudo de Última resistencia y a su enfriamiento; cuentan por tick simulado */
+  lastStandLeft: number;
+  lastStandCd: number;
+  /** daño que el Bloqueo devuelve a quien lo golpeó, a la espera de que RunRoom lo aplique (`flushReflects`) */
+  pendingReflects: { sourceId: string; amount: number }[];
   /** habilidades aprendidas con su rango, en orden de aprendizaje (copia de `progress.abilities`) */
   abilities: { id: AbilityId; rank: number }[];
   /** enfriamiento restante (s) de cada habilidad; cuenta por tick simulado */
   abilityCd: Partial<Record<AbilityId, number>>;
+  /** cargas que le quedan a cada habilidad con cargas mientras su enfriamiento corre (con el enfriamiento en 0 están todas) */
+  abilityCharges: Partial<Record<AbilityId, number>>;
   abilityAnim: AbilityAnim | null;
   /** máscara de teclas de habilidad del último input procesado (para detectar flancos) */
   heldMask: number;
@@ -118,12 +145,12 @@ export function moveSpeedMult(c: CombatState): number {
 }
 
 /** Aplica un estado con los números de `ELITE` (la quemadura, con `burnDps` si se da). */
-export function applyStatus(c: CombatState, kind: PlayerStatus, burnDps: number = ELITE.playerBurnDps): void {
+export function applyStatus(c: CombatState, kind: PlayerStatus, burnDps: number = ELITE.playerBurnDps, durationMult = 1): void {
   if (kind === "burn") {
-    c.burnLeft = ELITE.playerBurnS;
+    c.burnLeft = ELITE.playerBurnS * durationMult;
     c.burnDps = burnDps;
-  } else if (kind === "slow") c.slowLeft = ELITE.playerSlowS;
-  else c.stunLeft = ELITE.playerStunS;
+  } else if (kind === "slow") c.slowLeft = ELITE.playerSlowS * durationMult;
+  else c.stunLeft = ELITE.playerStunS * durationMult;
 }
 
 /** Tick al que se rebobina un impacto: el que veía el cliente, acotado a REWIND_MAX_TICKS. */
@@ -157,8 +184,13 @@ export function newCombatState(
     ...newComboTimers(),
     pendingHits: [],
     mods: playerMods(newProgress()),
+    fx: NO_GEAR_EFFECTS,
+    lastStandLeft: 0,
+    lastStandCd: 0,
+    pendingReflects: [],
     abilities: [],
     abilityCd: {},
+    abilityCharges: {},
     abilityAnim: null,
     heldMask: 0,
     blocking: false,
@@ -257,6 +289,7 @@ export class CombatSystem {
     );
     const origin = { x: k.x, z: k.z, facing: c.swingFacing };
     const result: ImpactResult = { step, hits: [], kills: [] };
+    let dealt = 0;
 
     // Se copia la lista: strike() puede cambiar el estado interno.
     for (const e of [...enemies.enemies]) {
@@ -268,10 +301,12 @@ export class CombatSystem {
       enemies.strike(e.id, amount, src).forEach((r, i) => {
         result.hits.push({ enemyId: r.enemyId, amount: r.amount, killed: r.killed, x: i === 0 ? e.x : r.x, z: i === 0 ? e.z : r.z });
         if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop, gear: r.gear, relic: r.relic });
+        dealt += r.amount;
       });
     }
     // Sed de sangre: cada kill propio cura.
     this.heal(c, c.mods.lifeOnKill * result.kills.length);
+    this.vampireHeal(c, dealt);
     return result;
   }
 
@@ -282,7 +317,7 @@ export class CombatSystem {
       // Piel de hierro: se aplica al encolar, sin redondear (la vida es decimal).
       c.pendingHits.push({
         damage: h.damage * c.mods.damageTakenMult, resolveTick: nowTick, sourceX: h.sourceX, sourceZ: h.sourceZ,
-        nature: h.nature, burnDps: h.burnDps,
+        nature: h.nature, burnDps: h.burnDps, element: h.element, sourceId: h.sourceId,
       });
     }
   }
@@ -304,6 +339,8 @@ export class CombatSystem {
 
     for (const [key, c] of states) {
       c.invulnFor = Math.max(0, c.invulnFor - dt);
+      c.lastStandLeft = Math.max(0, c.lastStandLeft - dt);
+      c.lastStandCd = Math.max(0, c.lastStandCd - dt);
 
       if (c.dead) {
         c.respawnIn -= dt;
@@ -317,7 +354,7 @@ export class CombatSystem {
         continue;
       }
 
-      this.heal(c, (BASE_REGEN + c.mods.regen) * dt);
+      if (!c.fx.noRegen) this.heal(c, (BASE_REGEN + c.mods.regen) * dt);
       const burned = this.tickStatus(c, dt);
 
       if (c.invulnFor > 0) {
@@ -326,12 +363,13 @@ export class CombatSystem {
       }
       // La quemadura mata con la misma muerte que un golpe.
       if (burned > 0) {
-        c.hp = Math.max(0, c.hp - burned);
+        c.hp = Math.max(0, c.hp - burned * (c.lastStandLeft > 0 ? LAST_STAND_DAMAGE_MULT : 1));
         if (c.hp === 0) {
           this.die(c);
           died.push(key);
           continue;
         }
+        this.checkLastStand(c);
       }
       // Sin un input que lo resuelva antes (jugador callado o con mucho lag), se aplica al vencer el plazo.
       const r = this.applyDue(c, kin.get(key), (h) => nowTick >= h.resolveTick + REWIND_MAX_TICKS);
@@ -343,7 +381,8 @@ export class CombatSystem {
 
   /** Avanza los estados un tick y devuelve el daño de la quemadura de ese tick (sin tocar la vida). */
   private tickStatus(c: CombatState, dt: number): number {
-    const burn = c.burnLeft > 0 ? c.burnDps * Math.min(dt, c.burnLeft) : 0;
+    // La quemadura por tick usa la resistencia al fuego.
+    const burn = c.burnLeft > 0 ? c.burnDps * (1 - c.mods.resist.fire) * Math.min(dt, c.burnLeft) : 0;
     c.burnLeft = c.burnLeft - dt > EPS ? c.burnLeft - dt : 0;
     c.slowLeft = c.slowLeft - dt > EPS ? c.slowLeft - dt : 0;
     c.stunLeft = c.stunLeft - dt > EPS ? c.stunLeft - dt : 0;
@@ -354,10 +393,53 @@ export class CombatSystem {
    * Cambia los multiplicadores de sus cartas y equipo. La vida máxima pasa a ser `maxHpFor`;
    * la vida no sube con ella (la cura de Vitalidad la da `heal`) y se recorta si la máxima baja.
    */
-  setMods(c: CombatState, mods: PlayerMods): void {
+  setMods(c: CombatState, mods: PlayerMods & Partial<GearEffects>): void {
     c.mods = mods;
+    c.fx = {
+      vampire: mods.vampire ?? 0, abilityHpCost: mods.abilityHpCost ?? 0, noRegen: mods.noRegen ?? false,
+      legendaries: mods.legendaries ?? [],
+    };
     c.maxHp = maxHpFor(c.cls, this.level, mods);
     c.hp = Math.min(c.hp, c.maxHp);
+  }
+
+  /** Colmillo del vampiro: cura la fracción `fx.vampire` del daño que hizo el jugador. */
+  vampireHeal(c: CombatState, dealt: number): void {
+    if (c.fx.vampire > 0) this.heal(c, dealt * c.fx.vampire);
+  }
+
+  /**
+   * Última resistencia: al bajar de 30 % de vida (viva) y sin enfriamiento, escuda `LAST_STAND_S` s y entra en
+   * enfriamiento `LAST_STAND_CD_S` s.
+   */
+  private checkLastStand(c: CombatState): void {
+    if (c.dead || c.lastStandCd > 0 || !c.fx.legendaries.includes("lastStand")) return;
+    if (c.hp >= c.maxHp * LAST_STAND_HP_FRAC) return;
+    c.lastStandLeft = LAST_STAND_S;
+    c.lastStandCd = LAST_STAND_CD_S;
+  }
+
+  /**
+   * Aplica el reflejo del Bloqueo pendiente: cada enemigo vivo que golpeó contra el escudo recibe el daño como
+   * golpe del jugador `key` (sin naturaleza). RunRoom la llama tras `onInputProcessed` y `step` y reparte
+   * con `impact(key, …)` los números de daño y las muertes (orbes).
+   */
+  flushReflects(c: CombatState, enemies: EnemySystem, key: string): Pick<ImpactResult, "hits" | "kills"> {
+    const out: Pick<ImpactResult, "hits" | "kills"> = { hits: [], kills: [] };
+    const pending = c.pendingReflects.splice(0);
+    let dealt = 0;
+    for (const p of pending) {
+      const e = enemies.enemies.find((x) => x.id === p.sourceId);
+      if (!e || e.ai === "dead" || e.hp <= 0) continue;
+      const amount = Math.max(1, Math.round(p.amount));
+      const [r] = enemies.strike(e.id, amount, { key, nature: "none", affinity: 0 });
+      out.hits.push({ enemyId: r!.enemyId, amount: r!.amount, killed: r!.killed, x: e.x, z: e.z });
+      if (r!.killed) out.kills.push({ x: r!.x, z: r!.z, xp: r!.xp, drop: r!.drop, gear: r!.gear, relic: r!.relic });
+      dealt += r!.amount;
+    }
+    this.heal(c, c.mods.lifeOnKill * out.kills.length);
+    this.vampireHeal(c, dealt);
+    return out;
   }
 
   /** Cura `amount` hasta la vida máxima; a los muertos no. */
@@ -386,11 +468,18 @@ export class CombatSystem {
       const front =
         reduction > 0 &&
         inArc({ x: k!.x, z: k!.z, facing: k!.facing }, { x: h.sourceX, z: h.sourceZ, radius: 0 }, Infinity, 2 * BLOCK_HALF_ARC_DEG);
-      const dealt = front ? h.damage * (1 - reduction) : h.damage;
+      // Resistencia al elemento del golpe; después el Bloqueo y la Última resistencia.
+      const resisted = h.damage * (h.element ? 1 - c.mods.resist[h.element] : 1);
+      const blocked = front ? resisted * (1 - reduction) : resisted;
+      if (front && h.sourceId && c.fx.legendaries.includes("blockReflect")) {
+        c.pendingReflects.push({ sourceId: h.sourceId, amount: (resisted - blocked) * BLOCK_REFLECT_FRAC });
+      }
+      const dealt = c.lastStandLeft > 0 ? blocked * LAST_STAND_DAMAGE_MULT : blocked;
       damage += dealt;
-      // El estado de un élite solo queda si el golpe hizo daño (con Invulnerable o god no hay).
+      // El estado de un élite solo queda si el golpe hizo daño (con Invulnerable o god no hay); la resistencia acorta su duración.
       if (dealt > 0 && h.nature && h.nature !== "none") {
-        applyStatus(c, h.nature === "fire" ? "burn" : h.nature === "ice" ? "slow" : "stun", h.burnDps);
+        const durationMult = h.element ? 1 - c.mods.resist[h.element] : 1;
+        applyStatus(c, h.nature === "fire" ? "burn" : h.nature === "ice" ? "slow" : "stun", h.burnDps, durationMult);
         // Piel de hierro también atenúa la quemadura.
         if (h.nature === "fire") c.burnDps *= c.mods.damageTakenMult;
       }
@@ -398,7 +487,10 @@ export class CombatSystem {
     c.pendingHits = keep;
     if (damage === 0) return { damage: 0, died: false };
     c.hp = Math.max(0, c.hp - damage);
-    if (c.hp > 0) return { damage, died: false };
+    if (c.hp > 0) {
+      this.checkLastStand(c);
+      return { damage, died: false };
+    }
     this.die(c);
     return { damage, died: true };
   }
@@ -411,6 +503,8 @@ export class CombatSystem {
     c.abilityAnim = null;
     c.blocking = false;
     c.burnLeft = c.slowLeft = c.stunLeft = 0;
+    c.lastStandLeft = 0;
+    c.pendingReflects = [];
   }
 
   grantXp(states: Map<string, CombatState>, xp: number): number[] {

@@ -458,11 +458,14 @@ export class RunRoom extends Room<{ state: RunState }> {
           this.abilities.onComboImpact(c, record.kinematic, res.impact.step, record.key);
         }
         if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
+        this.impact(record.key, this.combat.flushReflects(c, this.enemySystem, record.key));
         // Habilidades después del combo y antes del ataque (que no se puede durante su animación).
         const ab = this.abilities.onInput(
           c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party, record.key,
         );
         if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started });
+        // Impulso del Tajo frontal: el servidor mueve al jugador; el cliente se corrige con la reconciliación.
+        if (ab.dash) record.kinematic = { ...record.kinematic, x: ab.dash.x, z: ab.dash.z };
         this.impact(record.key, ab);
         // Antes del ataque de este input: con un swing o una habilidad en curso no se cambia de arma.
         if (input.interact && !c.dead && c.swingTimer === 0 && !c.abilityAnim) {
@@ -505,6 +508,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     const kin = new Map(connected.map((r) => [r.key, r.kinematic]));
     const { damaged, respawned } = this.combat.step(states, this.state.tick, SIM_DT, kin);
     for (const d of damaged) this.emitPlayerDamage(d.key, d.amount, kin.get(d.key)!);
+    for (const r of connected) this.impact(r.key, this.combat.flushReflects(r.combat, this.enemySystem, r.key));
     for (const key of respawned) {
       const r = connected.find((x) => x.key === key)!;
       r.kinematic = this.spawnFor(key);
@@ -518,7 +522,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.state.floorTime = this.floorTime;
     syncWorld(
       this.state, this.enemySystem.enemies, this.enemySystem.projectiles, this.combat, this.orbs.orbs,
-      this.abilities.playerShots, this.enemySystem.hazards,
+      this.abilities.playerShots, this.enemySystem.hazards, this.abilities.playerZones,
     );
   }
 
@@ -589,6 +593,9 @@ export class RunRoom extends Room<{ state: RunState }> {
   private burnTick(): void {
     const kills: ImpactResult["kills"] = [];
     for (const { key, result: r } of this.enemySystem.takeStatusDamage()) {
+      // Colmillo del vampiro: la quemadura cura a quien la puso.
+      const burner = this.registry.all().find((x) => x.key === key);
+      if (burner) this.combat.vampireHeal(burner.combat, r.amount);
       const acc = this.burnAcc.get(r.enemyId) ?? { key, amount: 0, since: this.state.tick, x: r.x, z: r.z };
       acc.amount += r.amount;
       acc.key = key;

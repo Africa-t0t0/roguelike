@@ -5,6 +5,7 @@ import {
   ENEMY_DEFS,
   KICK_ARC_DEG,
   KICK_IMPACT_AT,
+  PLAYER_RADIUS,
   MAX_ACTIVE_ABILITIES,
   MOVESETS,
   SIM_DT,
@@ -19,6 +20,7 @@ import {
   hasLineOfSight,
   inArc,
   isWalkableTile,
+  moveCircle,
   strikeDamage,
   type AbilityId,
   type Dungeon,
@@ -33,6 +35,11 @@ import type { PositionHistory } from "./PositionHistory";
 export interface AbilityResult {
   /** habilidad activa que empezó en este input */
   started?: AbilityId;
+  /**
+   * Impulso del Tajo frontal (`thrustDash`): dónde queda el jugador tras avanzar contra los muros. AbilitySystem no
+   * posee la cinemática (vive en el PlayerRecord): RunRoom la aplica a `record.kinematic` (x, z) tras cada input.
+   */
+  dash?: { x: number; z: number };
   hits: ImpactResult["hits"];
   kills: ImpactResult["kills"];
 }
@@ -62,7 +69,26 @@ export interface ShotResult {
   kills: ImpactResult["kills"];
 }
 
+/** Zona del jugador (grietas del Golpe sísmico): ralentiza a los enemigos dentro mientras dura. */
+export interface PlayerZone {
+  id: string;
+  x: number;
+  z: number;
+  radius: number;
+  left: number;
+  total: number;
+}
+
 const EPS = 1e-9;
+/** Grietas del Golpe sísmico (`slamCracks`): duración (s) y ralentización de los enemigos dentro. */
+const CRACKS_S = 3;
+const CRACKS_SLOW = 0.4;
+/** Impulso del Tajo frontal (`thrustDash`) en metros. */
+const DASH_M = 3;
+const WARCRY_LONG_MULT = 1.5;
+const WARCRY_HEAL_FRAC = 0.15;
+/** Torbellino con `whirlCharges`: cargas máximas. */
+const WHIRL_CHARGES = 2;
 const FULL_CIRCLE_DEG = 360;
 
 /** Resta `dt` y deja en 0 lo que quede por debajo de EPS (como el combo). */
@@ -94,6 +120,17 @@ export function abilitySlots(c: CombatState): { id: AbilityId; rank: number }[] 
   return c.abilities.filter((a) => ABILITIES[a.id].kind !== "passive").slice(0, MAX_ACTIVE_ABILITIES);
 }
 
+/** Cargas máximas de la habilidad: 2 el Torbellino con `whirlCharges`, 1 las demás. */
+export function abilityMaxCharges(c: CombatState, id: AbilityId): number {
+  return id === "whirlwind" && c.fx.legendaries.includes("whirlCharges") ? WHIRL_CHARGES : 1;
+}
+
+/** Cargas que tiene ahora: todas si su enfriamiento no corre; si corre, las guardadas. */
+export function abilityCharges(c: CombatState, id: AbilityId): number {
+  const max = abilityMaxCharges(c, id);
+  return (c.abilityCd[id] ?? 0) > 0 ? Math.min(max, c.abilityCharges[id] ?? 0) : max;
+}
+
 /** Segundos desde el inicio hasta cada impacto de esa habilidad, según su rango. */
 function impactTimes(id: AbilityId, rank: number): number[] {
   const def = ABILITIES[id];
@@ -121,6 +158,8 @@ function impactTimes(id: AbilityId, rank: number): number[] {
 export class AbilitySystem {
   private shots: PlayerShot[] = [];
   private nextShot = 1;
+  private zoneList: PlayerZone[] = [];
+  private nextZone = 1;
 
   constructor(
     private readonly dungeon: Dungeon,
@@ -129,6 +168,11 @@ export class AbilitySystem {
 
   get playerShots(): readonly PlayerShot[] {
     return this.shots;
+  }
+
+  /** Zonas del jugador activas (grietas del Golpe sísmico). */
+  get playerZones(): readonly PlayerZone[] {
+    return this.zoneList;
   }
 
   /**
@@ -175,9 +219,15 @@ export class AbilitySystem {
       if ((pressed & (1 << i)) === 0) continue;
       const { id, rank } = slots[i]!;
       const def = ABILITIES[id];
-      if (def.kind !== "active" || (c.abilityCd[id] ?? 0) > 0 || c.swingTimer > 0 || c.abilityAnim || c.stunLeft > 0) continue;
-      // Celeridad: el enfriamiento se fija al lanzarla.
-      c.abilityCd[id] = def.cooldownS * c.mods.cooldownMult;
+      if (def.kind !== "active" || abilityCharges(c, id) < 1 || c.swingTimer > 0 || c.abilityAnim || c.stunLeft > 0) continue;
+      // Celeridad: el enfriamiento se fija al lanzarla. Gasta 1 carga; si el enfriamiento no corría, empieza a recargar.
+      if ((c.abilityCd[id] ?? 0) > 0) c.abilityCharges[id] = abilityCharges(c, id) - 1;
+      else {
+        c.abilityCharges[id] = abilityMaxCharges(c, id) - 1;
+        c.abilityCd[id] = def.cooldownS * c.mods.cooldownMult;
+      }
+      // Reloj de arena roto: cada habilidad cuesta vida, sin bajar de 1 (ni curar a quien ya tiene menos).
+      if (c.fx.abilityHpCost > 0) c.hp = Math.min(c.hp, Math.max(1, c.hp - c.fx.abilityHpCost));
       c.abilityAnim = {
         id, rank, left: def.animS, impacts: impactTimes(id, rank), facing: input.facing, originX: k.x, originZ: k.z,
       };
@@ -214,16 +264,39 @@ export class AbilitySystem {
     });
   }
 
-  /** Una vez por tick (solo fuera de la pausa): enfriamientos, Grito y ondas. */
+  /** Una vez por tick (solo fuera de la pausa): enfriamientos y cargas, Grito, grietas y ondas. */
   step(states: ReadonlyMap<string, CombatState>, enemies: EnemySystem, dt: number): ShotResult[] {
     for (const c of states.values()) {
-      for (const id of Object.keys(c.abilityCd) as AbilityId[]) c.abilityCd[id] = countDown(c.abilityCd[id]!, dt);
+      for (const id of Object.keys(c.abilityCd) as AbilityId[]) {
+        const before = c.abilityCd[id]!;
+        c.abilityCd[id] = countDown(before, dt);
+        if (before <= 0 || c.abilityCd[id]! > 0) continue;
+        // Terminó un ciclo: vuelve 1 carga y, si faltan más, empieza otro ciclo.
+        const charges = Math.min(abilityMaxCharges(c, id), (c.abilityCharges[id] ?? 0) + 1);
+        c.abilityCharges[id] = charges;
+        if (charges < abilityMaxCharges(c, id)) c.abilityCd[id] = ABILITIES[id].cooldownS * c.mods.cooldownMult;
+      }
       if (c.buffLeft > 0) {
         c.buffLeft = countDown(c.buffLeft, dt);
         if (c.buffLeft === 0) c.buffDamage = 0;
       }
     }
+    this.stepZones(enemies, dt);
     return this.stepShots(enemies, dt);
+  }
+
+  /** Las grietas ralentizan cada tick a los enemigos dentro (la ralentización se renueva) y se acaban a los 3 s. */
+  private stepZones(enemies: EnemySystem, dt: number): void {
+    for (const z of this.zoneList) {
+      for (const e of enemies.enemies) {
+        if (e.ai === "dead" || e.hp <= 0) continue;
+        if (!circlesOverlap(z, { x: e.x, z: e.z, radius: ENEMY_DEFS[e.kind].radius })) continue;
+        // 2 ticks de margen: el enemigo resta `dt` a su ralentización antes de moverse en el siguiente tick.
+        enemies.slow(e.id, CRACKS_SLOW, dt * 2);
+      }
+      z.left = countDown(z.left, dt);
+    }
+    this.zoneList = this.zoneList.filter((z) => z.left > 0);
   }
 
   private stepShots(enemies: EnemySystem, dt: number): ShotResult[] {
@@ -251,6 +324,7 @@ export class AbilitySystem {
             // Sed de sangre también con las kills de la onda.
             this.combat.heal(s.owner, s.owner.mods.lifeOnKill);
           }
+          this.combat.vampireHeal(s.owner, d.amount);
         });
       }
       if (s.life > EPS) keep.push(s);
@@ -265,12 +339,19 @@ export class AbilitySystem {
     return Math.round(base * mult * c.mods.damageMult * (1 + c.buffDamage));
   }
 
-  /** El Grito llega al que grita y a los compañeros vivos del grupo; si ya tienen uno, se queda el mayor. */
+  /**
+   * El Grito llega al que grita y a los compañeros vivos del grupo; si ya tienen uno, se queda el mayor.
+   * `warcryLong` alarga el bono ×1,5 y `warcryHeal` cura el 15 % de la vida máxima a cada alcanzado.
+   */
   private warcry(c: CombatState, party: CombatState[], buff: number): void {
+    const duration = WARCRY_DURATION_S * (c.fx.legendaries.includes("warcryLong") ? WARCRY_LONG_MULT : 1);
+    const heals = c.fx.legendaries.includes("warcryHeal");
     for (const p of new Set([c, ...party])) {
-      if (p.dead || buff < p.buffDamage) continue;
+      if (p.dead) continue;
+      if (heals) this.combat.heal(p, p.maxHp * WARCRY_HEAL_FRAC);
+      if (buff < p.buffDamage) continue;
       p.buffDamage = buff;
-      p.buffLeft = WARCRY_DURATION_S;
+      p.buffLeft = duration;
     }
   }
 
@@ -294,6 +375,7 @@ export class AbilitySystem {
     const arcDeg = id === "kick" ? KICK_ARC_DEG : FULL_CIRCLE_DEG;
     const amount = this.abilityDamage(c, r.damageMult ?? 0);
     let kills = 0;
+    let dealt = 0;
 
     // Se copia la lista: damage() puede cambiar el estado interno.
     for (const e of [...enemies.enemies]) {
@@ -309,6 +391,7 @@ export class AbilitySystem {
       const src = { key, nature: c.weaponNature, affinity: c.mods.affinity };
       const results = enemies.strike(e.id, amount, src);
       results.forEach((d, i) => {
+        dealt += d.amount;
         res.hits.push({ enemyId: d.enemyId, amount: d.amount, killed: d.killed, x: i === 0 ? e.x : d.x, z: i === 0 ? e.z : d.z });
         if (d.killed) {
           res.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop, gear: d.gear, relic: d.relic });
@@ -323,10 +406,18 @@ export class AbilitySystem {
         const dz = pos.z - k.z;
         const far = Math.hypot(dx, dz) > EPS;
         enemies.knockback(e.id, far ? dx : Math.sin(facing), far ? dz : Math.cos(facing), r.knockback!);
-        enemies.stun(e.id, r.stunS!);
+        enemies.stun(e.id, r.stunS! * (c.fx.legendaries.includes("kickStun") ? 2 : 1));
       }
     }
     // Sed de sangre: cada kill propio cura.
     this.combat.heal(c, c.mods.lifeOnKill * kills);
+    this.combat.vampireHeal(c, dealt);
+
+    if (id === "slam" && c.fx.legendaries.includes("slamCracks")) {
+      this.zoneList.push({ id: `z${this.nextZone++}`, x: k.x, z: k.z, radius: r.radius!, left: CRACKS_S, total: CRACKS_S });
+    }
+    if (id === "thrust" && c.fx.legendaries.includes("thrustDash")) {
+      res.dash = moveCircle(this.dungeon, k.x, k.z, Math.sin(facing) * DASH_M, Math.cos(facing) * DASH_M, PLAYER_RADIUS);
+    }
   }
 }

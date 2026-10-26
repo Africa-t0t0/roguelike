@@ -1356,6 +1356,78 @@ describe("RunRoom: habilidades", () => {
     expect(synced.abilities[1]).toMatchObject({ id: "block", rank: 2, cooldown: 0 });
   });
 
+  const legendaryBoots = (legendary: "thrustDash" | "slamCracks"): GearItem => ({
+    slot: "boots", tier: 4, stats: [{ stat: "moveSpeed", value: 0.1 }], legendary,
+  });
+
+  it("thrustDash: el servidor adelanta al jugador 3 m en el impacto del Tajo frontal", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    startRun();
+    const { d, cr } = combatRoom();
+    const spot = roomSpawnPoints(d, cr.id, 1)[0]!;
+    teleport("ana", spot);
+    grant("ana", { kind: "ability", id: "thrust", rank: 1 });
+    record("ana").gear.boots = legendaryBoots("thrustDash");
+    room["refreshMods"](record("ana"));
+    const before = { ...record("ana").kinematic };
+    ana.client.send(MSG.input, keyInput(1, 1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 10);
+    // El impacto llega a los 0,45 × 0,7 s; los inputs vacíos hacen avanzar la animación.
+    for (let seq = 2; seq <= 14; seq++) ana.client.send(MSG.input, keyInput(seq, 0));
+    await ticksUntil(() => player("ana").lastSeq === 14, 20);
+    const after = record("ana").kinematic;
+    const moved = Math.hypot(after.x - before.x, after.z - before.z);
+    // Contra un muro puede quedarse corto, nunca pasar de 3 m.
+    expect(moved).toBeGreaterThan(0.01);
+    expect(moved).toBeLessThanOrEqual(3 + 1e-6);
+  });
+
+  it("charges y playerZones se sincronizan; las zonas y el escudo de Última resistencia no avanzan en la pausa", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    startRun();
+    grant("ana", { kind: "ability", id: "whirlwind", rank: 1 });
+    grant("ana", { kind: "ability", id: "kick", rank: 1 });
+    const c = record("ana").combat;
+    await ticksUntil(() => player("ana").abilities.length === 2, 10);
+    expect(player("ana").abilities[0]!.charges).toBe(1);
+    c.fx = { ...c.fx, legendaries: ["whirlCharges", "lastStand"] };
+    await ticksUntil(() => player("ana").abilities[0]!.charges === 2, 10);
+    expect(player("ana").abilities[1]!.charges).toBe(1);
+
+    room["abilities"]["zoneList"].push({ id: "z1", x: 5, z: 6, radius: 3.5, left: 2, total: 3 });
+    c.lastStandLeft = 2;
+    c.lastStandCd = 20;
+    await ticksUntil(() => room.state.playerZones.size === 1, 10);
+    const z = room.state.playerZones.get("z1")!;
+    expect(z).toMatchObject({ x: 5, z: 6, radius: 3.5, total: 3 });
+
+    room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
+    await ticksUntil(() => room.state.paused, 5);
+    const [zl, ls, cd] = [room["abilities"]["zoneList"][0]!.left, c.lastStandLeft, c.lastStandCd];
+    for (let i = 0; i < 20; i++) await room.waitForNextTimestep();
+    expect(room.state.paused).toBe(true);
+    expect(room["abilities"]["zoneList"][0]!.left).toBe(zl);
+    expect([c.lastStandLeft, c.lastStandCd]).toEqual([ls, cd]);
+    expect(room.state.playerZones.get("z1")!.left).toBe(zl);
+  });
+
+  it("vampiro: la quemadura cura a quien la puso (no a los demás)", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const beto = await join("Beto", "t-beto");
+    await beto.welcome;
+    record("ana").combat.fx = { ...record("ana").combat.fx, vampire: 0.05 };
+    record("ana").combat.hp = 50;
+    record("beto").combat.hp = 50;
+    const result = { enemyId: "e1", amount: 20, killed: false, xp: 0, x: 0, z: 0, drop: null, gear: null, relic: false };
+    vi.spyOn(room["enemySystem"], "takeStatusDamage").mockReturnValueOnce([{ key: "ana", result }]);
+    room["burnTick"]();
+    expect(record("ana").combat.hp).toBeCloseTo(51, 9);
+    expect(record("beto").combat.hp).toBe(50);
+  });
+
   it("los enfriamientos y el Grito no avanzan en la pausa", async () => {
     const ana = await join("Ana", "t-ana");
     await ana.welcome;
