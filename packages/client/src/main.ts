@@ -196,7 +196,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     for (const key of remotes.keys()) if (!players.has(key)) remotes.delete(key);
   });
 
-  conn.onFloorWeapons((items) => floorWeapons.set(items));
+  conn.onFloorWeapons((items) => floorWeapons.set(items, clock.now(performance.now())));
 
   conn.onWorld((world, receivedAt) => {
     // El parche que abre la pausa trae el último tick simulado: ese sí se interpola. Los siguientes, no.
@@ -307,7 +307,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
       const canPickUp = !(mine?.dead ?? true) && swing.swingTimer <= 0 && !heroAbility;
-      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp });
+      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp }, now);
     }
 
     const renderAt = now - INTERP_DELAY_MS;

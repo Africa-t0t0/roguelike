@@ -7,7 +7,7 @@ export function formatHp(hp: number, maxHp: number): string {
 
 /** "14/30 XP" (el nivel va aparte, en su insignia). */
 export function formatXp(xp: number, toNext: number): string {
-  return `${xp}/${toNext} XP`;
+  return `${Math.round(xp)}/${toNext} XP`; // la XP puede ser fraccionaria (Aprendizaje)
 }
 
 /** Nombre visible del arma con su tier: "Mandoble templado". */

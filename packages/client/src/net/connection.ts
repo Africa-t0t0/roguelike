@@ -1,5 +1,6 @@
 import { Client, type Room } from "@colyseus/sdk";
 import {
+  FLOOR_WEAPON_TTL_S,
   MSG,
   STAT_CARDS,
   PROTOCOL_VERSION,
@@ -111,21 +112,24 @@ export interface FloorWeapon {
   tier: WeaponTier;
   x: number;
   z: number;
+  /** segundos que le quedaban al llegar el mensaje (el cliente los baja con el reloj del juego) */
+  ttl: number;
 }
 
 /**
- * Valida el mensaje `floorWeapons` (`{ items: { weaponId, tier, x, z }[] }`); descarta lo que no encaje.
- * Sin `tier` vale 1; con un tier inválido el ítem se descarta.
+ * Valida el mensaje `floorWeapons` (`{ items: { weaponId, tier, x, z, ttl }[] }`); descarta lo que no encaje.
+ * Sin `tier` vale 1; con un tier inválido el ítem se descarta. Sin `ttl` (o inválido) vale FLOOR_WEAPON_TTL_S.
  */
 export function parseFloorWeapons(msg: unknown): FloorWeapon[] {
   const items = (msg as { items?: unknown } | null)?.items;
   if (!Array.isArray(items)) return [];
   const out: FloorWeapon[] = [];
-  for (const it of items as { weaponId?: unknown; tier?: unknown; x?: unknown; z?: unknown }[]) {
+  for (const it of items as { weaponId?: unknown; tier?: unknown; x?: unknown; z?: unknown; ttl?: unknown }[]) {
     if (!it || !isWeaponId(it.weaponId) || !Number.isFinite(it.x) || !Number.isFinite(it.z)) continue;
     const tier = it.tier === undefined ? 1 : it.tier;
     if (!isWeaponTier(tier)) continue;
-    out.push({ weaponId: it.weaponId, tier, x: it.x as number, z: it.z as number });
+    const ttl = typeof it.ttl === "number" && Number.isFinite(it.ttl) ? it.ttl : FLOOR_WEAPON_TTL_S;
+    out.push({ weaponId: it.weaponId, tier, x: it.x as number, z: it.z as number, ttl });
   }
   return out;
 }

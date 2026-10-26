@@ -53,6 +53,11 @@ describe("abilityBarModel", () => {
     expect(slots.map((s) => filled(s).glyph)).toEqual(["⟳", "↯", "✶", "◎"]);
   });
 
+  it("glifo del Tajo frontal", () => {
+    const slots = abilityBarModel([{ id: "thrust", rank: 1 }], () => 0, false);
+    expect(filled(slots[0]).glyph).toBe("➶");
+  });
+
   it("el barrido es la fracción de enfriamiento que queda", () => {
     const s = filled(abilityBarModel([{ id: "kick", rank: 1 }], () => 3, false)[0]);
     expect(s.sweep).toBeCloseTo(3 / ABILITIES.kick.cooldownS);
