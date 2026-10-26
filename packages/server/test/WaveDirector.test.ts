@@ -67,7 +67,7 @@ describe("WaveDirector.step", () => {
 
   it("con el tope de vivos no crea nada hasta que baja", () => {
     const { player, enemies, director } = setup();
-    const cap = maxLiveEnemies(1);
+    const cap = maxLiveEnemies(1, 15);
     enemies.spawnWave(Array.from({ length: cap }, () => ({ x: player.x, z: player.z })), ["minion"]);
     expect(enemies.liveCount()).toBe(cap);
     expect(director.step(15, [player], 1, enemies)).toEqual([]);

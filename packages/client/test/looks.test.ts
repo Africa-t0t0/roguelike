@@ -23,7 +23,7 @@ describe("looks", () => {
 
   it("allClipIds incluye los clips de las habilidades (y el Bloqueo), y existen en public/", () => {
     const ids = allClipIds();
-    for (const clip of ["ss_kick", "ss_power_up", "ss_block_idle", "ss_jump_2", "gs_high_spin_attack"]) {
+    for (const clip of ["ss_kick", "ss_power_up", "ss_block_idle", "gs_jump_attack", "gs_slide_attack", "gs_high_spin_attack"]) {
       expect(ids).toContain(clip);
       expect(ANIM_FILES).toContain(clip);
     }

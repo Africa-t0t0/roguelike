@@ -2,7 +2,7 @@ import type { AbilityId } from "./cards";
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 export interface JoinOptions {
   name: string;

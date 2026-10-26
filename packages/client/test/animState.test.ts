@@ -146,7 +146,8 @@ describe("chooseHeroAnim", () => {
   it("habilidad: cada activa usa su clip; la muerte gana a la habilidad", () => {
     expect(chooseHeroAnim(hero({ ability: { id: "kick", elapsed: 0 } })).clip).toBe("ss_kick");
     expect(chooseHeroAnim(hero({ ability: { id: "warcry", elapsed: 0 } })).clip).toBe("ss_power_up");
-    expect(chooseHeroAnim(hero({ ability: { id: "slam", elapsed: 0 } })).clip).toBe("ss_jump_2");
+    expect(chooseHeroAnim(hero({ ability: { id: "slam", elapsed: 0 } })).clip).toBe("gs_jump_attack");
+    expect(chooseHeroAnim(hero({ ability: { id: "thrust", elapsed: 0 } })).clip).toBe("gs_slide_attack");
     expect(chooseHeroAnim(hero({ dead: true, ability: { id: "kick", elapsed: 0 } })).clip).toBe("ss_death");
   });
 

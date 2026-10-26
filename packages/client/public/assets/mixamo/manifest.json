@@ -30,6 +30,8 @@
     "gs_impact_4": "anims/gs_impact_4.glb",
     "gs_slash": "anims/gs_slash.glb",
     "gs_high_spin_attack": "anims/gs_high_spin_attack.glb",
+    "gs_jump_attack": "anims/gs_jump_attack.glb",
+    "gs_slide_attack": "anims/gs_slide_attack.glb",
     "gs_strafe_3": "anims/gs_strafe_3.glb",
     "gs_strafe_4": "anims/gs_strafe_4.glb",
     "gs_death": "anims/gs_death.glb",

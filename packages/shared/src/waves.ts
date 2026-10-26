@@ -38,10 +38,23 @@ export function waveKinds(floorTime: number): EnemyKind[] {
   return ["minion", "brute", "mage"];
 }
 
-/** Tope de enemigos vivos (todos los que no están en `dead`). */
-export function maxLiveEnemies(players: number): number {
-  return 30 + 10 * (players - 1);
+/** Tope de enemigos vivos (todos los que no están en `dead`); crece 3 por minuto. */
+export function maxLiveEnemies(players: number, floorTime: number): number {
+  return Math.min(90, 45 + 10 * (players - 1) + 3 * Math.floor(floorTime / 60));
 }
+
+/** Escalado de vida y daño de los enemigos que se crean, según tiempo del piso y nivel del grupo. */
+export function enemyScale(floorTime: number, partyLevel: number): { hpMult: number; damageMult: number } {
+  const min = floorTime / 60;
+  return {
+    hpMult: (1 + 0.12 * (partyLevel - 1)) * (1 + 0.08 * min),
+    damageMult: (1 + 0.06 * (partyLevel - 1)) * (1 + 0.04 * min),
+  };
+}
+
+/** Segundos que dura un arma tirada en el suelo (tiempo simulado) y cuántos finales parpadea. */
+export const FLOOR_WEAPON_TTL_S = 40;
+export const FLOOR_WEAPON_BLINK_S = 5;
 
 /** Pesos [tier1, tier2, tier3] con t = tiempo del piso + 60 s por piso previo. */
 export function tierWeights(floorTime: number, floor: number): [number, number, number] {

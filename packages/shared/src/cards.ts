@@ -1,7 +1,7 @@
 import type { Rng } from "./rng";
 
-export type StatCardId = "vitality" | "regen" | "strength" | "fury" | "reach" | "agility" | "ironskin" | "bloodlust" | "magnet";
-export type AbilityId = "whirlwind" | "kick" | "warcry" | "slam" | "block" | "cleave";
+export type StatCardId = "vitality" | "regen" | "strength" | "fury" | "reach" | "agility" | "ironskin" | "bloodlust" | "magnet" | "learning" | "haste";
+export type AbilityId = "whirlwind" | "kick" | "warcry" | "slam" | "block" | "cleave" | "thrust";
 
 export const BASE_REGEN = 0.5;
 export const CHOICE_TIME_S = 20;
@@ -27,6 +27,11 @@ export const BLOCK_MOVE_MULT = 0.5;
 /** velocidad (m/s) y vida (s) de la Onda de corte */
 export const CLEAVE_SPEED = 14;
 export const CLEAVE_LIFE_S = 0.5;
+/** ancho (m) de la línea del Tajo frontal e impacto como fracción de su animación */
+export const THRUST_WIDTH = 1.2;
+export const THRUST_IMPACT_FRAC = 0.45;
+/** el factor de enfriamiento de habilidades nunca baja de aquí */
+export const MIN_COOLDOWN_MULT = 0.5;
 
 export const STAT_CARDS: Record<StatCardId, { name: string; text: string }> = {
   vitality: { name: "Vitalidad", text: "+20 de vida máxima y te cura 20" },
@@ -38,6 +43,8 @@ export const STAT_CARDS: Record<StatCardId, { name: string; text: string }> = {
   ironskin: { name: "Piel de hierro", text: "-8% de daño recibido (máx. -60%)" },
   bloodlust: { name: "Sed de sangre", text: "+2 de vida por enemigo que mates" },
   magnet: { name: "Imán", text: "+50% de radio para recoger orbes" },
+  learning: { name: "Aprendizaje", text: "+15% de XP por orbe que recojas" },
+  haste: { name: "Celeridad", text: "-10% de enfriamiento de habilidades (máx. -50%)" },
 };
 
 export interface AbilityRank {
@@ -49,6 +56,8 @@ export interface AbilityRank {
   stunS?: number;
   buff?: number;
   reduction?: number;
+  /** alcance en metros (Tajo frontal) */
+  range?: number;
 }
 
 export interface AbilityDef {
@@ -110,7 +119,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     kind: "active",
     cooldownS: 10,
     animS: 0.9,
-    clip: "ss_jump_2",
+    clip: "gs_jump_attack",
     ranks: [
       { damageMult: 1.5, radius: 3.5 },
       { damageMult: 2, radius: 3.5 },
@@ -119,6 +128,22 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     text: (r) => {
       const k = ABILITIES.slam.ranks[r - 1]!;
       return `Saltas y golpeas el suelo: ${pct(k.damageMult!)} de daño en ${k.radius} m`;
+    },
+  },
+  thrust: {
+    name: "Tajo frontal",
+    kind: "active",
+    cooldownS: 7,
+    animS: 0.7,
+    clip: "gs_slide_attack",
+    ranks: [
+      { damageMult: 1.3, range: 4 },
+      { damageMult: 1.6, range: 6 },
+      { damageMult: 2, range: 8 },
+    ],
+    text: (r) => {
+      const k = ABILITIES.thrust.ranks[r - 1]!;
+      return `Te lanzas hacia adelante y golpeas en línea hasta ${k.range} m con ${pct(k.damageMult!)} de daño`;
     },
   },
   block: {
@@ -209,6 +234,8 @@ export interface PlayerMods {
   damageTakenMult: number;
   lifeOnKill: number;
   magnetMult: number;
+  xpMult: number;
+  cooldownMult: number;
 }
 
 /** Multiplicadores de las cartas de stat; el Grito y el Bloqueo los aplica el servidor encima. */
@@ -224,6 +251,8 @@ export function playerMods(p: Progress): PlayerMods {
     damageTakenMult: Math.max(MIN_DAMAGE_TAKEN_MULT, 1 - 0.08 * n("ironskin")),
     lifeOnKill: 2 * n("bloodlust"),
     magnetMult: 1 + 0.5 * n("magnet"),
+    xpMult: 1 + 0.15 * n("learning"),
+    cooldownMult: Math.max(MIN_COOLDOWN_MULT, 0.9 ** n("haste")),
   };
 }
 

@@ -8,6 +8,7 @@ export const ABILITY_GLYPHS: Record<AbilityId, string> = {
   slam: "◎",
   block: "⛨",
   cleave: "☽",
+  thrust: "➶",
 };
 
 const MAX_RANK = 3;

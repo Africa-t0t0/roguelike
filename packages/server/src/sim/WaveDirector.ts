@@ -37,7 +37,7 @@ export class WaveDirector {
   /** Devuelve los enemigos creados en este tick. Sin jugadores vivos no hace nada. */
   step(floorTime: number, alive: readonly SimPlayer[], playerCount: number, enemies: EnemySystem): Enemy[] {
     if (alive.length === 0 || floorTime < this.nextAt) return [];
-    const room = maxLiveEnemies(playerCount) - enemies.liveCount();
+    const room = maxLiveEnemies(playerCount, floorTime) - enemies.liveCount();
     // En el tope se espera: el grupo pendiente sale en cuanto baje, sin acumular grupos atrasados.
     if (room <= 0) return [];
 

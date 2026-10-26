@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createRng,
+  enemyScale,
+  FLOOR_WEAPON_TTL_S,
+  FLOOR_WEAPON_BLINK_S,
   maxLiveEnemies,
   rollTier,
   splitXp,
@@ -26,8 +29,19 @@ describe("director de oleadas", () => {
     expect(waveKinds(130)).toEqual(["minion", "brute", "mage"]);
   });
   it("tope de vivos", () => {
-    expect(maxLiveEnemies(1)).toBe(30);
-    expect(maxLiveEnemies(4)).toBe(60);
+    expect(maxLiveEnemies(1, 0)).toBe(45);
+    expect(maxLiveEnemies(2, 600)).toBe(85);
+    expect(maxLiveEnemies(4, 3600)).toBe(90);
+  });
+  it("escalado de enemigos", () => {
+    expect(enemyScale(0, 1)).toEqual({ hpMult: 1, damageMult: 1 });
+    const s = enemyScale(300, 3);
+    expect(s.hpMult).toBeCloseTo(1.24 * 1.4);
+    expect(s.damageMult).toBeCloseTo(1.12 * 1.2);
+  });
+  it("armas del suelo", () => {
+    expect(FLOOR_WEAPON_TTL_S).toBe(40);
+    expect(FLOOR_WEAPON_BLINK_S).toBe(5);
   });
 });
 

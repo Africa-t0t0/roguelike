@@ -13,6 +13,9 @@ import {
   MAX_ACTIVE_ABILITIES,
   BASE_REGEN,
   CHOICE_TIME_S,
+  THRUST_WIDTH,
+  THRUST_IMPACT_FRAC,
+  PROTOCOL_VERSION,
   type AbilityId,
   type CardOffer,
   type Progress,
@@ -39,12 +42,44 @@ describe("playerMods", () => {
       damageTakenMult: 1,
       lifeOnKill: 0,
       magnetMult: 1,
+      xpMult: 1,
+      cooldownMult: 1,
     });
   });
   it("constantes", () => {
     expect(BASE_REGEN).toBe(0.5);
     expect(CHOICE_TIME_S).toBe(20);
     expect(MAX_ACTIVE_ABILITIES).toBe(4);
+  });
+});
+
+describe("Aprendizaje, Celeridad y Tajo frontal", () => {
+  it("mods de las cartas nuevas", () => {
+    expect(playerMods({ stats: { haste: 10 }, abilities: [] }).cooldownMult).toBeCloseTo(0.5);
+    expect(playerMods({ stats: { haste: 2 }, abilities: [] }).cooldownMult).toBeCloseTo(0.81);
+    expect(playerMods({ stats: { learning: 2 }, abilities: [] }).xpMult).toBeCloseTo(1.3);
+  });
+  it("rollOffer puede ofrecer thrust, learning y haste", () => {
+    const rng = createRng(3);
+    const seen = new Set<string>();
+    for (let i = 0; i < 3000; i++) for (const c of rollOffer(rng, empty())) seen.add(c.id);
+    for (const id of ["thrust", "learning", "haste"]) expect(seen.has(id)).toBe(true);
+  });
+  it("definición del Tajo y clips", () => {
+    const t = ABILITIES.thrust;
+    expect(t.kind).toBe("active");
+    expect(t.cooldownS).toBe(7);
+    expect(t.animS).toBe(0.7);
+    expect(t.clip).toBe("gs_slide_attack");
+    expect(t.ranks.map((r) => r.range)).toEqual([4, 6, 8]);
+    expect(t.ranks.map((r) => r.damageMult)).toEqual([1.3, 1.6, 2.0]);
+    expect(THRUST_WIDTH).toBe(1.2);
+    expect(THRUST_IMPACT_FRAC).toBe(0.45);
+    expect(ABILITIES.slam.clip).toBe("gs_jump_attack");
+    expect(PROTOCOL_VERSION).toBe(7);
+  });
+  it("cardText del Tajo rango 2 menciona 6 m", () => {
+    expect(cardText({ kind: "ability", id: "thrust", rank: 2 })).toContain("6 m");
   });
 });
 
@@ -83,7 +118,7 @@ describe("rollOffer", () => {
     }
   });
   it("con todo al máximo da 3 de stat", () => {
-    const ids: AbilityId[] = ["whirlwind", "kick", "warcry", "slam", "cleave"];
+    const ids: AbilityId[] = ["whirlwind", "kick", "warcry", "slam", "cleave", "thrust"];
     const p: Progress = { stats: {}, abilities: ids.map((id) => ({ id, rank: 3 })) };
     const o = rollOffer(createRng(1), p);
     expect(o).toHaveLength(3);
