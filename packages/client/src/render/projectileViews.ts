@@ -3,12 +3,12 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
-import { ENEMY_DEFS } from "@roguelike/shared";
+import { ORB } from "@roguelike/shared";
 import type { ProjectileSnapshot, WorldSnapshot } from "../net/connection";
 import { SnapshotBuffer } from "../net/SnapshotBuffer";
 
 const FLIGHT_Y = 1.1; // m: altura a la que vuelan
-const RADIUS = ENEMY_DEFS.mage.ranged?.projectileRadius ?? 0.3;
+const RADIUS = ORB.radius;
 
 const lerpProjectile = (a: ProjectileSnapshot, b: ProjectileSnapshot, t: number): ProjectileSnapshot => ({
   x: a.x + (b.x - a.x) * t,

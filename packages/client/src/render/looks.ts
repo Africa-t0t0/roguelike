@@ -62,6 +62,17 @@ export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
     height: 2.2,
     clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
   },
+  // Provisional: copian al mago hasta que lleguen sus modelos propios.
+  pyromancer: {
+    asset: "mage",
+    height: 2.2,
+    clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
+  },
+  stormcaller: {
+    asset: "mage",
+    height: 2.2,
+    clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
+  },
 };
 
 /**

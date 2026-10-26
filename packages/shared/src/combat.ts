@@ -6,7 +6,7 @@ export interface ClassDef {
   damagePerLevel: number;
 }
 
-export type EnemyKind = "minion" | "brute" | "mage";
+export type EnemyKind = "minion" | "brute" | "mage" | "pyromancer" | "stormcaller";
 
 export interface EnemyDef {
   hp: number;
@@ -20,11 +20,10 @@ export interface EnemyDef {
   /** inmune al aturdimiento (patada) */
   stunImmune?: boolean;
   ranged?: {
-    projectileSpeed: number;
-    projectileRadius: number;
-    lifetimeS: number;
     preferredMin: number;
     preferredMax: number;
+    /** radio con el que se comprueba la línea de vista al jugador */
+    losRadius: number;
   };
 }
 
@@ -48,7 +47,29 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     telegraphS: 0.7,
     cooldownS: 2.2,
     xp: 8,
-    ranged: { projectileSpeed: 9, projectileRadius: 0.3, lifetimeS: 3, preferredMin: 6, preferredMax: 10 },
+    ranged: { preferredMin: 6, preferredMax: 10, losRadius: 0.3 },
+  },
+  pyromancer: {
+    hp: 30,
+    speed: 3,
+    radius: 0.5,
+    damage: 14,
+    attackRange: 0,
+    telegraphS: 0.6,
+    cooldownS: 3,
+    xp: 8,
+    ranged: { preferredMin: 7, preferredMax: 12, losRadius: 0.3 },
+  },
+  stormcaller: {
+    hp: 26,
+    speed: 3,
+    radius: 0.5,
+    damage: 12,
+    attackRange: 0,
+    telegraphS: 1.1,
+    cooldownS: 3.5,
+    xp: 8,
+    ranged: { preferredMin: 8, preferredMax: 13, losRadius: 0.3 },
   },
 };
 

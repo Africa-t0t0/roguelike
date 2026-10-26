@@ -1,5 +1,7 @@
 import {
   ARMED_CHANCE,
+  ORB,
+  SPELLS,
   ENEMY_DEFS,
   ENEMY_SPAWN_MIN_PLAYER_DIST_TILES,
   FlowField,
@@ -320,8 +322,8 @@ export class EnemySystem {
         const dirX = d > 0 ? dx / d : Math.sin(e.facing);
         const dirZ = d > 0 ? dz / d : Math.cos(e.facing);
         this.shots.push({
-          id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX, dirZ, speed: def.ranged.projectileSpeed,
-          radius: def.ranged.projectileRadius, damage: Math.round(def.damage * e.damageMult), life: def.ranged.lifetimeS, sourceId: e.id,
+          id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX, dirZ, speed: SPELLS.mage.tiers[1].speed,
+          radius: ORB.radius, damage: Math.round(def.damage * e.damageMult), life: ORB.lifetimeS, sourceId: e.id,
         });
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
         hits.push({ targetKey: target.key, damage: Math.round(atk.damage * e.damageMult), sourceId: e.id, sourceX: e.x, sourceZ: e.z });
@@ -334,7 +336,7 @@ export class EnemySystem {
     // chase
     if (def.ranged) {
       // Solo se planta o retrocede si el proyectil pasaría; tras un muro sigue acercándose con la navegación.
-      const r = def.ranged.projectileRadius;
+      const r = def.ranged.losRadius;
       const los = hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r);
       if (los && d >= def.ranged.preferredMin && d <= def.ranged.preferredMax) {
         if (e.cooldown <= 0) this.setAi(e, "telegraph");

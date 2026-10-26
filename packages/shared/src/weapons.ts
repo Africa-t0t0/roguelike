@@ -140,11 +140,13 @@ export function strikeDamage(weaponId: WeaponId, cls: ClassId, level: number, st
 
 export type EnemyLoadout = { weaponId: WeaponId; tier: WeaponTier };
 
-/** Probabilidad de que un enemigo nazca armado y con qué arma; el mago nunca. */
+/** Probabilidad de que un enemigo nazca armado y con qué arma; los hechiceros nunca. */
 export const ARMED_CHANCE: Record<EnemyKind, { chance: number; weaponId: WeaponId } | null> = {
   minion: { chance: 0.6, weaponId: "guard-sword" },
   brute: { chance: 0.6, weaponId: "great-sword" },
   mage: null,
+  pyromancer: null,
+  stormcaller: null,
 };
 
 /** Daño y alcance del ataque de un enemigo, con o sin arma. */

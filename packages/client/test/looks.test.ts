@@ -41,6 +41,8 @@ describe("looks", () => {
       brute: ["brute", 2.4, ["cr_idle", "cr_run", "cr_swiping", "gs_impact", "cr_dying"]],
       minion: ["minion", 1.7, ["cr_idle_2", "cr_run", "cr_punch", "gs_impact_4", "cr_dying"]],
       mage: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
+      pyromancer: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
+      stormcaller: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
     };
     for (const [kind, [asset, height, clips]] of Object.entries(expected)) {
       const look = ENEMY_LOOKS[kind as EnemyKind];

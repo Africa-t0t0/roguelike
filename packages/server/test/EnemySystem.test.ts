@@ -403,7 +403,7 @@ describe("navegación", () => {
     // Bajando por el pasillo vertical entra en su banda de 6-10 m con el muro de por medio.
     const [e] = sys.spawnWave([center(2, 3)], ["mage"]);
     const pl = [P("a", center(12, 13).x, center(12, 13).z)];
-    const shotR = ENEMY_DEFS.mage.ranged!.projectileRadius;
+    const shotR = ENEMY_DEFS.mage.ranged!.losRadius;
     let hit = false;
     for (let i = 0; i < 30 / SIM_DT && !hit; i++) {
       const before = e!.ai;

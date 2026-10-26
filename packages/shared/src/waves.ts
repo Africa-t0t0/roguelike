@@ -1,4 +1,5 @@
 import type { EnemyKind } from "./combat";
+import type { CasterKind } from "./spells";
 import type { Rng } from "./rng";
 import type { WeaponTier } from "./weapons";
 
@@ -36,6 +37,13 @@ export function waveKinds(floorTime: number): EnemyKind[] {
   if (floorTime < 60) return ["minion"];
   if (floorTime < 120) return ["minion", "brute"];
   return ["minion", "brute", "mage"];
+}
+
+/** Hechiceros permitidos según el tiempo del piso: el piromante desde 240 s y el tormentoso desde 360 s. */
+export function casterKinds(floorTime: number): CasterKind[] {
+  if (floorTime < 240) return ["mage"];
+  if (floorTime < 360) return ["mage", "pyromancer"];
+  return ["mage", "pyromancer", "stormcaller"];
 }
 
 /** Tope de enemigos vivos (todos los que no están en `dead`); crece 3 por minuto. */

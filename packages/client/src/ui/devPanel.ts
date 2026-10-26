@@ -29,7 +29,7 @@ export function devCardOptions(): { label: string; card: CardOffer }[] {
   return [...abilities, ...stats];
 }
 
-const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago" };
+const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Tormentoso" };
 const TIER_LABELS = ["Desarmado", "Tier 1", "Tier 2", "Tier 3"];
 
 /** Lo que muestra un interruptor: "Invulnerable: sí". */
