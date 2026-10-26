@@ -7,6 +7,7 @@ const CARDINALS: readonly { label: string; angle: number }[] = [
   { label: "S", angle: Math.PI },
   { label: "O", angle: -Math.PI / 2 },
 ];
+export const START_NOTICE = "Atraviesa el sello para comenzar";
 const TICK_STEP = Math.PI / 12; // una marca cada 15°
 /** Media apertura de la brújula: lo que está a más de 90° del rumbo no se ve. */
 export const COMPASS_HALF_SPAN = Math.PI / 2;
@@ -38,6 +39,7 @@ export class Compass {
   private readonly root = document.createElement("div");
   private readonly strip = document.createElement("div");
   private readonly clock = document.createElement("div");
+  private readonly notice = document.createElement("div");
   private readonly marks: Mark[] = [];
   private lastYaw = NaN;
 
@@ -59,6 +61,10 @@ export class Compass {
     this.strip.append(pin);
     this.clock.className = "compass-clock";
     this.root.append(this.clock);
+    this.notice.className = "compass-notice";
+    this.notice.textContent = START_NOTICE;
+    this.notice.hidden = true; // hasta el primer snapshot (si ya empezó, no debe parpadear)
+    this.root.append(this.notice);
     parent.append(this.root);
   }
 
@@ -78,6 +84,11 @@ export class Compass {
   setFloorTime(s: number): void {
     const text = `⧗ ${formatFloorTime(s)}`;
     if (this.clock.textContent !== text) this.clock.textContent = text;
+  }
+
+  /** Mientras la partida no empezó se pide atravesar el sello. */
+  setStarted(started: boolean): void {
+    this.notice.hidden = started;
   }
 
   dispose(): void {

@@ -197,6 +197,8 @@ export interface WorldSnapshot {
   hazards: Map<string, HazardSnapshot>;
   /** el grupo está eligiendo cartas: la simulación no avanza */
   paused: boolean;
+  /** la partida ya empezó (alguien cruzó los sellos de la sala inicial) */
+  started: boolean;
   /** segundos que quedan de la elección en curso de la pausa */
   pauseLeft: number;
 }
@@ -450,6 +452,7 @@ function snapshotWorld(room: Room): WorldSnapshot {
     playerShots,
     hazards,
     paused: st.paused ?? false,
+    started: st.started ?? false,
     pauseLeft: st.pauseLeft ?? 0,
   };
 }

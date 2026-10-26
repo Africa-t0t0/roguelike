@@ -7,6 +7,7 @@ import {
   JOIN_ERROR_STATUS,
   normalizeName,
   sanitizeInput,
+  startSeals,
   STARTING_WEAPON,
   type KinematicState,
 } from "@roguelike/shared";
@@ -41,6 +42,7 @@ import { PlayerShotViews } from "./render/playerShotViews";
 import { PlayerViews } from "./render/playerViews";
 import { HazardViews } from "./render/hazardViews";
 import { ProjectileViews } from "./render/projectileViews";
+import { SealViews } from "./render/sealViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
 import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
 import { CardPanel } from "./ui/cardPanel";
@@ -141,6 +143,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
   const hazards = new HazardViews(scene);
+  const seals = new SealViews(scene, startSeals(dungeon));
   const chests = new ChestViews(scene);
   const chainFx = new ChainFx(scene);
   const playerShots = new PlayerShotViews(scene);
@@ -241,6 +244,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     pause = { paused: world.paused, pauseLeft: world.pauseLeft };
     hud.setWorld(world);
     compass.setFloorTime(world.floorTime);
+    compass.setStarted(world.started);
+    seals.setStarted(world.started, clock.now(receivedAt));
     orbs.sync(world.orbs);
     if (wasPaused && world.paused) return;
     const at = clock.now(receivedAt);
@@ -368,6 +373,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
     hazards.render(renderAt);
+    seals.render(now);
     chests.render(renderAt);
     chainFx.render(renderAt);
     playerShots.render(renderAt);
@@ -383,6 +389,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     floorWeapons.setPaused(paused);
     projectiles.setPaused(paused);
     hazards.setPaused(paused);
+    seals.setPaused(paused);
     chests.setPaused(paused);
     abilityFx.update(now);
     scene.render();
@@ -406,6 +413,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.dispose();
     projectiles.dispose();
     hazards.dispose();
+    seals.dispose();
     chests.dispose();
     chainFx.dispose();
     playerShots.dispose();
