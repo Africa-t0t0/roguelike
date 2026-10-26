@@ -4,7 +4,10 @@ import {
   activeAbilityCount,
   ABILITIES,
   applyCard,
+  CHEST_LOOT,
+  chestSpots,
   createRng,
+  ELEMENTS,
   EMPTY_ROOM_TTL_MS,
   FLOOR_WEAPON_TTL_S,
   generateDungeon,
@@ -22,6 +25,7 @@ import {
   playerMods,
   PICKUP_RANGE,
   PROTOCOL_VERSION,
+  rollTier,
   roomSpawnPoints,
   SANDBOX_COOLDOWN_MULT,
   sanitizeInput,
@@ -38,7 +42,9 @@ import {
   type Dungeon,
   type KinematicState,
   type PlayerInput,
+  type Rng,
   type WeaponId,
+  type WeaponTier,
 } from "@roguelike/shared";
 import { AbilitySystem } from "../sim/AbilitySystem";
 import { applyStatus, CombatSystem, moveSpeedMult, newCombatState, type CombatState, type ImpactResult } from "../sim/CombatSystem";
@@ -50,8 +56,8 @@ import { WaveDirector } from "../sim/WaveDirector";
 import { resolveCreateOptions, type RunRoomCreateOptions } from "./createOptions";
 import { PlayerRegistry, pruneFloorWeapons, type FloorWeapon, type PlayerRecord } from "./PlayerRegistry";
 import { createRoomCode } from "./roomCode";
-import { sandboxSpawnSpots } from "./sandbox";
-import { PlayerState, RunState } from "./RunState";
+import { SANDBOX_CHEST_AHEAD_M, sandboxSpawnSpots } from "./sandbox";
+import { ChestState, PlayerState, RunState } from "./RunState";
 import { syncLevel, syncPlayer, syncWorld } from "./syncState";
 
 const ROOM_CODE_ATTEMPTS = 5;
@@ -61,10 +67,20 @@ const ENEMY_RNG_SALT = 0x5eed;
 const WAVE_RNG_SALT = 0x7a3e;
 const ORB_RNG_SALT = 0x0b5e;
 const CARD_RNG_SALT = 0xca7d;
+const CHEST_RNG_SALT = 0xc4e5;
 /** lo que cura la carta Vitalidad al aplicarse */
 const VITALITY_HEAL = 20;
 /** ticks entre números de daño de la quemadura de un mismo enemigo (1 s) */
 const BURN_EVENT_TICKS = SIM_HZ;
+
+export type ChestLoot = "weapon" | "orbs" | "heal";
+
+/** Sortea el botín de un cofre según CHEST_LOOT. */
+export function rollChestLoot(rng: Rng): ChestLoot {
+  const r = rng.next();
+  if (r < CHEST_LOOT.weapon) return "weapon";
+  return r < CHEST_LOOT.weapon + CHEST_LOOT.orbs ? "orbs" : "heal";
+}
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
@@ -90,6 +106,9 @@ export class RunRoom extends Room<{ state: RunState }> {
   private director!: WaveDirector;
   private orbs!: OrbSystem;
   private levelUp!: LevelUpSystem;
+  /** Botín de los cofres. */
+  private chestRng!: Rng;
+  private nextChest = 1;
   private floorTime = 0;
   private readonly history = new PositionHistory();
   private readonly combat = new CombatSystem();
@@ -119,12 +138,14 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
     this.orbs = new OrbSystem(createRng(seed ^ ORB_RNG_SALT));
     this.levelUp = new LevelUpSystem(createRng(seed ^ CARD_RNG_SALT));
+    this.chestRng = createRng(seed ^ CHEST_RNG_SALT);
     this.abilities = new AbilitySystem(this.dungeon, this.combat);
     this.floorTime = floorTimeStart;
     this.state = new RunState({
       seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart, paused: false, pauseLeft: 0,
     });
     syncWorld(this.state, [], [], this.combat, []);
+    for (const spot of chestSpots(this.dungeon)) this.addChest(spot.x, spot.z);
 
     this.autoDispose = false;
     this.setPatchRate(PATCH_RATE_MS);
@@ -333,6 +354,11 @@ export class RunRoom extends Room<{ state: RunState }> {
       case "castNow":
         this.enemySystem.castNow(this.simPlayers());
         break;
+      case "chest": {
+        const [spot] = sandboxSpawnSpots(this.dungeon, record.kinematic, 1, SANDBOX_CHEST_AHEAD_M);
+        if (spot) this.addChest(spot.x, spot.z);
+        break;
+      }
       case "weapon":
         c.weaponId = cmd.weaponId;
         c.weaponTier = cmd.tier;
@@ -394,7 +420,9 @@ export class RunRoom extends Room<{ state: RunState }> {
         if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started });
         this.impact(record.key, ab);
         // Antes del ataque de este input: con un swing o una habilidad en curso no se cambia de arma.
-        if (input.interact && !c.dead && c.swingTimer === 0 && !c.abilityAnim) this.tryPickup(record);
+        if (input.interact && !c.dead && c.swingTimer === 0 && !c.abilityAnim) {
+          if (!this.tryOpenChest(record)) this.tryPickup(record);
+        }
         if (input.attack) {
           const swing = this.combat.attack(record.combat, input);
           if (swing.swung) this.emit({ type: "swing", key: record.key, step: swing.step });
@@ -548,12 +576,58 @@ export class RunRoom extends Room<{ state: RunState }> {
 
   /** Cada jugador conectado recibe su propia copia del arma soltada y se le reenvía su lista. */
   private dropWeapon(item: Omit<FloorWeapon, "expiresAt">): void {
-    const expiresAt = this.floorWeaponExpiry();
-    for (const r of this.registry.connected()) {
-      r.floorWeapons.push({ ...item, expiresAt });
-      const client = this.clients.find((c) => c.sessionId === r.sessionId);
-      if (client) this.sendFloorWeapons(client, r);
+    for (const r of this.registry.connected()) this.giveFloorWeapon(r, item);
+  }
+
+  /** Agrega un arma a la lista del suelo de un jugador y se la reenvía si está conectado. */
+  private giveFloorWeapon(r: PlayerRecord, item: Omit<FloorWeapon, "expiresAt">): void {
+    r.floorWeapons.push({ ...item, expiresAt: this.floorWeaponExpiry() });
+    const client = this.clients.find((c) => c.sessionId === r.sessionId);
+    if (client) this.sendFloorWeapons(client, r);
+  }
+
+  private addChest(x: number, z: number): void {
+    const cs = new ChestState();
+    cs.x = x;
+    cs.z = z;
+    cs.open = false;
+    this.state.chests.set(`c${this.nextChest++}`, cs);
+  }
+
+  /**
+   * Abre el cofre cerrado más cercano a ≤ PICKUP_RANGE, si lo hay, y reparte su botín. Devuelve si abrió uno
+   * (ese `interact` ya no recoge armas).
+   */
+  private tryOpenChest(record: PlayerRecord): boolean {
+    const { x, z } = record.kinematic;
+    let best: ChestState | null = null;
+    let bestD2 = Infinity;
+    for (const cs of this.state.chests.values()) {
+      const d2 = (cs.x - x) ** 2 + (cs.z - z) ** 2;
+      if (!cs.open && d2 <= PICKUP_RANGE ** 2 && d2 < bestD2) [best, bestD2] = [cs, d2];
     }
+    if (!best) return false;
+    best.open = true;
+    const loot = rollChestLoot(this.chestRng);
+    if (loot === "orbs") {
+      this.orbs.spawn(best.x, best.z, CHEST_LOOT.orbXp, this.state.tick);
+    } else if (loot === "heal") {
+      for (const r of this.registry.connected()) if (!r.combat.dead) this.combat.heal(r.combat, r.combat.maxHp);
+    } else {
+      // 1 m hacia quien lo abre; si ese punto es muro, sobre el cofre.
+      const d = Math.sqrt(bestD2);
+      const at = { x: best.x + (d > 0 ? (x - best.x) / d : 0), z: best.z + (d > 0 ? (z - best.z) / d : 0) };
+      if (!isWalkableTile(this.dungeon, tileOf(at.x), tileOf(at.z))) [at.x, at.z] = [best.x, best.z];
+      const rng = this.chestRng;
+      for (const r of this.registry.connected()) {
+        const weaponId = rng.pick(Object.keys(WEAPONS) as WeaponId[]);
+        const nature = rng.pick(ELEMENTS);
+        const base = rollTier(rng, this.floorTime, this.state.floor);
+        const tier = Math.min(4, base + (rng.next() < CHEST_LOOT.tierBumpChance ? 1 : 0)) as WeaponTier;
+        this.giveFloorWeapon(r, { weaponId, tier, nature, x: at.x, z: at.z });
+      }
+    }
+    return true;
   }
 
   /**

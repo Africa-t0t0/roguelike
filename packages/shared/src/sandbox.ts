@@ -28,6 +28,7 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `clock`: adelanta el reloj del piso `seconds`.
  * - `freeze`: congela a los enemigos que no preparan un ataque (proyectiles y peligros siguen).
  * - `castNow`: todos los hechiceros libres lanzan ya su hechizo sobre el jugador más cercano.
+ * - `chest`: un cofre cerrado nuevo delante del jugador.
  * - `weapon`: equipa el arma con su tier y naturaleza (`"none"` si no se indica).
  */
 export type DevCommand =
@@ -43,6 +44,7 @@ export type DevCommand =
   | { cmd: "clock"; seconds: number }
   | { cmd: "freeze"; on: boolean }
   | { cmd: "castNow" }
+  | { cmd: "chest" }
   | { cmd: "status"; kind: "burn" | "slow" | "stun" }
   | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature };
 
@@ -79,6 +81,7 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
     case "heal":
     case "killAll":
     case "castNow":
+    case "chest":
       return { cmd: m.cmd };
     case "spawn": {
       if (!has(ENEMY_DEFS, m.kind) || !isInt(m.count, 1, SANDBOX_MAX_SPAWN) || !isInt(m.tier, 0, 3)) return null;

@@ -3,6 +3,7 @@ import { boot, type ColyseusTestServer } from "@colyseus/testing";
 import type { Room as ClientRoom } from "@colyseus/sdk";
 import { ErrorCode, matchMaker } from "colyseus";
 import {
+  createRng,
   generateDungeon,
   isWalkableTile,
   roomSpawnPoints,
@@ -35,7 +36,7 @@ import {
   type CombatEvent,
 } from "@roguelike/shared";
 import { appConfig } from "../src/app.config";
-import type { RunRoom } from "../src/rooms/RunRoom";
+import { rollChestLoot, type RunRoom } from "../src/rooms/RunRoom";
 
 const SEED = 123;
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}$/;
@@ -1406,6 +1407,101 @@ describe("HTTP", () => {
   });
 });
 
+describe("RunRoom: cofres", () => {
+  const d = generateDungeon(SEED, 1);
+  const idle = (seq: number) => ({ ...attackInput(seq, 0, room.state.tick), attack: false, interact: true });
+  /** RNG del cofre con `next` fijo: <0,6 arma, <0,85 orbes, si no vida. */
+  const forceLoot = (v: number) => {
+    room["chestRng"] = { ...createRng(9), next: () => v };
+  };
+  const chest = () => [...room.state.chests.entries()][0]!;
+
+  it("rollChestLoot reparte según CHEST_LOOT", () => {
+    expect(rollChestLoot({ ...createRng(1), next: () => 0.59 })).toBe("weapon");
+    expect(rollChestLoot({ ...createRng(1), next: () => 0.6 })).toBe("orbs");
+    expect(rollChestLoot({ ...createRng(1), next: () => 0.85 })).toBe("heal");
+  });
+
+  it("la sala trae ceil(combate / 2) cofres cerrados, también en el estado del cliente", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const n = Math.ceil(d.rooms.filter((r) => r.kind === "combat").length / 2);
+    await ticksUntil(() => ana.client.state.chests?.size === n, 10);
+    expect([...ana.client.state.chests.values()].every((c) => !c.open)).toBe(true);
+    expect([...ana.client.state.chests.keys()][0]).toBe("c1");
+  });
+
+  it("abrir con interact: cada jugador recibe su arma, no se repite, y el cofre gana al arma del suelo", async () => {
+    const ana = await join("Ana", "t-ana");
+    const beto = await join("Beto", "t-beto");
+    await ana.welcome;
+    await beto.welcome;
+    await ticksUntil(() => ana.floors.length >= 1 && beto.floors.length >= 1, 10);
+    forceLoot(0.1);
+    const [id, cs] = chest();
+    teleport("ana", { x: cs.x + 1, z: cs.z });
+    teleport("beto", { x: cs.x, z: cs.z + 5 });
+    const before = [record("ana").floorWeapons.length, record("beto").floorWeapons.length];
+    // Un arma del suelo también al alcance: el cofre tiene prioridad.
+    record("ana").floorWeapons.push({ weaponId: "great-sword", tier: 1, nature: "none", x: cs.x + 1, z: cs.z, expiresAt: 1e9 });
+    const equipped = record("ana").combat.weaponId;
+    ana.client.send(MSG.input, idle(1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    expect(room.state.chests.get(id)!.open).toBe(true);
+    expect(record("ana").combat.weaponId).toBe(equipped);
+    expect(record("ana").floorWeapons).toHaveLength(before[0]! + 2);
+    expect(record("beto").floorWeapons).toHaveLength(before[1]! + 1);
+    const mine = record("ana").floorWeapons.at(-1)!;
+    expect(mine.tier).toBeGreaterThanOrEqual(1);
+    expect(mine.tier).toBeLessThanOrEqual(4);
+    expect(mine.nature).not.toBe("none");
+    // 1 m hacia Ana.
+    expect(Math.hypot(mine.x - cs.x, mine.z - cs.z)).toBeCloseTo(1, 5);
+    expect(record("beto").floorWeapons.at(-1)).toMatchObject({ x: mine.x, z: mine.z });
+    await ticksUntil(() => ana.floors.length >= 2 && beto.floors.length >= 2, 10);
+    expect(beto.floors.at(-1)!.items).toHaveLength(before[1]! + 1);
+    // Un segundo interact no cambia nada.
+    ana.client.send(MSG.input, idle(2));
+    await ticksUntil(() => player("ana").lastSeq === 2, 5);
+    expect(record("ana").floorWeapons).toHaveLength(before[0]! + 2);
+    expect(record("beto").floorWeapons).toHaveLength(before[1]! + 1);
+    await ticksUntil(() => ana.client.state.chests.get(id)?.open === true, 10);
+  });
+
+  it("botín de orbes: 30 XP en el cofre", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    forceLoot(0.7);
+    const [, cs] = chest();
+    teleport("ana", { x: cs.x + 1, z: cs.z });
+    const spawn = vi.spyOn(room["orbs"], "spawn");
+    ana.client.send(MSG.input, idle(1));
+    await ticksUntil(() => spawn.mock.calls.length > 0, 5);
+    expect(spawn.mock.calls[0]).toEqual([cs.x, cs.z, 30, expect.any(Number)]);
+  });
+
+  it("botín de vida: vida al máximo", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    forceLoot(0.9);
+    const [, cs] = chest();
+    teleport("ana", { x: cs.x + 1, z: cs.z });
+    record("ana").combat.hp = 10;
+    ana.client.send(MSG.input, idle(1));
+    await ticksUntil(() => record("ana").combat.hp === record("ana").combat.maxHp, 5);
+  });
+
+  it("lejos del cofre no se abre", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const [, cs] = chest();
+    teleport("ana", { x: cs.x + 1.6, z: cs.z });
+    ana.client.send(MSG.input, idle(1));
+    await ticksUntil(() => player("ana").lastSeq === 1, 5);
+    expect(chest()[1].open).toBe(false);
+  });
+});
+
 describe("RunRoom: sandbox", () => {
   const sandboxRoom = async () => {
     await colyseus.cleanup();
@@ -1417,6 +1513,18 @@ describe("RunRoom: sandbox", () => {
   const settle = async (n = 3) => {
     for (let i = 0; i < n; i++) await room.waitForNextTimestep();
   };
+
+  it("chest crea un cofre cerrado a ~3 m delante, con id nuevo", async () => {
+    const { ana } = await sandboxRoom();
+    const n = room.state.chests.size;
+    const k = record("ana").kinematic;
+    dev(ana.client, { cmd: "chest" });
+    await ticksUntil(() => room.state.chests.size === n + 1, 10);
+    const cs = room.state.chests.get(`c${n + 1}`)!;
+    expect(cs.open).toBe(false);
+    expect(Math.hypot(cs.x - k.x, cs.z - k.z)).toBeGreaterThanOrEqual(2);
+    expect(Math.hypot(cs.x - k.x, cs.z - k.z)).toBeLessThan(4.5);
+  });
 
   it("una sala normal avisa sandbox: false e ignora los comandos", async () => {
     const ana = await join("Ana", "t-ana");

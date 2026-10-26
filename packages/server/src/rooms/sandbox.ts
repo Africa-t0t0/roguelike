@@ -2,16 +2,23 @@ import { hasLineOfSight, isWalkableTile, TILE_SIZE, tileCenter, type Dungeon, ty
 
 /** A cuántos metros delante del jugador aparecen los enemigos del panel de pruebas. */
 export const SANDBOX_SPAWN_AHEAD_M = 5;
+/** ...y los cofres. */
+export const SANDBOX_CHEST_AHEAD_M = 3;
 
 const tileOf = (v: number): number => Math.floor(v / TILE_SIZE);
 
 /**
  * Hasta `count` centros de casilla caminables, uno por casilla, lo más cerca posible de un punto a
- * SANDBOX_SPAWN_AHEAD_M delante de `k` (si hay un muro en medio, alrededor del jugador). Nunca la casilla del
+ * `aheadM` (por defecto SANDBOX_SPAWN_AHEAD_M) delante de `k` (si hay un muro en medio, alrededor del jugador). Nunca la casilla del
  * jugador ni una sin línea de vista desde él. Determinista: por distancia al punto, luego por z y x de casilla.
  */
-export function sandboxSpawnSpots(dungeon: Dungeon, k: KinematicState, count: number): { x: number; z: number }[] {
-  const ahead = { x: k.x + Math.sin(k.facing) * SANDBOX_SPAWN_AHEAD_M, z: k.z + Math.cos(k.facing) * SANDBOX_SPAWN_AHEAD_M };
+export function sandboxSpawnSpots(
+  dungeon: Dungeon,
+  k: KinematicState,
+  count: number,
+  aheadM = SANDBOX_SPAWN_AHEAD_M,
+): { x: number; z: number }[] {
+  const ahead = { x: k.x + Math.sin(k.facing) * aheadM, z: k.z + Math.cos(k.facing) * aheadM };
   const target = hasLineOfSight(dungeon, k.x, k.z, ahead.x, ahead.z, 0) ? ahead : { x: k.x, z: k.z };
   const [tx, tz] = [tileOf(target.x), tileOf(target.z)];
   const own = `${tileOf(k.x)},${tileOf(k.z)}`;

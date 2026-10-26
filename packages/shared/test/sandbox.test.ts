@@ -18,6 +18,7 @@ describe("parseDevCommand", () => {
       { cmd: "killAll" },
       { cmd: "freeze", on: true },
       { cmd: "castNow" },
+      { cmd: "chest" },
       { cmd: "clock", seconds: 60 },
       { cmd: "weapon", weaponId: "great-sword", tier: 2, nature: "none" },
       { cmd: "weapon", weaponId: "great-sword", tier: 3, nature: "ice" },

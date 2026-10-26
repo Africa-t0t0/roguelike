@@ -128,6 +128,10 @@ export type HazardState = SchemaType<typeof HazardState>;
 export const OrbState = schema({ x: t.number(), z: t.number(), value: t.number() }, "OrbState");
 export type OrbState = SchemaType<typeof OrbState>;
 
+/** Cofre del piso: fijo, solo cambia `open`. */
+export const ChestState = schema({ x: t.number(), z: t.number(), open: t.boolean() }, "ChestState");
+export type ChestState = SchemaType<typeof ChestState>;
+
 /** `players` está indexado por la clave normalizada del jugador, no por `sessionId`. */
 export const RunState = schema(
   {
@@ -148,6 +152,8 @@ export const RunState = schema(
     hazards: t.map(HazardState),
     /** orbes de XP compartidos, indexados por id ("o1", …) */
     orbs: t.map(OrbState),
+    /** cofres, indexados por id ("c1", …); no salen de la sala, solo se abren */
+    chests: t.map(ChestState),
     /** ondas de los jugadores, indexadas por id ("w1", …) */
     playerShots: t.map(PlayerShotState),
     /** el grupo está eligiendo cartas: la simulación no avanza */
