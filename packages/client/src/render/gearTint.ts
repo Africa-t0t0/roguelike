@@ -16,19 +16,26 @@ import { boneKey } from "./animLibrary";
 export const TINT_SLOTS: readonly GearSlot[] = ["helmet", "chest", "gloves", "belt", "boots"];
 
 /**
- * Región del cuerpo (ranura de equipo) de un hueso de Mixamo, por su nombre; null = ninguna (muslos).
+ * Región del cuerpo (ranura de equipo) de un hueso de Mixamo, por su nombre; null = ninguna.
  * Casco: cuello y cabeza. Pechera: columna media y alta, hombros y brazos (con hombreras). Cinturón: cadera y la
- * columna baja (`Spine`, a la altura de la cintura). Guantes: antebrazos, manos y dedos. Botas: espinillas, pies y puntas.
+ * columna baja (`Spine`, a la altura de la cintura). Guantes: antebrazos, manos y dedos. Botas: muslos (con peso parcial, ver `boneRegionWeight`), espinillas, pies y puntas.
  */
 export function boneRegion(name: string): GearSlot | null {
   const k = boneKey(name);
   if (k.startsWith("neck") || k.startsWith("head")) return "helmet";
   if (k.includes("forearm") || k.includes("hand")) return "gloves";
-  if (k.includes("upleg")) return null;
   if (k.endsWith("leg") || k.includes("foot") || k.includes("toe")) return "boots";
   if (k.startsWith("hips") || k === "spine") return "belt";
   if (k.startsWith("spine") || k.endsWith("shoulder") || k.endsWith("arm")) return "chest";
   return null;
+}
+
+/** Peso de las botas en el muslo (`UpLeg`): el tinte sube un poco por la pierna y se desvanece hacia la cadera. */
+export const THIGH_BOOTS_WEIGHT = 0.45;
+
+/** Cuánto pesa un hueso en su región: 1, salvo el muslo (parcial); la espinilla (`Leg`) pesa entera. */
+export function boneRegionWeight(name: string): number {
+  return boneKey(name).includes("upleg") ? THIGH_BOOTS_WEIGHT : 1;
 }
 
 /** Fuerza del tinte por rareza (0 = sin tinte): tier 2 sutil, 3 claro, 4 fuerte. */
@@ -57,9 +64,11 @@ export function tintOf(tier: WeaponTier): [number, number, number, number] | nul
 export function regionWeights(mesh: AbstractMesh, skeleton: Skeleton): { main: Float32Array; extra: Float32Array } | null {
   const n = mesh.getTotalVertices();
   const byIndex: number[] = [];
+  const weightOf: number[] = [];
   for (const bone of skeleton.bones) {
     const slot = boneRegion(bone.name);
     byIndex[bone.getIndex()] = slot ? TINT_SLOTS.indexOf(slot) : -1;
+    weightOf[bone.getIndex()] = boneRegionWeight(bone.name);
   }
   const out = new Float32Array(n * 4);
   const extra = new Float32Array(n);
@@ -75,8 +84,9 @@ export function regionWeights(mesh: AbstractMesh, skeleton: Skeleton): { main: F
     any = true;
     for (let i = 0; i < n * 4; i++) {
       const r = byIndex[idx[i]!] ?? -1;
-      if (r >= MAIN_REGIONS) extra[i >> 2]! += w[i]!;
-      else if (r >= 0) out[(i & ~3) + r]! += w[i]!;
+      const bw = w[i]! * (weightOf[idx[i]!] ?? 1);
+      if (r >= MAIN_REGIONS) extra[i >> 2]! += bw;
+      else if (r >= 0) out[(i & ~3) + r]! += bw;
     }
   }
   return any ? { main: out, extra } : null;

@@ -11,6 +11,8 @@ import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
 import { CharacterView } from "./characterView";
+import { SetAuraFx } from "./bodyAura";
+import { flameTexture } from "./fxTextures";
 import { GearFxShared, GearLooks } from "./gearLooks";
 import { GearTint } from "./gearTint";
 import { PLAYER_LOOK } from "./looks";
@@ -46,6 +48,8 @@ interface PlayerView {
   gearLooks: GearLooks;
   /** tinte y contorno del color de cada pieza sobre su parte del cuerpo */
   gearTint: GearTint;
+  /** aura de llamas muy leve que crece con las piezas del mismo tier */
+  setAura: SetAuraFx;
   speed: SpeedMeter;
   /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
   swing?: { step: number; startMs: number; restart: boolean };
@@ -82,6 +86,7 @@ export class PlayerViews {
   private readonly clipLengths: ClipLengths;
   private readonly gearFx: GearFxShared;
   private paused = false;
+  private flame?: DynamicTexture;
   /**
    * Empezó a dibujarse una habilidad (una vez por lanzamiento, propia o ajena): con la pose dibujada en ese
    * cuadro y cuánto lleva ya (s) en el reloj con el que se dibuja a ese jugador.
@@ -140,6 +145,8 @@ export class PlayerViews {
     view.character.setWeapon(state.weaponId, { tier: state.weaponTier, nature: state.weaponNature });
     view.gearLooks.set(state.relic ?? null);
     view.gearTint.set(state.gear ?? {});
+    view.setAura.set(state.gear ?? {});
+    view.setAura.setActive(!state.dead);
     view.gearLooks.render(nowMs);
     let { comboStep, swingTimer } = state;
     let attackClip: string | undefined;
@@ -194,6 +201,7 @@ export class PlayerViews {
     this.paused = paused;
     for (const view of this.views.values()) {
       view.character.setPaused(paused);
+      view.setAura.setPaused(paused);
     }
   }
 
@@ -201,6 +209,8 @@ export class PlayerViews {
     for (const view of this.views.values()) view.dispose();
     this.views.clear();
     this.gearFx.dispose();
+    this.flame?.dispose();
+    this.flame = undefined;
   }
 
   private create(key: string, name: string): PlayerView {
@@ -209,16 +219,20 @@ export class PlayerViews {
     const gearLooks = new GearLooks(this.scene, this.gearFx, character);
     // Mallas con esqueleto: el cuerpo (el arma cuelga de la mano sin esqueleto).
     const gearTint = new GearTint(character.root.getChildMeshes(false).filter((m) => m.skeleton));
+    const setAura = new SetAuraFx(this.scene, () => (this.flame ??= flameTexture(this.scene, "player-flame")), character, PLAYER_LOOK.height);
+    setAura.setPaused(this.paused);
     return {
       character,
       gearLooks,
       gearTint,
+      setAura,
       speed: new SpeedMeter(),
       dispose() {
         label.material?.getActiveTextures().forEach((t) => t.dispose());
         label.material?.dispose();
         gearLooks.dispose();
         gearTint.dispose();
+        setAura.dispose();
         character.dispose();
       },
     };

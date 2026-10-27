@@ -9,7 +9,7 @@ import { Matrix } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Scene } from "@babylonjs/core/scene";
 import { TIERS } from "@roguelike/shared";
-import { boneRegion, GearTint, GearTintPlugin, REGION_ATTRIBUTE, regionWeights, tintOf, tintStrength } from "../src/render/gearTint";
+import { boneRegion, boneRegionWeight, THIGH_BOOTS_WEIGHT, GearTint, GearTintPlugin, REGION_ATTRIBUTE, regionWeights, tintOf, tintStrength } from "../src/render/gearTint";
 
 const noop = () => undefined;
 const ctx2d = new Proxy({}, { get: () => noop, set: () => true });
@@ -40,11 +40,20 @@ describe("boneRegion", () => {
     ["mixamorig:LeftForeArm", "gloves"],
     ["mixamorig:RightHand", "gloves"],
     ["mixamorig:LeftHandIndex3", "gloves"],
-    ["mixamorig:LeftUpLeg", null],
+    ["mixamorig:LeftUpLeg", "boots"],
+    ["mixamorig:LeftLeg", "boots"],
     ["mixamorig:RightLeg", "boots"],
     ["mixamorig:LeftFoot", "boots"],
     ["mixamorig:RightToeBase", "boots"],
   ])("%s → %s", (name, region) => expect(boneRegion(name)).toBe(region));
+});
+
+describe("boneRegionWeight", () => {
+  it("el muslo pesa parcial en las botas; espinilla y pie, entero", () => {
+    expect(boneRegionWeight("mixamorig:RightUpLeg")).toBe(THIGH_BOOTS_WEIGHT);
+    expect(THIGH_BOOTS_WEIGHT).toBeCloseTo(0.45);
+    for (const n of ["mixamorig:LeftLeg", "mixamorig:LeftFoot", "mixamorig:LeftToeBase", "mixamorig:Head", "mixamorig:Hips"]) expect(boneRegionWeight(n)).toBe(1);
+  });
 });
 
 describe("tint por tier", () => {
@@ -88,9 +97,9 @@ describe("regionWeights", () => {
     expect(w.slice(0, 4)).toEqual([1, 0, 0, 0]); // cabeza
     expect(w.slice(4, 8)).toEqual([0, 0, 0.5, 0]); // mano (guantes); el pie va aparte
     expect(b[1]).toBeCloseTo(0.5); // pie → botas
-    expect(w[8]).toBe(0); // muslo: nada
+    expect(w[8]).toBe(0); // muslo: no cae en las regiones principales
     expect(w[11]).toBe(0);
-    expect(b[2]).toBeCloseTo(0.3);
+    expect(b[2]).toBeCloseTo(0.7 * THIGH_BOOTS_WEIGHT + 0.3); // muslo parcial + pie
   });
 });
 

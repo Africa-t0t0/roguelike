@@ -6,7 +6,7 @@ import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import "@babylonjs/core/Particles/particleSystemComponent";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import type { CasterKind, Nature } from "@roguelike/shared";
+import { GEAR_SLOTS, TIERS, type CasterKind, type GearSlot, type Nature, type WeaponTier } from "@roguelike/shared";
 import { PARTICLE_SPEED } from "./fxTextures";
 import type { BoneSource } from "./gearLooks";
 import { NATURE_COLORS } from "./natureLooks";
@@ -165,5 +165,84 @@ export class BodyAura {
   dispose(): void {
     for (const e of this.emitters) disposeFlameEmitter(e);
     this.emitters.length = 0;
+  }
+}
+
+/** Intensidad del aura de conjunto según cuántas piezas del mismo tier lleva (1..5); el conjunto completo = máximo. */
+export const SET_AURA_INTENSITY: readonly number[] = [0, 0.12, 0.22, 0.35, 0.55, 1];
+
+/**
+ * Aura de conjunto: el tier (≥2) con más piezas equipadas (empate → el mayor; las de tier 1 no cuentan) y cuántas
+ * son; la intensidad crece con ese número. null si no hay ninguna pieza de tier 2 o más.
+ */
+export function setAura(gear: Partial<Record<GearSlot, { tier: WeaponTier }>>): { tier: WeaponTier; count: number; intensity: number } | null {
+  const counts = [0, 0, 0, 0, 0];
+  for (const slot of GEAR_SLOTS) {
+    const t = gear[slot]?.tier ?? 0;
+    if (t >= 2 && t <= 4) counts[t]!++;
+  }
+  let best: WeaponTier | null = null;
+  for (const t of [2, 3, 4] as const) if (counts[t]! > 0 && (best === null || counts[t]! >= counts[best]!)) best = t;
+  if (best === null) return null;
+  const count = counts[best]!;
+  return { tier: best, count, intensity: SET_AURA_INTENSITY[Math.min(count, 5)]! };
+}
+
+/** Cómo arde el aura de conjunto: la del élite escalada por la intensidad (ritmo y opacidad lineales; el tamaño, menos). */
+export function setAuraParams(tier: WeaponTier, intensity: number): AuraParams {
+  const g = TIERS[tier].glow ?? [1, 1, 1];
+  const elite = auraParams("elite");
+  return { color: new Color3(g[0], g[1], g[2]), rate: elite.rate * intensity, size: elite.size * (0.55 + 0.45 * intensity), alpha: elite.alpha * intensity };
+}
+
+/**
+ * Aura de conjunto de UN jugador: un `BodyAura` que solo se reconstruye cuando cambia (tier, piezas); sin conjunto,
+ * ninguna. Conserva pausa y emisión (muerte) al reconstruir. La textura es de quien la crea.
+ */
+export class SetAuraFx {
+  private aura: BodyAura | null = null;
+  private key = "";
+  private paused = false;
+  private active = true;
+
+  constructor(
+    private readonly scene: Scene,
+    private readonly flame: () => DynamicTexture,
+    private readonly character: BoneSource,
+    private readonly height = REF_HEIGHT,
+  ) {}
+
+  get current(): BodyAura | null {
+    return this.aura;
+  }
+
+  set(gear: Partial<Record<GearSlot, { tier: WeaponTier }>>): void {
+    const a = setAura(gear);
+    const key = a ? `${a.tier}:${a.count}` : "";
+    if (key === this.key) return;
+    this.key = key;
+    this.aura?.dispose();
+    this.aura = null;
+    if (!a) return;
+    this.aura = new BodyAura(this.scene, this.flame(), this.character, setAuraParams(a.tier, a.intensity), this.height);
+    this.aura.setPaused(this.paused);
+    this.aura.setActive(this.active);
+  }
+
+  /** false al morir: deja de emitir y las llamas vivas se apagan; true al revivir. */
+  setActive(active: boolean): void {
+    this.active = active;
+    this.aura?.setActive(active);
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.aura?.setPaused(paused);
+  }
+
+  dispose(): void {
+    this.aura?.dispose();
+    this.aura = null;
+    this.key = "";
   }
 }

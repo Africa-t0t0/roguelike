@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
-import { AURA_BONES, auraParams, BodyAura } from "../src/render/bodyAura";
+import { AURA_BONES, auraParams, BodyAura, SetAuraFx, setAura, setAuraParams } from "../src/render/bodyAura";
 import { flameTexture, PARTICLE_SPEED } from "../src/render/fxTextures";
 import type { BoneSource } from "../src/render/gearLooks";
 import { NATURE_COLORS } from "../src/render/natureLooks";
@@ -93,6 +93,69 @@ describe("BodyAura", () => {
     expect(scene.particleSystems).toHaveLength(0);
     expect(scene.meshes).toHaveLength(0);
     expect(scene.materials).toHaveLength(0);
+    expect(scene.textures).toHaveLength(0);
+  });
+});
+
+describe("setAura", () => {
+  const g = (...t: number[]) => Object.fromEntries(["helmet", "chest", "gloves", "belt", "boots"].slice(0, t.length).map((s, i) => [s, { tier: t[i] }])) as never;
+  it("sin piezas o solo tier 1: nada", () => {
+    expect(setAura({})).toBeNull();
+    expect(setAura(g(1, 1, 1, 1, 1))).toBeNull();
+  });
+  it("las de tier 1 no cuentan", () => {
+    expect(setAura(g(1, 1, 3))).toEqual({ tier: 3, count: 1, intensity: 0.12 });
+  });
+  it("gana el tier con más piezas; en empate, el mayor", () => {
+    expect(setAura(g(2, 2, 3))).toMatchObject({ tier: 2, count: 2, intensity: 0.22 });
+    expect(setAura(g(2, 2, 3, 3))).toMatchObject({ tier: 3, count: 2 });
+    expect(setAura(g(2, 3, 4))).toMatchObject({ tier: 4, count: 1 });
+  });
+  it("la intensidad crece con las piezas y el conjunto completo es 1", () => {
+    const i = [1, 2, 3, 4, 5].map((n) => setAura(g(...Array(n).fill(4)))!.intensity);
+    expect(i).toEqual([0.12, 0.22, 0.35, 0.55, 1]);
+    expect(setAura(g(3, 3, 3, 3, 3))).toEqual({ tier: 3, count: 5, intensity: 1 });
+  });
+  it("params: color del tier y el conjunto completo ≈ aura del élite", () => {
+    const full = setAuraParams(4, 1);
+    const elite = auraParams("elite");
+    expect(full.rate).toBe(elite.rate);
+    expect(full.alpha).toBe(elite.alpha);
+    expect(setAuraParams(2, 0.12).alpha).toBeLessThan(0.1);
+    expect(setAuraParams(2, 0.12).color.b).toBe(1);
+  });
+});
+
+describe("SetAuraFx", () => {
+  it("reconstruye solo al cambiar, respeta pausa y muerte, y no deja nada al liberar", () => {
+    const scene = new Scene(new NullEngine());
+    let flame: ReturnType<typeof flameTexture> | undefined;
+    const ch = character(scene);
+    const fx = new SetAuraFx(scene, () => (flame ??= flameTexture(scene, "t")), ch);
+    fx.set({});
+    expect(scene.particleSystems).toHaveLength(0);
+    fx.set({ helmet: { tier: 3 }, chest: { tier: 3 } });
+    const a = fx.current;
+    expect(scene.particleSystems).toHaveLength(AURA_BONES.length);
+    fx.set({ helmet: { tier: 3 }, chest: { tier: 3 }, belt: { tier: 1 } });
+    expect(fx.current).toBe(a);
+    fx.setPaused(true);
+    fx.setActive(false);
+    fx.set({ helmet: { tier: 3 }, chest: { tier: 3 }, gloves: { tier: 3 } });
+    expect(fx.current).not.toBe(a);
+    expect(scene.particleSystems).toHaveLength(AURA_BONES.length);
+    expect(scene.particleSystems.every((p) => p.emitRate === 0 && p.updateSpeed === 0)).toBe(true);
+    fx.setActive(true);
+    expect(scene.particleSystems.every((p) => p.emitRate > 0)).toBe(true);
+    fx.set({});
+    expect(scene.particleSystems).toHaveLength(0);
+    fx.set({ boots: { tier: 4 } });
+    fx.dispose();
+    flame?.dispose();
+    ch.root.dispose();
+    for (const n of scene.transformNodes.slice()) n.dispose();
+    expect(scene.particleSystems).toHaveLength(0);
+    expect(scene.meshes).toHaveLength(0);
     expect(scene.textures).toHaveLength(0);
   });
 });
