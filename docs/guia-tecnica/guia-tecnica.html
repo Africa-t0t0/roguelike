@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Roguelike co-op — Guía técnica</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  :root { --ink:#1d1a16; --muted:#5b5348; --gold:#9a7428; --line:#d8cfc0; --code:#f4f0e8; --accent:#7a2e1c; }
+  * { box-sizing: border-box; }
+  body { font-family: "Iowan Old Style", Georgia, "Times New Roman", serif; color: var(--ink); font-size: 10.6pt; line-height: 1.5; margin: 0; }
+  h1, h2, h3, h4 { font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif; color: var(--ink); line-height: 1.25; }
+  h1 { font-size: 22pt; margin: 0 0 6pt; }
+  h2 { font-size: 15.5pt; margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 2px solid var(--gold); break-after: avoid; }
+  h2.chapter { break-before: page; }
+  h3 { font-size: 12pt; margin: 14pt 0 5pt; color: var(--accent); break-after: avoid; }
+  h4 { font-size: 10.5pt; margin: 10pt 0 3pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt 18pt; padding: 0; }
+  li { margin: 0 0 3pt; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.8pt; background: var(--code); padding: 0.5pt 3pt; border-radius: 3px; }
+  pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.4pt; line-height: 1.4; background: var(--code); border: 1px solid var(--line); border-left: 3px solid var(--gold); padding: 7pt 9pt; border-radius: 4px; white-space: pre-wrap; break-inside: avoid; margin: 4pt 0 9pt; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 4pt 0 10pt; font-size: 9.4pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 3.5pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #efe7d8; font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif; font-size: 8.8pt; }
+  .note { border: 1px solid #c9b48a; background: #fbf6ea; padding: 7pt 10pt; border-radius: 4px; margin: 6pt 0 10pt; break-inside: avoid; }
+  .warn { border: 1px solid #c98a7a; background: #fbefea; padding: 7pt 10pt; border-radius: 4px; margin: 6pt 0 10pt; break-inside: avoid; }
+  .note b:first-child, .warn b:first-child { font-family: "Avenir Next", Arial, sans-serif; }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; }
+  .cover .kicker { font-family: "Avenir Next", Arial, sans-serif; letter-spacing: 0.2em; color: var(--gold); font-size: 10pt; text-transform: uppercase; }
+  .cover h1 { font-size: 34pt; margin: 8pt 0 4pt; }
+  .cover .sub { font-size: 14pt; color: var(--muted); max-width: 140mm; }
+  .cover .meta { margin-top: 30pt; font-size: 10pt; color: var(--muted); }
+  .toc { break-before: page; }
+  .toc ol { list-style: none; margin-left: 0; }
+  .toc li { margin: 3pt 0; font-size: 11pt; }
+  .toc li span { color: var(--muted); }
+  .diagram { font-family: "SF Mono", Menlo, monospace; font-size: 8.2pt; line-height: 1.3; background: #fff; border: 1px solid var(--line); padding: 8pt; white-space: pre; break-inside: avoid; margin: 4pt 0 10pt; }
+  .kbd { font-family: "Avenir Next", Arial, sans-serif; font-size: 8.5pt; border: 1px solid #b9ad99; border-bottom-width: 2px; border-radius: 3px; padding: 0 4pt; background: #fff; }
+  .steps li { margin-bottom: 5pt; }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="kicker">Documentación técnica</div>
+  <h1>Roguelike co-op</h1>
+  <div class="sub">Guía para entender el código y hacer tus propios cambios: estructura, cómo funciona por dentro, recetas paso a paso y las reglas que no hay que romper.</div>
+  <div class="meta">Monorepo TypeScript · Babylon.js 9 · Colyseus 0.18 · Vite · Vitest<br>Estado del código: rama <code>main</code>, octubre 2026 (protocolo 14)</div>
+</section>
+
+<section class="toc">
+  <h2>Contenido</h2>
+  <ol>
+    <li>1. Antes de empezar <span>— instalar, correr, probar, el panel F2</span></li>
+    <li>2. La arquitectura en una página <span>— quién manda, qué viaja por la red</span></li>
+    <li>3. Mapa del repositorio <span>— qué hay en cada carpeta y archivo</span></li>
+    <li>4. El ciclo del servidor <span>— un tick de <code>RunRoom</code>, paso a paso</span></li>
+    <li>5. El ciclo del cliente <span>— un frame de <code>main.ts</code>, predicción e interpolación</span></li>
+    <li>6. Red y protocolo <span>— el estado sincronizado, los mensajes, la versión</span></li>
+    <li>7. Determinismo y números aleatorios</li>
+    <li>8. Los sistemas del servidor <span>— combate, habilidades, enemigos, oleadas, orbes, cartas</span></li>
+    <li>9. Dónde viven los datos del juego <span>— las tablas que vas a tocar más</span></li>
+    <li>10. El cliente por dentro <span>— vistas, animaciones, efectos, HUD</span></li>
+    <li>11. Recetas paso a paso <span>— cómo agregar cartas, habilidades, enemigos, armas, equipo…</span></li>
+    <li>12. Tests</li>
+    <li>13. Reglas y trampas comunes <span>— la lista de chequeo antes de cada cambio</span></li>
+    <li>14. Flujo de trabajo y documentos</li>
+    <li>15. Glosario</li>
+  </ol>
+</section>
+
+<!-- ============================================================ -->
+<h2 class="chapter">1. Antes de empezar</h2>
+
+<h3>1.1 Requisitos e instalación</h3>
+<p>Necesitas <b>Node 24 o más nuevo</b>. El proyecto es un <i>monorepo</i> de npm (workspaces): tres paquetes que se instalan juntos con un solo comando desde la raíz.</p>
+<pre><code>cd roguelike-coop
+npm install</code></pre>
+
+<h3>1.2 Jugar en desarrollo</h3>
+<pre><code>npm run dev</code></pre>
+<p>Levanta dos procesos a la vez:</p>
+<ul>
+  <li><b>Servidor</b> (Colyseus) en <code>ws://localhost:2567</code>, con <code>tsx watch</code>: se reinicia solo cuando guardas un archivo del servidor o de <code>shared</code>.</li>
+  <li><b>Cliente</b> (Vite) en <code>http://localhost:5173</code>: recarga la página sola cuando guardas un archivo del cliente.</li>
+</ul>
+<p>Abre siempre <code>http://localhost:5173</code>. El puerto 2567 solo sirve el cliente compilado en producción.</p>
+
+<h3>1.3 Parámetros de URL útiles (solo en desarrollo)</h3>
+<table>
+  <tr><th>Parámetro</th><th>Qué hace</th><th>Ejemplo</th></tr>
+  <tr><td><code>sandbox=1</code></td><td>Crea una <b>sala de pruebas</b>: empieza abierta (sin sellos), oleadas apagadas y el panel <span class="kbd">F2</span> disponible.</td><td><code>?sandbox=1</code></td></tr>
+  <tr><td><code>floorTimeStart</code></td><td>Crea la sala con el reloj del piso adelantado (segundos). Útil para ver oleadas tardías.</td><td><code>?floorTimeStart=300</code></td></tr>
+  <tr><td><code>lag</code>, <code>jitter</code></td><td>Simula latencia (ms de ida y vuelta) y variación, para probar la predicción.</td><td><code>?lag=150&amp;jitter=30</code></td></tr>
+</table>
+<p>Se pueden combinar: <code>?sandbox=1&amp;floorTimeStart=400</code>.</p>
+
+<h3>1.4 El panel de pruebas (F2)</h3>
+<p>En una sala <code>?sandbox=1</code>, <span class="kbd">F2</span> abre un panel a la derecha. Cada botón manda un comando al servidor (mensaje <code>dev</code>); el servidor lo valida y lo aplica, así que lo que ves es lo mismo que pasaría jugando. Secciones:</p>
+<ul>
+  <li><b>Nivel</b>: subir 1 nivel (con elección de carta y pausa) o 5 niveles sin cartas.</li>
+  <li><b>Cartas</b>: darte cualquier carta o habilidad en cualquier rango; quitarlas todas.</li>
+  <li><b>Jugador</b>: invulnerable, sin enfriamiento, curar, y aplicarte estados (quemadura, ralentizar, aturdir).</li>
+  <li><b>Enemigos</b>: crear N enemigos de un tipo, tier, naturaleza y opcionalmente élite; matar a todos; "Enemigos quietos"; "Hechizo ya"; oleadas on/off.</li>
+  <li><b>Reloj del piso</b>: +1 / +5 minutos.</li>
+  <li><b>Arma</b>, <b>Cofres</b>, <b>Equipo</b>: equiparte cualquier arma/pieza/reliquia, soltar piezas, crear un cofre delante.</li>
+</ul>
+<p>El panel está en <code>packages/client/src/ui/devPanel.ts</code>; los comandos se definen y validan en <code>packages/shared/src/sandbox.ts</code> y se aplican en <code>RunRoom.applyDev</code> (servidor).</p>
+
+<h3>1.5 Tests, tipos y compilación</h3>
+<pre><code>npm test                         # los tests de los tres paquetes
+npm test -w @roguelike/server    # solo un paquete
+cd packages/server &amp;&amp; npx vitest run test/EnemySystem.test.ts   # un archivo
+cd packages/client &amp;&amp; npx tsc --noEmit -p .                    # chequeo de tipos
+npm run build -w @roguelike/client                              # compila el cliente</code></pre>
+<div class="warn"><b>Ojo con el puerto 2568.</b> Los tests de <code>RunRoom.test.ts</code> levantan un servidor de prueba en el puerto <b>2568</b>. Si tienes algo escuchando ahí, esos tests no arrancan.</div>
+
+<!-- ============================================================ -->
+<h2 class="chapter">2. La arquitectura en una página</h2>
+
+<div class="diagram">  NAVEGADOR (cliente, Babylon.js)                         SERVIDOR (Colyseus, Node)
+ ┌──────────────────────────────────────┐   inputs 30/s   ┌────────────────────────────────────┐
+ │ teclado/mouse → InputState           │ ─────────────▶ │ RunRoom: cola de inputs por jugador│
+ │ Predictor: mueve YA tu personaje     │   MSG.input     │ tick 30 Hz (SIM_DT = 1/30 s)       │
+ │ LocalCombo / LocalAbility: predicen  │                 │  · mueve, combate, habilidades     │
+ │   tu golpe y tu habilidad            │                 │  · enemigos, oleadas, orbes, cofres│
+ │ SnapshotBuffer: interpola a los demás│ ◀───────────── │ RunState (schema) → parches 20/s   │
+ │   (100 ms en el pasado)              │  estado + msgs  │ mensajes: combat, floorWeapons,    │
+ │ Vistas: dibujan lo que llega         │                 │   levelChoice, welcome             │
+ └──────────────────────────────────────┘                 └────────────────────────────────────┘
+                     ▲                                                     ▲
+                     └──────────── packages/shared (lo usan los dos) ──────┘
+             constantes · RNG con semilla · mazmorra · movimiento · datos (armas, cartas,
+             enemigos, hechizos, naturalezas, equipo) · protocolo · comandos del sandbox</div>
+
+<h3>2.1 Las cuatro ideas que explican todo</h3>
+<ol>
+  <li><b>El servidor es autoritativo.</b> Él decide posiciones, daño, muertes, botín y niveles. El cliente nunca "decide" nada que importe; solo envía <i>inputs</i> (qué teclas apretaste) y dibuja.</li>
+  <li><b>El cliente predice lo tuyo.</b> Para que tu personaje responda sin esperar al servidor, el cliente simula tu movimiento con <b>el mismo código</b> que el servidor (<code>stepPlayer</code> en <code>shared</code>). Cuando llega el estado real, <b>reconcilia</b>: parte de la posición del servidor y vuelve a aplicar los inputs que el servidor todavía no confirmó. Lo mismo hace con el inicio de tu golpe y de tus habilidades.</li>
+  <li><b>Lo demás se interpola.</b> Otros jugadores, enemigos, proyectiles, etc., se dibujan 100 ms en el pasado (<code>INTERP_DELAY_MS</code>), interpolando entre dos estados recibidos. Así se ven suaves aunque lleguen 20 parches por segundo.</li>
+  <li><b><code>shared</code> es la fuente única de verdad de reglas y datos.</b> Si algo debe dar igual en cliente y servidor (movimiento, tablas de armas, fórmulas), vive en <code>shared</code> y es <b>determinista</b>.</li>
+</ol>
+
+<h3>2.2 Números clave (<code>packages/shared/src/constants.ts</code>)</h3>
+<table>
+  <tr><th>Constante</th><th>Valor</th><th>Para qué</th></tr>
+  <tr><td><code>SIM_HZ</code> / <code>SIM_DT</code></td><td>30 / 1/30 s</td><td>Frecuencia de la simulación (servidor y predicción).</td></tr>
+  <tr><td><code>PATCH_RATE_MS</code></td><td>50</td><td>Cada cuánto el servidor manda el estado (20/s).</td></tr>
+  <tr><td><code>INTERP_DELAY_MS</code></td><td>100</td><td>Cuánto en el pasado se dibuja lo interpolado.</td></tr>
+  <tr><td><code>MAX_INPUTS_PER_TICK</code></td><td>3</td><td>Inputs de un jugador procesados por tick como máximo.</td></tr>
+  <tr><td><code>TILE_SIZE</code></td><td>2 m</td><td>Tamaño de una casilla de la mazmorra.</td></tr>
+  <tr><td><code>PLAYER_SPEED</code>, <code>SPRINT_SPEED</code></td><td>5, 8 m/s</td><td>Velocidades del jugador.</td></tr>
+  <tr><td><code>JUMP_VELOCITY</code>, <code>GRAVITY</code></td><td>7 m/s, 20 m/s²</td><td>Salto (~1,1 m de alto).</td></tr>
+  <tr><td><code>PICKUP_RANGE</code></td><td>1,5 m</td><td>Distancia para recoger con E y abrir cofres.</td></tr>
+  <tr><td><code>REWIND_MAX_TICKS</code></td><td>10</td><td>Cuánto rebobina el servidor para compensar el lag al golpear.</td></tr>
+  <tr><td><code>RESPAWN_S</code></td><td>5 s</td><td>Tiempo hasta reaparecer.</td></tr>
+  <tr><td><code>MAX_PLAYERS</code></td><td>4</td><td>Jugadores por sala.</td></tr>
+</table>
+
+<h3>2.3 Compensación de lag al golpear</h3>
+<p>Cuando haces clic, ves a los enemigos donde estaban hace ~100 ms (interpolados). Para que el golpe sea justo, cada input lleva <code>viewTick</code> (el tick que estabas viendo) y el servidor, al resolver el impacto, mira las posiciones guardadas en <code>PositionHistory</code> de ese momento (acotado a <code>REWIND_MAX_TICKS</code>). El daño se aplica en el <b>momento del impacto</b> del golpe (una fracción de la animación), no en el clic.</p>
+
+<!-- ============================================================ -->
+<h2 class="chapter">3. Mapa del repositorio</h2>
+
+<pre><code>roguelike-coop/
+├── package.json            scripts de raíz (dev, test, build) y workspaces
+├── README.md               cómo jugar, controles, varias pestañas, lag
+├── CREDITS.md              licencias de modelos y animaciones
+├── docs/
+│   ├── specs/              un documento de diseño por fase (qué y por qué)
+│   ├── plans/              el plan de implementación de cada fase (cómo, por tareas)
+│   └── guia-tecnica/       esta guía (HTML + PDF)
+├── scripts/assets/build-mixamo.mjs   arma los .glb de personajes, animaciones y armas
+└── packages/
+    ├── shared/   reglas y datos comunes (sin dependencias de motor ni de red)
+    ├── server/   la sala de Colyseus y la simulación
+    └── client/   el juego en el navegador (Babylon.js + DOM para la UI)</code></pre>
+
+<h3>3.1 <code>packages/shared/src</code></h3>
+<table>
+  <tr><th>Archivo</th><th>Contenido</th></tr>
+  <tr><td><code>constants.ts</code></td><td>Constantes globales (ver 2.2).</td></tr>
+  <tr><td><code>rng.ts</code></td><td><code>createRng(seed)</code>: generador determinista (mulberry32) con <code>next</code>, <code>int</code>, <code>pick</code>.</td></tr>
+  <tr><td><code>dungeon.ts</code></td><td>Generador de mazmorras por semilla: casillas (0 muro, 1 suelo), salas (<code>start</code>/<code>combat</code>/<code>boss</code>), pasillos. <code>isWalkableTile</code>, <code>tileCenter</code>, <code>roomSpawnPoints</code>.</td></tr>
+  <tr><td><code>movement.ts</code></td><td><code>PlayerInput</code>, <code>KinematicState</code>, <code>stepPlayer</code> (mover + saltar + colisiones), <code>sanitizeInput</code>, <code>deadInput</code>, <code>moveCircle</code>.</td></tr>
+  <tr><td><code>nav.ts</code></td><td><code>FlowField</code> (BFS hacia los jugadores, para que los enemigos esquiven muros) y <code>hasLineOfSight</code>.</td></tr>
+  <tr><td><code>combat.ts</code></td><td>Clases (<code>CLASS_DEFS</code>: vida por nivel), <code>ENEMY_DEFS</code> (vida, velocidad, daño, alcance, telegrafía…), <code>xpToNext</code>, <code>playerStats</code>.</td></tr>
+  <tr><td><code>weapons.ts</code></td><td><code>MOVESETS</code> (animaciones y combo de cada estilo), <code>WEAPONS</code>, <code>TIERS</code> (oxidado → legendario), <code>strikeOf</code>, <code>strikeDamage</code>, armas de enemigos.</td></tr>
+  <tr><td><code>cards.ts</code></td><td>Cartas de stat (<code>STAT_CARDS</code>), habilidades (<code>ABILITIES</code>), <code>rollOffer</code>, <code>applyCard</code>, <code>playerMods</code>.</td></tr>
+  <tr><td><code>waves.ts</code></td><td>Curvas del director de oleadas, escalado de enemigos, tope de vivos, sorteo de tiers, hechiceros por minuto, probabilidad de élite.</td></tr>
+  <tr><td><code>spells.ts</code></td><td>Hechiceros (<code>SPELLS</code>: orbe, zona, rayo por tier), <code>casterTelegraphS</code>.</td></tr>
+  <tr><td><code>natures.ts</code></td><td>Naturalezas (fuego/hielo/rayo), <code>NATURE</code>, <code>ELITE</code>, <code>natureEffects</code>.</td></tr>
+  <tr><td><code>gear.ts</code></td><td>Equipo (ranuras, stats por tier, legendarias, reliquias), <code>rollGear</code>, <code>combinedMods</code>.</td></tr>
+  <tr><td><code>chests.ts</code>, <code>start.ts</code></td><td>Posición de cofres y botín; sellos de la sala inicial.</td></tr>
+  <tr><td><code>protocol.ts</code></td><td><code>PROTOCOL_VERSION</code>, nombres de mensajes (<code>MSG</code>), <code>CombatEvent</code>, validación de nombres.</td></tr>
+  <tr><td><code>sandbox.ts</code></td><td>Comandos del panel F2 (<code>DevCommand</code>) y <code>parseDevCommand</code>.</td></tr>
+</table>
+
+<h3>3.2 <code>packages/server/src</code></h3>
+<table>
+  <tr><th>Archivo</th><th>Contenido</th></tr>
+  <tr><td><code>index.ts</code>, <code>app.config.ts</code></td><td>Arranque del servidor y registro de la sala <code>run</code>.</td></tr>
+  <tr><td><code>rooms/RunRoom.ts</code></td><td><b>El corazón</b>: crea la partida, recibe inputs, corre el tick, reparte botín, aplica comandos del sandbox.</td></tr>
+  <tr><td><code>rooms/RunState.ts</code></td><td>El <b>estado sincronizado</b> (schema de Colyseus): jugadores, enemigos, proyectiles, orbes, peligros, cofres, zonas…</td></tr>
+  <tr><td><code>rooms/syncState.ts</code></td><td>Copia la simulación al schema cada tick (<code>syncPlayer</code>, <code>syncWorld</code>).</td></tr>
+  <tr><td><code>rooms/PlayerRegistry.ts</code></td><td>Registro de jugadores por nombre/token (reconexión), su progreso, equipo, objetos del suelo.</td></tr>
+  <tr><td><code>rooms/createOptions.ts</code>, <code>sandbox.ts</code></td><td>Opciones de creación (semilla, <code>sandbox</code>, <code>floorTimeStart</code>) y utilidades del sandbox.</td></tr>
+  <tr><td><code>sim/CombatSystem.ts</code></td><td>Vida, combo de ataques, daño recibido (con bloqueo, resistencias, estados), muertes, XP del grupo.</td></tr>
+  <tr><td><code>sim/AbilitySystem.ts</code></td><td>Habilidades activas: enfriamientos, cargas, impactos, Grito, ondas de corte, zonas del jugador.</td></tr>
+  <tr><td><code>sim/EnemySystem.ts</code></td><td>Enemigos: creación, IA, ataques, proyectiles, peligros (zonas y rayos), estados, élites, botín.</td></tr>
+  <tr><td><code>sim/hazards.ts</code></td><td>Geometría de zonas y rayos (<code>inZone</code>, <code>inBeam</code>, <code>beamLength</code>).</td></tr>
+  <tr><td><code>sim/WaveDirector.ts</code></td><td>Cuándo y dónde aparecen las oleadas (fuera de la vista de los jugadores).</td></tr>
+  <tr><td><code>sim/OrbSystem.ts</code></td><td>Orbes de XP: imán, recogida, fusión.</td></tr>
+  <tr><td><code>sim/LevelUpSystem.ts</code></td><td>Elección de cartas al subir de nivel (pausa del grupo, 20 s, ofertas sin pausa).</td></tr>
+  <tr><td><code>sim/PositionHistory.ts</code></td><td>Historial de posiciones de enemigos para la compensación de lag.</td></tr>
+</table>
+
+<h3>3.3 <code>packages/client/src</code></h3>
+<table>
+  <tr><th>Carpeta / archivo</th><th>Contenido</th></tr>
+  <tr><td><code>main.ts</code></td><td>Entrada: lobby, conexión, carga de modelos, <code>startSession</code> (crea todas las vistas y el bucle <code>frame</code>).</td></tr>
+  <tr><td><code>net/connection.ts</code></td><td>Conexión a Colyseus, <b>snapshots</b> tipados del estado, parseo defensivo de mensajes, envío de inputs y comandos.</td></tr>
+  <tr><td><code>net/Predictor.ts</code></td><td>Predicción y reconciliación de tu movimiento.</td></tr>
+  <tr><td><code>net/LocalCombo.ts</code>, <code>LocalAbility.ts</code></td><td>Predicción del inicio del golpe y de las habilidades (con enfriamientos y cargas).</td></tr>
+  <tr><td><code>net/SnapshotBuffer.ts</code>, <code>fixedStep.ts</code>, <code>pauseClock.ts</code>, <code>tickClock.ts</code></td><td>Interpolación, paso fijo de 30 Hz, reloj de juego que se congela en la pausa.</td></tr>
+  <tr><td><code>input/</code></td><td><code>InputState</code> (estado de teclas, una pulsación = una acción) y <code>browserInput</code> (eventos del navegador, puntero).</td></tr>
+  <tr><td><code>render/</code></td><td>Escena, cámara, mazmorra, personajes, animaciones y todos los efectos (ver capítulo 10).</td></tr>
+  <tr><td><code>ui/</code></td><td>Interfaz en DOM: HUD, barra de habilidades, panel de cartas, brújula, minimapa, panel F2, lobby, iconos.</td></tr>
+  <tr><td><code>index.html</code></td><td>Estructura de la página y <b>todo el CSS</b> del HUD (variables <code>--gold</code>, <code>--ink</code>, fuentes).</td></tr>
+  <tr><td><code>public/assets/</code></td><td>Modelos .glb (personajes, animaciones, armas, mazmorra) e imágenes de la UI.</td></tr>
+  <tr><td><code>dev/grip.html</code></td><td>Página de desarrollo para ajustar cómo se agarran las armas.</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 class="chapter">4. El ciclo del servidor</h2>
+<p><code>RunRoom</code> llama a <code>tick()</code> 30 veces por segundo (<code>setTimestep</code>). Este es el orden real, y el orden importa: el cliente predice en el mismo orden.</p>
+
+<h3>4.1 Un tick, paso a paso</h3>
+<ol class="steps">
+  <li><b>Elecciones de cartas</b> (<code>levelUp.step</code>). Si el grupo está en <b>pausa</b> eligiendo cartas, se corre <code>pausedTick</code> y el tick termina ahí: nada avanza, los inputs se descartan pero su <code>seq</code> se confirma.</li>
+  <li><b>Inputs de cada jugador conectado</b> (hasta 3 por tick). Para cada input, en este orden:
+    <ol>
+      <li>Si está muerto, el input se convierte con <code>deadInput</code> (quieto, sin acciones).</li>
+      <li><code>stepPlayer</code> mueve al jugador (con su multiplicador de velocidad: cartas, estados, bloqueo).</li>
+      <li><code>combat.onInputProcessed</code>: avanza el combo y resuelve impactos de golpes que vencen.</li>
+      <li><code>abilities.onInput</code>: habilidades (empezar, impactos, bloqueo) y un posible impulso (Tajo frontal).</li>
+      <li>E: abrir cofre o recoger objeto (si no está golpeando ni en una habilidad).</li>
+      <li>Ataque: empezar un golpe nuevo del combo.</li>
+    </ol></li>
+  <li><b><code>state.tick++</code></b>.</li>
+  <li><b>Inicio de la partida</b>: si alguien salió de la sala inicial, <code>started = true</code>. Antes de empezar no corren reloj, salas ni oleadas.</li>
+  <li><b>Reloj del piso</b> (<code>floorTime += SIM_DT</code>) y escalado de enemigos por tiempo y nivel.</li>
+  <li><b>Salas y oleadas</b>: <code>enemySystem.activateRooms</code> (llenar una sala al entrar) y <code>director.step</code> (grupos que llegan con el tiempo).</li>
+  <li><b>Enemigos</b>: <code>enemySystem.step</code> (IA, ataques, proyectiles, peligros, estados) → sus golpes se encolan en el combate.</li>
+  <li><b>Habilidades por tick</b> (enfriamientos, Grito, ondas de corte, zonas).</li>
+  <li><b>Daño por estados</b> (quemaduras) y <b>orbes</b>: los vivos atraen y recogen XP; si el grupo sube de nivel, la pausa empieza al final del tick.</li>
+  <li><b>Combate por tick</b>: golpes enemigos que vencen, muertes, reapariciones, regeneración.</li>
+  <li><b>Historial</b> de posiciones (para la compensación de lag).</li>
+  <li><b>Sincronizar</b> todo al schema (<code>syncPlayer</code>, <code>syncWorld</code>). Colyseus manda los cambios cada 50 ms.</li>
+</ol>
+
+<h3>4.2 Cómo entra un input</h3>
+<p>El cliente manda <code>MSG.input</code> con un <code>seq</code> creciente. <code>enqueueInput</code> lo pasa por <code>sanitizeInput</code> (nunca confíes en el cliente), descarta repetidos o viejos y lo encola. El tick consume la cola. El <code>lastSeq</code> de cada jugador viaja en el estado para que el cliente sepa qué inputs ya se procesaron.</p>
+
+<h3>4.3 Jugadores: registro y reconexión</h3>
+<p>Un jugador se identifica por <b>nombre + token</b> (guardado en <code>localStorage</code>). <code>PlayerRegistry</code> conserva su <code>PlayerRecord</code> aunque se desconecte: posición, combate, progreso (cartas), equipo, reliquia, objetos del suelo. Volver con el mismo nombre y token lo recupera; con el mismo nombre desde otra pestaña "toma el control" y la anterior se cierra.</p>
+
+<h3>4.4 La pausa de elección de cartas</h3>
+<p>Al subir de nivel, <code>LevelUpSystem</code> pausa al grupo: cada jugador elige 1 de 3 cartas (20 s, al azar si no elige). Mientras dura, el servidor no avanza nada y el cliente congela su reloj de juego (<code>PauseClock</code>): animaciones, partículas y efectos se detienen. <b>Todo lo nuevo que dependa del tiempo debe respetar esta pausa</b> (ver 13).</p>
+
+<!-- ============================================================ -->
+<h2 class="chapter">5. El ciclo del cliente</h2>
+
+<h3>5.1 Arranque</h3>
+<ol>
+  <li><code>main.ts</code> muestra el lobby (<code>ui/lobby.ts</code>).</li>
+  <li><code>connect()</code> (<code>net/connection.ts</code>) crea o une la sala y espera <code>welcome</code> (tu clave y si es sandbox).</li>
+  <li>Se cargan modelos (<code>loadAssets</code>) y animaciones (<code>AnimLibrary</code>).</li>
+  <li><code>startSession</code> genera la <b>misma mazmorra</b> que el servidor a partir de la semilla (<code>generateDungeon(seed, floor)</code>) y crea todas las vistas, el HUD y el bucle.</li>
+</ol>
+
+<h3>5.2 Los manejadores de red</h3>
+<ul>
+  <li><code>conn.onPlayers</code>: llega tu estado y el de los demás. El tuyo va al <code>Predictor.reconcile</code>; los demás a un <code>SnapshotBuffer</code> cada uno.</li>
+  <li><code>conn.onWorld</code>: enemigos, proyectiles, orbes, peligros, cofres, zonas → se "empujan" (<code>push</code>) a sus vistas.</li>
+  <li><code>conn.onCombat</code>: eventos sueltos (daño, golpe, nivel, habilidad, cadena del rayo) → números de daño, efectos.</li>
+  <li><code>conn.onFloorWeapons</code>: tus objetos del suelo (cada jugador ve los suyos).</li>
+  <li><code>conn.onLevelChoice</code>: abre el panel de cartas.</li>
+</ul>
+
+<h3>5.3 Un frame, paso a paso (<code>frame()</code> en <code>main.ts</code>)</h3>
+<ol class="steps">
+  <li>Calcula el tiempo de juego (<code>clock.now</code>, quieto en la pausa) y el <code>dt</code>.</li>
+  <li><b>Paso fijo a 30 Hz</b> (<code>FixedStep</code>): por cada paso, toma un input (<code>input.sample</code>), lo sanea, lo predice (<code>predictor.applyLocal</code>), avanza el combo y la habilidad locales y lo envía (<code>conn.sendInput</code>). <i>Exactamente lo mismo, en el mismo orden, que hará el servidor.</i></li>
+  <li>Dibuja tu personaje en la posición predicha (interpolada entre los dos últimos pasos, más un suavizado de correcciones).</li>
+  <li>Dibuja a los demás y al mundo en <code>renderAt = now − 100 ms</code> (interpolados).</li>
+  <li>Actualiza HUD, brújula, minimapa, barra de habilidades.</li>
+  <li>Avisa la pausa a todas las vistas (<code>setPaused</code>) y renderiza la escena.</li>
+</ol>
+
+<h3>5.4 Predicción: la regla de oro</h3>
+<div class="warn"><b>Todo lo que el cliente predice debe calcularse igual que en el servidor.</b> Si cambias cómo se mueve el jugador (velocidad, bloqueo, estados), cómo empieza un golpe o una habilidad (enfriamientos, cargas), tienes que cambiarlo en los dos lados, idealmente con una función de <code>shared</code> que usen ambos (como <code>stepPlayer</code>, <code>deadInput</code> o <code>blockMoveMult</code>). Si no coinciden, verás "tirones": el personaje salta a la posición corregida.</div>
+
+<!-- ============================================================ -->
+<h2 class="chapter">6. Red y protocolo</h2>
+
+<h3>6.1 El estado sincronizado (<code>RunState.ts</code>)</h3>
+<p>Colyseus sincroniza automáticamente un árbol de objetos definidos con <code>schema({...})</code>. Solo viaja lo que cambia. Los campos principales:</p>
+<table>
+  <tr><th>Esquema</th><th>Campos (resumen)</th></tr>
+  <tr><td><code>RunState</code></td><td><code>seed</code>, <code>floor</code>, <code>tick</code>, <code>level</code>, <code>xp</code>, <code>floorTime</code>, <code>paused</code>, <code>started</code> y mapas: <code>players</code>, <code>enemies</code>, <code>projectiles</code>, <code>orbs</code>, <code>playerShots</code>, <code>hazards</code>, <code>chests</code>, <code>playerZones</code>.</td></tr>
+  <tr><td><code>PlayerState</code></td><td>posición y salto, <code>lastSeq</code>, vida, muerte, combo, arma (id, tier, naturaleza), multiplicadores (<code>moveSpeedMult</code>, <code>statusSpeedMult</code>, <code>cooldownMult</code>…), estados, habilidades (<code>AbilitySlotState</code>: id, rango, enfriamiento, cargas), equipo (<code>GearState</code> por ranura) y reliquia.</td></tr>
+  <tr><td><code>EnemyState</code></td><td>tipo, posición, vida, estado de IA y su tiempo, arma, tier de hechizo, élite, naturaleza, estados (quemando, ralentizado, congelado, aturdido).</td></tr>
+  <tr><td>otros</td><td><code>ProjectileState</code>, <code>OrbState</code>, <code>HazardState</code> (zonas y rayos), <code>ChestState</code>, <code>PlayerShotState</code>, <code>PlayerZoneState</code>.</td></tr>
+</table>
+<p>Los datos complejos (por ejemplo una pieza de equipo con sus stats) viajan como <b>texto JSON</b> en un campo <code>t.string()</code> (<code>GearState.data</code>) y el cliente los valida al parsear.</p>
+
+<h3>6.2 Mensajes (<code>MSG</code> en <code>protocol.ts</code>)</h3>
+<table>
+  <tr><th>Mensaje</th><th>Dirección</th><th>Contenido</th></tr>
+  <tr><td><code>input</code></td><td>cliente → servidor</td><td><code>PlayerInput</code>: <code>seq</code>, movimiento, <code>facing</code>, sprint, salto, ataque, E, máscara de habilidades, <code>viewTick</code>.</td></tr>
+  <tr><td><code>welcome</code></td><td>servidor → cliente</td><td>Tu clave y si la sala es sandbox.</td></tr>
+  <tr><td><code>combat</code></td><td>servidor → todos</td><td><code>CombatEvent</code>: <code>damage</code>, <code>swing</code>, <code>levelUp</code>, <code>ability</code>, <code>chain</code>.</td></tr>
+  <tr><td><code>floorWeapons</code></td><td>servidor → un jugador</td><td>Sus objetos del suelo (armas, piezas, reliquias) con tiempo de vida.</td></tr>
+  <tr><td><code>levelChoice</code> / <code>chooseCard</code></td><td>ida y vuelta</td><td>Oferta de 3 cartas (con <code>offerId</code>) y la elección.</td></tr>
+  <tr><td><code>dev</code></td><td>cliente → servidor</td><td>Comando del panel F2 (solo en salas sandbox).</td></tr>
+</table>
+
+<h3>6.3 <code>PROTOCOL_VERSION</code>: cuándo subirlo</h3>
+<p>El cliente manda su versión al entrar; si no coincide con la del servidor, lo rechaza. <b>Súbelo en uno</b> cada vez que cambies el schema (agregar o quitar campos), el formato de un mensaje o el significado de un dato. Hay un test que fija el número en <code>packages/shared/test/cards.test.ts</code>: actualízalo también. Después de cambiarlo, recarga el navegador con <span class="kbd">Cmd+Shift+R</span>.</p>
+
+<h3>6.4 Parseo defensivo en el cliente</h3>
+<p><code>connection.ts</code> convierte el estado crudo en <i>snapshots</i> tipados (<code>PlayerSnapshot</code>, <code>EnemySnapshot</code>, <code>WorldSnapshot</code>…) y valida todo: números finitos, valores conocidos (una naturaleza desconocida pasa a <code>"none"</code>), JSON que no lanza errores. Si agregas un campo, agrégalo ahí con un valor por defecto seguro.</p>
+
+<!-- ============================================================ -->
+<h2 class="chapter">7. Determinismo y números aleatorios</h2>
+<p>La mazmorra se genera igual en cliente y servidor a partir de la semilla. Las tiradas del servidor (botín, IA, oleadas) usan generadores con semilla para que los tests sean reproducibles.</p>
+<ul>
+  <li><b>Nunca uses <code>Math.random()</code></b> en <code>shared</code> ni en la simulación del servidor. Usa un <code>Rng</code> (<code>createRng(semilla)</code>).</li>
+  <li>Cada sistema tiene su propio generador, creado en <code>RunRoom.onCreate</code> con la semilla de la sala combinada con una "sal" (por ejemplo <code>seed ^ ENEMY_RNG_SALT</code>). Así, agregar una tirada en un sistema no cambia las secuencias de los demás.</li>
+  <li><b>Cada tirada nueva cambia lo que sale después</b> en ese generador. Por eso, cuando agregas un sorteo, algunos tests con semilla pueden cambiar sus resultados esperados. Si quieres evitarlo, crea un generador nuevo con su propia sal, o sortea solo cuando haga falta (como la élite, que solo sortea desde el minuto 3).</li>
+  <li>En el cliente sí puedes usar <code>Math.random()</code> para cosas puramente visuales (chispas, partículas), porque no afectan la partida.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 class="chapter">8. Los sistemas del servidor</h2>
+
+<h3>8.1 Combate (<code>CombatSystem.ts</code>)</h3>
+<ul>
+  <li><b><code>CombatState</code></b> por jugador: clase, arma (id, tier, naturaleza), vida, combo, golpes pendientes recibidos, mods (de cartas, equipo y reliquia), habilidades, enfriamientos, bloqueo, bono del Grito, estados (quemadura, ralentización, aturdimiento) y efectos de equipo (<code>fx</code>).</li>
+  <li><b>Atacar</b>: <code>attack</code> empieza un golpe del combo del moveset del arma; el impacto se resuelve en <code>impactAt</code> de la animación, con arco, alcance y daño (<code>strikeDamage</code> × mods × bono).</li>
+  <li><b>Recibir daño</b>: los golpes enemigos se encolan con un tick de resolución (<code>queueEnemyHits</code>) y se aplican en <code>applyDue</code>: multiplicador de daño recibido, resistencia elemental, bloqueo frontal, estados del élite, Última resistencia, reflejo.</li>
+  <li><b>XP del grupo</b>: el nivel y la XP son <b>compartidos</b> (<code>grantXp</code>); al subir de nivel sube la vida máxima de todos.</li>
+  <li><b><code>setMods</code></b> recalcula la vida máxima con <code>maxHpFor</code> cuando cambian cartas, equipo o reliquia.</li>
+</ul>
+
+<h3>8.2 Habilidades (<code>AbilitySystem.ts</code>)</h3>
+<ul>
+  <li>Un jugador tiene hasta 4 habilidades activas en las teclas 1–4 (<code>abilitySlots</code>) más la pasiva (Onda de corte).</li>
+  <li><code>onInput</code>: detecta el flanco de la tecla, revisa enfriamiento/cargas, empieza la animación (<code>abilityAnim</code>) con sus tiempos de impacto (<code>impactTimes</code>) y resuelve los impactos vencidos (<code>resolveImpact</code>, un <code>switch</code> por habilidad).</li>
+  <li><code>step</code> (por tick): enfriamientos, recarga de cargas, Grito, ondas de corte, zonas del jugador (grietas).</li>
+  <li>Los golpes a enemigos pasan por <code>enemies.strike</code>, que aplica la naturaleza del arma (quemar, ralentizar, encadenar).</li>
+</ul>
+
+<h3>8.3 Enemigos (<code>EnemySystem.ts</code>)</h3>
+<p>Cada enemigo tiene un estado de IA: <code>idle → chase → telegraph → recover</code> (y <code>dead</code>).</p>
+<ul>
+  <li><b>chase</b>: persigue al jugador vivo más cercano por recorrido, siguiendo el <code>FlowField</code> si no hay línea de vista. Los hechiceros se plantan a distancia preferida.</li>
+  <li><b>telegraph</b>: prepara el ataque (el cliente muestra el aviso). Al terminar golpea, dispara un orbe, marca una zona o dispara un rayo. <code>startTelegraph</code> es el único punto de entrada.</li>
+  <li><b>recover</b>: enfriamiento antes de volver a perseguir.</li>
+  <li>Además: aturdimiento y congelamiento, empuje, separación entre enemigos, proyectiles, peligros (<code>hazards</code>), estados (quemadura, ralentización), élites (vida ×3, naturaleza, ataques alternados) y el sorteo de botín al morir (<code>rollDrop</code>).</li>
+  <li>Los enemigos se crean con <code>createEnemy</code> desde <code>activateRooms</code> (salas), <code>spawnWave</code> (oleadas) o <code>spawnAt</code> (sandbox).</li>
+</ul>
+
+<h3>8.4 Oleadas, orbes y cartas</h3>
+<ul>
+  <li><b><code>WaveDirector</code></b>: cada cierto intervalo (que se acorta con el reloj) crea un grupo a 8–30 casillas de recorrido del jugador, fuera de su vista, respetando el tope de enemigos vivos.</li>
+  <li><b><code>OrbSystem</code></b>: al morir, un enemigo deja orbes de XP; se atraen dentro del radio de imán y se recogen al tocarlos.</li>
+  <li><b><code>LevelUpSystem</code></b>: ofertas de 3 cartas (<code>rollOffer</code>), pausa del grupo, ofertas sin pausa para quien entra tarde o vuelve.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 class="chapter">9. Dónde viven los datos del juego</h2>
+<p>La mayoría de los cambios de balance y contenido son <b>cambios de datos en <code>packages/shared</code></b>. Estas son las tablas que más vas a tocar:</p>
+<table>
+  <tr><th>Quiero cambiar…</th><th>Archivo · símbolo</th></tr>
+  <tr><td>Vida del jugador por nivel</td><td><code>combat.ts</code> · <code>CLASS_DEFS</code></td></tr>
+  <tr><td>Vida, daño, velocidad, alcance, XP de enemigos</td><td><code>combat.ts</code> · <code>ENEMY_DEFS</code></td></tr>
+  <tr><td>Curva de XP por nivel</td><td><code>combat.ts</code> · <code>xpToNext</code></td></tr>
+  <tr><td>Armas (daño, alcance, velocidad) y combos</td><td><code>weapons.ts</code> · <code>WEAPONS</code>, <code>MOVESETS</code></td></tr>
+  <tr><td>Rarezas (multiplicador, color, probabilidad de soltar)</td><td><code>weapons.ts</code> · <code>TIERS</code></td></tr>
+  <tr><td>Qué arma lleva cada enemigo</td><td><code>weapons.ts</code> · <code>ARMED_CHANCE</code></td></tr>
+  <tr><td>Cartas de stat y su efecto</td><td><code>cards.ts</code> · <code>STAT_CARDS</code>, <code>playerMods</code></td></tr>
+  <tr><td>Habilidades (enfriamiento, daño por rango, clip)</td><td><code>cards.ts</code> · <code>ABILITIES</code></td></tr>
+  <tr><td>Ritmo de oleadas, escalado, tope de vivos</td><td><code>waves.ts</code></td></tr>
+  <tr><td>Hechizos por tier</td><td><code>spells.ts</code> · <code>SPELLS</code></td></tr>
+  <tr><td>Quemadura, ralentización, cadena; fuerza de élites</td><td><code>natures.ts</code> · <code>NATURE</code>, <code>ELITE</code></td></tr>
+  <tr><td>Equipo, legendarias, reliquias</td><td><code>gear.ts</code> · <code>GEAR_BASE</code>, <code>LEGENDARY_POOL</code>, <code>RELICS</code></td></tr>
+  <tr><td>Botín de cofres</td><td><code>chests.ts</code> · <code>CHEST_LOOT</code></td></tr>
+  <tr><td>Velocidades, salto, rango de recogida</td><td><code>constants.ts</code></td></tr>
+</table>
+<p>Del lado del cliente, lo puramente visual también está en tablas: <code>render/looks.ts</code> (<code>ENEMY_LOOKS</code>: modelo, altura y animaciones por enemigo), <code>render/natureLooks.ts</code> (colores de naturalezas), <code>render/casterLooks.ts</code>, <code>render/tierGlow.ts</code>, <code>ui/abilityBar.ts</code> (<code>ABILITY_GLYPHS</code>) y <code>index.html</code> (colores y tamaños del HUD).</p>
+
+<!-- ============================================================ -->
+<h2 class="chapter">10. El cliente por dentro</h2>
+
+<h3>10.1 El patrón de las vistas</h3>
+<p>Casi todo lo que se dibuja sigue la misma forma, por ejemplo <code>projectileViews.ts</code>, <code>hazardViews.ts</code>, <code>chestViews.ts</code>, <code>enemyViews.ts</code>:</p>
+<pre><code>class XViews {
+  constructor(scene)                 // crea materiales y texturas COMPARTIDOS
+  push(world, receivedAtMs)          // llega un estado: crear/actualizar/marcar para borrar por id
+  render(renderAtMs)                 // cada frame: posición interpolada, animaciones, desvanecer
+  setPaused(paused)                  // congelar partículas (updateSpeed = 0) en la pausa
+  dispose()                          // liberar TODO: mallas, partículas, materiales, texturas
+}</code></pre>
+<p>Para agregar algo nuevo al mundo, copia una vista existente parecida y conéctala en <code>main.ts</code> en los cuatro puntos: creación, <code>onWorld</code> (push), <code>frame</code> (render y setPaused) y el <code>return</code> de <code>startSession</code> (dispose).</p>
+
+<h3>10.2 Personajes y animaciones</h3>
+<ul>
+  <li><b><code>characterView.ts</code></b>: instancia un modelo con esqueleto, lo escala a su altura, le cuelga el arma en la mano (<code>setWeapon</code>), reproduce clips, da acceso a los huesos (<code>boneMount</code>) y maneja estados como congelado.</li>
+  <li><b><code>animLibrary.ts</code></b>: carga los clips de <code>public/assets/mixamo/anims</code> y los reasigna a cualquier personaje con rig de Mixamo.</li>
+  <li><b><code>animState.ts</code></b>: decide qué clip toca (quieto, correr en 8 direcciones, saltar, golpe, habilidad, golpe recibido, muerte) y a qué velocidad, para que los pies no patinen.</li>
+  <li><b><code>playerViews.ts</code></b> / <b><code>enemyViews.ts</code></b>: arman cada personaje con sus extras (arma, barra de vida, auras, tintes, rótulos).</li>
+</ul>
+
+<h3>10.3 Efectos visuales</h3>
+<ul>
+  <li><code>abilityFx.ts</code>: efectos de habilidades por línea de tiempo (<code>abilityTimeline</code>: anillos, ondas, grietas, destellos, estelas, chispas), con color según la naturaleza del arma.</li>
+  <li><code>projectileViews.ts</code>, <code>hazardViews.ts</code>, <code>chainFx.ts</code>: orbes y proyectiles por elemento, zonas, rayos, arcos eléctricos.</li>
+  <li><code>bodyAura.ts</code>: llamas sobre el cuerpo (élites, hechiceros, aura de conjunto del jugador).</li>
+  <li><code>gearTint.ts</code>: <b>shader</b> (plugin de material) que tiñe y da contorno a la zona del cuerpo de cada pieza de equipo.</li>
+  <li><code>natureLooks.ts</code>, <code>tierGlow.ts</code>, <code>casterLooks.ts</code>: colores y brillos de armas, rarezas y hechiceros.</li>
+  <li><code>fxTextures.ts</code>: texturas generadas en código (chispa, llama, gradientes), compartidas.</li>
+</ul>
+
+<h3>10.4 Reglas del render</h3>
+<div class="note"><b>Sin luces nuevas.</b> La escena tiene un presupuesto de luces fijo (<code>render/lighting.ts</code>, antorchas). Todo efecto se hace con materiales <b>emisivos</b> (que brillan solos), transparencias y partículas.</div>
+<ul>
+  <li><b>Materiales compartidos</b>: crea un material por tipo/color/tier y reúsalo; nunca uno por instancia (cuesta memoria y llamadas de dibujo).</li>
+  <li><b>Reloj de juego</b>: anima con el tiempo que te pasan a <code>render</code>, no con <code>performance.now()</code>, para que todo se congele en la pausa.</li>
+  <li><b>Liberar todo</b>: cada malla, partícula, material y textura creada debe destruirse en <code>dispose</code>. Los tests con <code>NullEngine</code> cuentan que no queden sobrantes.</li>
+  <li><b>Nada de asignar memoria por frame</b> si se puede evitar (vectores, closures, strings en bucles calientes).</li>
+</ul>
+
+<h3>10.5 La interfaz (DOM)</h3>
+<p>El HUD no es 3D: son elementos HTML encima del canvas, con estilos en <code>index.html</code>. <code>ui/hud.ts</code> (retrato, vida, XP, arma, estados, iconos de equipo y tooltips), <code>ui/abilityBar.ts</code>, <code>ui/cardPanel.ts</code>, <code>ui/compass.ts</code>, <code>ui/minimap.ts</code>, <code>ui/devPanel.ts</code>. Los iconos de equipo son SVG en <code>ui/gearIcons.ts</code>. Se actualiza el DOM solo cuando el contenido cambia.</p>
+
+<h3>10.6 Modelos y animaciones nuevos</h3>
+<ol>
+  <li>Descarga el personaje o la animación de Mixamo como .glb (con esqueleto de Mixamo).</li>
+  <li>Ponlo en la carpeta de trabajo (por defecto <code>.superpowers/kingslayer-work/glb/</code>) y agrégalo a las listas de <code>scripts/assets/build-mixamo.mjs</code>.</li>
+  <li>Corre <code>node scripts/assets/build-mixamo.mjs</code>: regenera <code>public/assets/mixamo/</code> y su <code>manifest.json</code>.</li>
+  <li>Usa el id del clip en un moveset (<code>weapons.ts</code>), una habilidad (<code>cards.ts</code>, campo <code>clip</code>) o un look de enemigo (<code>render/looks.ts</code>).</li>
+  <li>Para ajustar el agarre de un arma, usa la página <code>packages/client/dev/grip.html</code> (abre <code>localhost:5173/dev/grip.html</code>).</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 class="chapter">11. Recetas paso a paso</h2>
+<p>Cada receta indica los archivos en orden. Al terminar: <code>npm test</code>, tipos y probar en <code>?sandbox=1</code>.</p>
+
+<h3>11.1 Cambiar el balance</h3>
+<p>Edita el número en su tabla (capítulo 9). Si un test fija ese número, actualízalo. No hace falta tocar el protocolo.</p>
+
+<h3>11.2 Agregar una carta de stat</h3>
+<ol class="steps">
+  <li><code>shared/src/cards.ts</code>: agrega el id a <code>StatCardId</code> y su entrada en <code>STAT_CARDS</code> (nombre y texto).</li>
+  <li>Si es un efecto nuevo, agrega un campo a <code>PlayerMods</code> y calcúlalo en <code>playerMods</code> (y en <code>combinedMods</code> de <code>gear.ts</code>, que suma cartas, equipo y reliquia).</li>
+  <li>Úsalo en el servidor donde corresponda (por ejemplo en <code>CombatSystem</code>).</li>
+  <li>Si el cliente necesita saberlo para predecir (como la velocidad), agrégalo a <code>PlayerState</code>, sincronízalo en <code>syncPlayer</code>, léelo en <code>connection.ts</code> y sube <code>PROTOCOL_VERSION</code>.</li>
+  <li>Tests en <code>shared/test/cards.test.ts</code>.</li>
+</ol>
+
+<h3>11.3 Agregar una habilidad</h3>
+<ol class="steps">
+  <li><code>shared/src/cards.ts</code>: agrega el id a <code>AbilityId</code> y su <code>AbilityDef</code> en <code>ABILITIES</code> (tipo, enfriamiento, duración de animación, clip, rangos, texto).</li>
+  <li><code>server/src/sim/AbilitySystem.ts</code>: sus tiempos de impacto en <code>impactTimes</code> y su efecto en <code>resolveImpact</code> (daño con <code>enemies.strike</code>, aturdir, empujar…).</li>
+  <li>El clip de animación (ver 10.6) y, si hace falta, la lógica de animación en <code>render/animState.ts</code>.</li>
+  <li><code>client/src/ui/abilityBar.ts</code>: su símbolo en <code>ABILITY_GLYPHS</code>.</li>
+  <li><code>client/src/render/abilityFx.ts</code>: su efecto visual en <code>abilityTimeline</code>.</li>
+  <li><code>LocalAbility</code> predice cualquier habilidad activa sin cambios, salvo que tenga mecánicas nuevas (cargas, costos).</li>
+  <li>Tests en <code>server/test/AbilitySystem.test.ts</code>. Pruébala con F2 → Cartas → "Dar carta".</li>
+</ol>
+
+<h3>11.4 Agregar un tipo de enemigo</h3>
+<ol class="steps">
+  <li><code>shared/src/combat.ts</code>: el tipo en <code>EnemyKind</code> y sus números en <code>ENEMY_DEFS</code>.</li>
+  <li><code>shared/src/weapons.ts</code>: su entrada en <code>ARMED_CHANCE</code> (<code>null</code> si no lleva arma).</li>
+  <li>Si es hechicero: <code>spells.ts</code> e <code>isCaster</code>; su ataque en <code>EnemySystem.startTelegraph</code> y el final de la telegrafía.</li>
+  <li>Dónde aparece: <code>waves.ts</code> (<code>waveKinds</code> / <code>casterKinds</code>) o <code>EnemySystem.activateRooms</code>.</li>
+  <li>Cliente: su look en <code>render/looks.ts</code> (<code>ENEMY_LOOKS</code>: modelo, altura, clips) y el modelo en <code>render/assets.ts</code> si es nuevo.</li>
+  <li>Panel F2: su etiqueta en <code>ENEMY_LABELS</code> (<code>ui/devPanel.ts</code>).</li>
+  <li>Sube <code>PROTOCOL_VERSION</code> (el cliente debe conocer el tipo nuevo).</li>
+</ol>
+
+<h3>11.5 Agregar un arma</h3>
+<ol class="steps">
+  <li>El modelo .glb en <code>build-mixamo.mjs</code> (o en <code>public/assets</code>) y su id en <code>render/assets.ts</code>.</li>
+  <li><code>shared/src/weapons.ts</code>: el id en <code>WeaponId</code> y su entrada en <code>WEAPONS</code> (nombre, género gramatical, moveset, daño, multiplicadores).</li>
+  <li>Si usa un estilo nuevo, un <code>MOVESETS</code> nuevo con sus clips y su combo.</li>
+  <li>Ajusta el agarre en <code>dev/grip.html</code> y guárdalo en la tabla de looks del arma.</li>
+  <li>Sube <code>PROTOCOL_VERSION</code>.</li>
+</ol>
+
+<h3>11.6 Agregar una pieza de equipo, una legendaria o una reliquia</h3>
+<ul>
+  <li><b>Reliquia</b>: <code>gear.ts</code> → <code>RelicId</code> y <code>RELICS</code>; su efecto en <code>combinedMods</code> (si es un modificador) o en el servidor (si es una regla, como el Colmillo del vampiro).</li>
+  <li><b>Efecto legendario</b>: <code>gear.ts</code> → <code>LegendaryId</code>, <code>LEGENDARY_POOL</code>, <code>LEGENDARY_TEXT</code>, <code>LEGENDARY_ABILITY</code>; su efecto en el sistema que corresponda (habilidades o combate), preguntando si el jugador lo tiene (<code>legendaries</code>).</li>
+  <li><b>Ranura nueva</b> (como se hizo con el cinturón): <code>GearSlot</code> y <code>GEAR_SLOTS</code>, stat principal en <code>GEAR_MAIN</code>, icono en <code>ui/gearIcons.ts</code>, zona del cuerpo en <code>render/gearTint.ts</code>, objeto del suelo en <code>render/floorItemViews.ts</code>, etiqueta del panel. El resto (botín, equipar, sincronizar) es genérico.</li>
+</ul>
+
+<h3>11.7 Agregar un comando al panel F2</h3>
+<ol class="steps">
+  <li><code>shared/src/sandbox.ts</code>: el caso en <code>DevCommand</code> y su validación en <code>parseDevCommand</code> (rechaza todo lo que no sea válido).</li>
+  <li><code>server/src/rooms/RunRoom.ts</code>: el <code>case</code> en <code>applyDev</code>.</li>
+  <li><code>client/src/ui/devPanel.ts</code>: el botón o interruptor (<code>this.button</code>, <code>this.toggle</code>, <code>this.select</code>).</li>
+  <li>Test en <code>shared/test/sandbox.test.ts</code> y, si aplica, en la sección "sandbox" de <code>RunRoom.test.ts</code>.</li>
+</ol>
+
+<h3>11.8 Sincronizar un dato nuevo del servidor al cliente</h3>
+<ol class="steps">
+  <li>Agrega el campo al schema en <code>server/src/rooms/RunState.ts</code>.</li>
+  <li>Asígnalo cada tick en <code>syncState.ts</code> (<code>syncPlayer</code> o <code>syncWorld</code>).</li>
+  <li>Léelo en <code>client/src/net/connection.ts</code> (en el snapshot, con valor por defecto seguro).</li>
+  <li>Úsalo en la vista o el HUD.</li>
+  <li>Sube <code>PROTOCOL_VERSION</code> y su test.</li>
+</ol>
+
+<h3>11.9 Agregar un efecto visual</h3>
+<ol class="steps">
+  <li>Si es de una habilidad: un paso más en <code>abilityTimeline</code> (<code>abilityFx.ts</code>).</li>
+  <li>Si es algo del mundo que viene del servidor: una vista nueva con el patrón de 10.1, conectada en <code>main.ts</code>.</li>
+  <li>Si es un evento puntual: un <code>CombatEvent</code> nuevo (servidor lo emite, <code>isValidCombatEvent</code> lo valida, <code>conn.onCombat</code> lo dibuja).</li>
+  <li>Respeta las reglas de 10.4 y agrega un test con <code>NullEngine</code> que cree y libere sin sobrantes.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 class="chapter">12. Tests</h2>
+<p>Hay unos 800 tests con <b>Vitest</b>, uno o varios archivos por módulo, en <code>packages/*/test/</code>.</p>
+<ul>
+  <li><b>shared</b>: funciones puras (generador de mazmorras, movimiento, fórmulas, sorteos con semilla).</li>
+  <li><b>server</b>: los sistemas por separado (<code>EnemySystem.test.ts</code>, <code>CombatSystem.test.ts</code>…) y la sala completa (<code>RunRoom.test.ts</code>), que levanta un servidor de prueba y conecta clientes reales.</li>
+  <li><b>client</b>: lógica pura (predicción, animaciones, formatos del HUD) y vistas con <code>NullEngine</code> de Babylon (sin navegador) para comprobar que se crean y liberan bien.</li>
+</ul>
+<h3>12.1 Ayudas de <code>RunRoom.test.ts</code></h3>
+<pre><code>const ana = await join("Ana", "t-ana");   // conecta un cliente de prueba
+await ana.welcome;
+teleport("ana", { x, z });                 // mueve al jugador en el servidor
+record("ana").combat.hp = 10;              // acceso directo al registro
+await ticksUntil(() => room.state.paused, 30);  // espera ticks hasta que se cumpla algo
+// sección "sandbox": sandboxRoom(), dev(client, cmd), settle(n)
+// startRun(): marca la partida como empezada (sin sellos)</code></pre>
+<div class="note"><b>Un buen hábito:</b> escribe primero el test que falla, después el código. Si cambias una regla compartida, prueba ambos lados (servidor y predicción del cliente).</div>
+
+<!-- ============================================================ -->
+<h2 class="chapter">13. Reglas y trampas comunes</h2>
+<p>Revisa esta lista antes de cada cambio:</p>
+<table>
+  <tr><th>#</th><th>Regla</th><th>Por qué</th></tr>
+  <tr><td>1</td><td>Sin <code>Math.random()</code> en <code>shared</code> ni en la simulación del servidor.</td><td>Determinismo: mazmorra igual en ambos lados y tests reproducibles.</td></tr>
+  <tr><td>2</td><td>El servidor decide; el cliente solo predice y dibuja.</td><td>Evita trampas y estados distintos entre jugadores.</td></tr>
+  <tr><td>3</td><td>Lo que se predice se calcula igual en ambos lados (mejor: una función de <code>shared</code>).</td><td>Si no, hay tirones al reconciliar.</td></tr>
+  <tr><td>4</td><td>Cambias el schema o un mensaje → sube <code>PROTOCOL_VERSION</code> y su test.</td><td>Un cliente viejo no debe entrar a un servidor nuevo.</td></tr>
+  <tr><td>5</td><td>Todo lo que depende del tiempo respeta la pausa.</td><td>En la elección de cartas el juego debe quedar quieto.</td></tr>
+  <tr><td>6</td><td>Sin luces nuevas; emisivos y partículas.</td><td>Presupuesto de rendimiento.</td></tr>
+  <tr><td>7</td><td>Materiales compartidos y <code>dispose</code> de todo.</td><td>Memoria y fugas en partidas largas.</td></tr>
+  <tr><td>8</td><td>Valida en el servidor todo lo que manda el cliente.</td><td>Nunca confíes en el navegador.</td></tr>
+  <tr><td>9</td><td>El orden del input importa: mover → combo → habilidades → recoger → atacar.</td><td>El cliente predice en el mismo orden.</td></tr>
+  <tr><td>10</td><td>Una tirada nueva en un generador cambia las siguientes.</td><td>Puede romper tests con semilla; usa otra sal si quieres aislarla.</td></tr>
+</table>
+<h3>13.1 Problemas que ya aparecieron</h3>
+<ul>
+  <li><b>"No se pudieron cargar los modelos"</b> al guardar varios archivos a la vez: Vite recargó con archivos a medio escribir. Recarga con <span class="kbd">Cmd+Shift+R</span>.</li>
+  <li><b>El juego no entra después de un cambio</b>: probablemente cambió <code>PROTOCOL_VERSION</code>; recarga y verifica que el servidor se reinició.</li>
+  <li><b>Un efecto no se congela en la pausa</b>: usa el reloj que llega a <code>render</code> y conecta <code>setPaused</code>.</li>
+  <li><b>Partículas que dejan de emitir</b>: en Babylon, tras una ráfaga manual (<code>manualEmitCount</code>), hay que volver a ponerlo en <code>-1</code>.</li>
+  <li><b>Clonar un material clona sus texturas dinámicas en blanco</b>: comparte el material y usa <code>mesh.visibility</code> para desvanecer.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 class="chapter">14. Flujo de trabajo y documentos</h2>
+<ul>
+  <li><b><code>docs/specs/</code></b>: una especificación por fase, con la intención, las decisiones y lo que queda fuera. Léela antes de tocar una mecánica para entender el porqué.</li>
+  <li><b><code>docs/plans/</code></b>: el plan de cada fase dividido en tareas, con los archivos, interfaces y tests de cada una. Sirven de ejemplo de cómo se agregó cada cosa.</li>
+  <li><b>Git</b>: trabaja en una rama (<code>git switch -c mi-cambio</code>), commits chicos con mensaje claro, <code>npm test</code> antes de mezclar a <code>main</code>.</li>
+  <li><b>Pruebas manuales</b>: <code>?sandbox=1</code> + panel F2 para llegar rápido a cualquier situación; dos pestañas con nombres distintos para probar co-op; <code>?lag=150</code> para probar la predicción.</li>
+</ul>
+<h3>14.1 Un ejemplo completo: subir el daño del Torbellino</h3>
+<ol>
+  <li>Abre <code>packages/shared/src/cards.ts</code>, busca <code>whirlwind</code> y cambia <code>damageMult</code> de sus rangos.</li>
+  <li>Corre <code>npm test -w @roguelike/shared</code>; si un test fija el valor, actualízalo.</li>
+  <li>Con <code>npm run dev</code> corriendo, el servidor se reinicia solo. Abre <code>localhost:5173/?sandbox=1</code>, F2 → Cartas → "Torbellino III" → Dar carta → Enemigos → crear 5 brutos → tecla 1.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 class="chapter">15. Glosario</h2>
+<table>
+  <tr><th>Término</th><th>Significado</th></tr>
+  <tr><td>Tick</td><td>Un paso de la simulación del servidor (1/30 s).</td></tr>
+  <tr><td>Schema</td><td>Estructura de datos de Colyseus que se sincroniza sola a los clientes.</td></tr>
+  <tr><td>Parche</td><td>Los cambios del schema que el servidor manda cada 50 ms.</td></tr>
+  <tr><td>Predicción</td><td>El cliente simula tu personaje sin esperar al servidor.</td></tr>
+  <tr><td>Reconciliación</td><td>Corregir la predicción partiendo del estado real y reaplicando los inputs pendientes.</td></tr>
+  <tr><td>Interpolación</td><td>Dibujar a otros entre dos estados recibidos, 100 ms en el pasado.</td></tr>
+  <tr><td><code>seq</code> / <code>lastSeq</code></td><td>Número de cada input / último input que el servidor procesó.</td></tr>
+  <tr><td><code>viewTick</code></td><td>El tick que veías al hacer clic; sirve para rebobinar al golpear.</td></tr>
+  <tr><td>Telegrafía</td><td>El aviso de un ataque enemigo antes de que golpee.</td></tr>
+  <tr><td>Peligro (hazard)</td><td>Zona del piromante o rayo del invocador: aviso y luego daño.</td></tr>
+  <tr><td>Naturaleza</td><td>Elemento (fuego, hielo, rayo) de un arma o un élite.</td></tr>
+  <tr><td>Tier</td><td>Rareza: 1 oxidado, 2 templado, 3 rúnico, 4 legendario.</td></tr>
+  <tr><td>Sal (salt)</td><td>Número que se combina con la semilla para que cada sistema tenga su propio generador.</td></tr>
+  <tr><td>NullEngine</td><td>Motor de Babylon sin pantalla, usado en los tests del cliente.</td></tr>
+  <tr><td>Sandbox</td><td>Sala de pruebas con el panel F2.</td></tr>
+</table>
+<p class="small">Esta guía describe el estado del código a la fecha. Si algo no coincide, la referencia es el código y los documentos de <code>docs/specs</code> y <code>docs/plans</code>.</p>
+
+</body>
+</html>
