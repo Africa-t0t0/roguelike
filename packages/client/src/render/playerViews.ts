@@ -138,7 +138,7 @@ export class PlayerViews {
     if (!view) return;
     view.character.setPose(pose.x, pose.y, pose.z, pose.facing);
     view.character.setWeapon(state.weaponId, { tier: state.weaponTier, nature: state.weaponNature });
-    view.gearLooks.set(state.gear ?? {}, state.relic ?? null);
+    view.gearLooks.set(state.relic ?? null);
     view.gearTint.set(state.gear ?? {});
     view.gearLooks.render(nowMs);
     let { comboStep, swingTimer } = state;
@@ -189,12 +189,11 @@ export class PlayerViews {
     view.character.play(choice, attackClip !== undefined && choice.clip === attackClip);
   }
 
-  /** Congela (o reanuda) las partículas de las armas y del equipo en la pausa del grupo. */
+  /** Congela (o reanuda) las partículas de las armas en la pausa del grupo. */
   setPaused(paused: boolean): void {
     this.paused = paused;
     for (const view of this.views.values()) {
       view.character.setPaused(paused);
-      view.gearLooks.setPaused(paused);
     }
   }
 
@@ -208,7 +207,6 @@ export class PlayerViews {
     const character = new CharacterView(this.scene, this.assets, this.anims, PLAYER_LOOK);
     const label = createLabel(this.scene, key, name, character.root);
     const gearLooks = new GearLooks(this.scene, this.gearFx, character);
-    gearLooks.setPaused(this.paused);
     // Mallas con esqueleto: el cuerpo (el arma cuelga de la mano sin esqueleto).
     const gearTint = new GearTint(character.root.getChildMeshes(false).filter((m) => m.skeleton));
     return {
