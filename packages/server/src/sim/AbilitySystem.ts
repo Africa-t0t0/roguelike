@@ -278,7 +278,10 @@ export class AbilitySystem {
       }
       if (c.buffLeft > 0) {
         c.buffLeft = countDown(c.buffLeft, dt);
-        if (c.buffLeft === 0) c.buffDamage = 0;
+        if (c.buffLeft === 0) {
+          c.buffDamage = 0;
+          c.buffGuard = false;
+        }
       }
     }
     this.stepZones(enemies, dt);
@@ -341,17 +344,20 @@ export class AbilitySystem {
 
   /**
    * El Grito llega al que grita y a los compañeros vivos del grupo; si ya tienen uno, se queda el mayor.
-   * `warcryLong` alarga el bono ×1,5 y `warcryHeal` cura el 15 % de la vida máxima a cada alcanzado.
+   * `warcryLong` alarga el bono ×1,5 y `warcryHeal` cura el 15 % de la vida máxima a cada alcanzado y
+   * `warcryGuard` (de quien grita) da -20 % de daño recibido a cada alcanzado mientras dura su bono.
    */
   private warcry(c: CombatState, party: CombatState[], buff: number): void {
     const duration = WARCRY_DURATION_S * (c.fx.legendaries.includes("warcryLong") ? WARCRY_LONG_MULT : 1);
     const heals = c.fx.legendaries.includes("warcryHeal");
+    const guard = c.fx.legendaries.includes("warcryGuard");
     for (const p of new Set([c, ...party])) {
       if (p.dead) continue;
       if (heals) this.combat.heal(p, p.maxHp * WARCRY_HEAL_FRAC);
       if (buff < p.buffDamage) continue;
       p.buffDamage = buff;
       p.buffLeft = duration;
+      p.buffGuard = guard;
     }
   }
 

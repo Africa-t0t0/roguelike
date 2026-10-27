@@ -58,11 +58,11 @@ describe("GearLooks", () => {
 });
 
 describe("objetos del suelo", () => {
-  it("el kit dibuja las 4 ranuras y una reliquia, y se libera entero", () => {
+  it("el kit dibuja las 5 ranuras y una reliquia, y se libera entero", () => {
     const scene = new Scene(new NullEngine());
     const kit = new FloorItemKit(scene);
     const root = new TransformNode("r", scene);
-    for (const slot of ["helmet", "chest", "gloves", "boots"] as const) kit.gear(root, slot, 3, "none");
+    for (const slot of ["helmet", "chest", "gloves", "belt", "boots"] as const) kit.gear(root, slot, 3, "none");
     kit.relic(root, root, "vampireFang");
     expect(scene.meshes.length).toBeGreaterThan(8);
     root.dispose();

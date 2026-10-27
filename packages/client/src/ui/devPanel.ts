@@ -35,7 +35,7 @@ export function devCardOptions(): { label: string; card: CardOffer }[] {
   return [...abilities, ...stats];
 }
 
-const GEAR_SLOT_LABELS: Record<GearSlot, string> = { helmet: "Yelmo", chest: "Pechera", gloves: "Guanteletes", boots: "Botas" };
+const GEAR_SLOT_LABELS: Record<GearSlot, string> = { helmet: "Yelmo", chest: "Pechera", gloves: "Guanteletes", belt: "Cinturón", boots: "Botas" };
 
 /** Comando de la sección Equipo: ranura (índice de `GEAR_SLOTS`), tier (índice 0-3 = tier 1-4) y acción. */
 export function devGearCommand(slotIndex: number, tierIndex: number, action: "equip" | "drop"): DevCommand {

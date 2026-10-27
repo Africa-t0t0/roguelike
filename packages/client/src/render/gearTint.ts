@@ -9,13 +9,16 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { TIERS, type GearSlot, type WeaponTier } from "@roguelike/shared";
 import { boneKey } from "./animLibrary";
 
-/** Orden de las regiones en el atributo (x, y, z, w) y en los uniformes `gearTint0..3`. */
-export const TINT_SLOTS: readonly GearSlot[] = ["helmet", "chest", "gloves", "boots"];
+/**
+ * Orden de las regiones (el de `GEAR_SLOTS`) y de los uniformes `gearTint0..4`. Los pesos van en dos atributos: las
+ * cuatro primeras (casco, pechera, guantes, cinturón) en un vec4 (x, y, z, w) y la quinta (botas) en un float aparte.
+ */
+export const TINT_SLOTS: readonly GearSlot[] = ["helmet", "chest", "gloves", "belt", "boots"];
 
 /**
  * Región del cuerpo (ranura de equipo) de un hueso de Mixamo, por su nombre; null = ninguna (muslos).
- * Casco: cuello y cabeza. Pechera: cadera, columna, hombros y brazos (con hombreras). Guantes: antebrazos, manos y
- * dedos. Botas: espinillas, pies y puntas.
+ * Casco: cuello y cabeza. Pechera: columna media y alta, hombros y brazos (con hombreras). Cinturón: cadera y la
+ * columna baja (`Spine`, a la altura de la cintura). Guantes: antebrazos, manos y dedos. Botas: espinillas, pies y puntas.
  */
 export function boneRegion(name: string): GearSlot | null {
   const k = boneKey(name);
@@ -23,7 +26,8 @@ export function boneRegion(name: string): GearSlot | null {
   if (k.includes("forearm") || k.includes("hand")) return "gloves";
   if (k.includes("upleg")) return null;
   if (k.endsWith("leg") || k.includes("foot") || k.includes("toe")) return "boots";
-  if (k.startsWith("hips") || k.startsWith("spine") || k.endsWith("shoulder") || k.endsWith("arm")) return "chest";
+  if (k.startsWith("hips") || k === "spine") return "belt";
+  if (k.startsWith("spine") || k.endsWith("shoulder") || k.endsWith("arm")) return "chest";
   return null;
 }
 
@@ -45,11 +49,12 @@ export function tintOf(tier: WeaponTier): [number, number, number, number] | nul
 }
 
 /**
- * Peso de cada región por vértice (vec4: casco, pechera, guantes, botas) = Σ pesos de piel de sus huesos. Los índices de
+ * Peso de cada región por vértice = Σ pesos de piel de sus huesos: `main` (vec4: casco, pechera, guantes, cinturón) y
+ * `extra` (botas). Los índices de
  * hueso de la malla son los de la matriz del esqueleto (`bone.getIndex()`, la articulación del glTF), no la posición
  * en `skeleton.bones`. null si la malla no trae los datos de piel en la CPU.
  */
-export function regionWeights(mesh: AbstractMesh, skeleton: Skeleton): Float32Array | null {
+export function regionWeights(mesh: AbstractMesh, skeleton: Skeleton): { main: Float32Array; extra: Float32Array } | null {
   const n = mesh.getTotalVertices();
   const byIndex: number[] = [];
   for (const bone of skeleton.bones) {
@@ -57,6 +62,7 @@ export function regionWeights(mesh: AbstractMesh, skeleton: Skeleton): Float32Ar
     byIndex[bone.getIndex()] = slot ? TINT_SLOTS.indexOf(slot) : -1;
   }
   const out = new Float32Array(n * 4);
+  const extra = new Float32Array(n);
   const sets: [string, string][] = [
     [VertexBuffer.MatricesIndicesKind, VertexBuffer.MatricesWeightsKind],
     [VertexBuffer.MatricesIndicesExtraKind, VertexBuffer.MatricesWeightsExtraKind],
@@ -69,30 +75,41 @@ export function regionWeights(mesh: AbstractMesh, skeleton: Skeleton): Float32Ar
     any = true;
     for (let i = 0; i < n * 4; i++) {
       const r = byIndex[idx[i]!] ?? -1;
-      if (r >= 0) out[(i & ~3) + r]! += w[i]!;
+      if (r >= MAIN_REGIONS) extra[i >> 2]! += w[i]!;
+      else if (r >= 0) out[(i & ~3) + r]! += w[i]!;
     }
   }
-  return any ? out : null;
+  return any ? { main: out, extra } : null;
 }
+
+/** Regiones que caben en el vec4 del atributo principal; las demás van en `REGION_EXTRA_ATTRIBUTE`. */
+const MAIN_REGIONS = 4;
 
 /** Atributo de vértice con los pesos de región (en la geometría, compartida por los clones del modelo). */
 export const REGION_ATTRIBUTE = "gearRegion";
+/** Peso de la quinta región (botas), un float por vértice. */
+export const REGION_EXTRA_ATTRIBUTE = "gearRegion2";
 
 const VERTEX_DEFINITIONS = `#ifdef GEARTINT
 attribute vec4 ${REGION_ATTRIBUTE};
+attribute float ${REGION_EXTRA_ATTRIBUTE};
 varying vec4 vGearRegion;
+varying float vGearRegion2;
 #endif`;
 const VERTEX_MAIN_END = `#ifdef GEARTINT
 vGearRegion=${REGION_ATTRIBUTE};
+vGearRegion2=${REGION_EXTRA_ATTRIBUTE};
 #endif`;
 const FRAGMENT_DEFINITIONS = `#ifdef GEARTINT
 varying vec4 vGearRegion;
+varying float vGearRegion2;
 #endif`;
 const FRAGMENT_UNIFORMS = `#ifdef GEARTINT
 uniform vec4 gearTint0;
 uniform vec4 gearTint1;
 uniform vec4 gearTint2;
 uniform vec4 gearTint3;
+uniform vec4 gearTint4;
 #endif`;
 /**
  * Tras el procesado de imagen (como el overlay de los élites, que se dibuja encima): mezcla hacia el color de la pieza
@@ -102,8 +119,9 @@ const fragmentBeforeFragColor = (out: string) => `#ifdef GEARTINT
 {
 vec4 gw=clamp(vGearRegion,0.0,1.0);
 vec4 gs=vec4(gearTint0.a,gearTint1.a,gearTint2.a,gearTint3.a)*gw;
-vec3 gc=gearTint0.rgb*gs.x+gearTint1.rgb*gs.y+gearTint2.rgb*gs.z+gearTint3.rgb*gs.w;
-float gsum=gs.x+gs.y+gs.z+gs.w;
+float gs4=gearTint4.a*clamp(vGearRegion2,0.0,1.0);
+vec3 gc=gearTint0.rgb*gs.x+gearTint1.rgb*gs.y+gearTint2.rgb*gs.z+gearTint3.rgb*gs.w+gearTint4.rgb*gs4;
+float gsum=gs.x+gs.y+gs.z+gs.w+gs4;
 if (gsum>0.001) {
 float rim=pow(1.0-clamp(dot(normalW,viewDirectionW),0.0,1.0),2.5);
 ${out}.rgb=mix(${out}.rgb,gc/gsum,clamp(gsum*0.4,0.0,0.4))+gc*(0.08+rim*1.6);
@@ -118,7 +136,7 @@ ${out}.rgb=mix(${out}.rgb,gc/gsum,clamp(gsum*0.4,0.0,0.4))+gc*(0.08+rim*1.6);
  */
 export class GearTintPlugin extends MaterialPluginBase {
   /** (r, g, b, fuerza) por región, en el orden de `TINT_SLOTS` */
-  readonly tints = new Float32Array(16);
+  readonly tints = new Float32Array(TINT_SLOTS.length * 4);
   private enabled = false;
 
   constructor(material: Material) {
@@ -144,16 +162,18 @@ export class GearTintPlugin extends MaterialPluginBase {
   }
 
   override prepareDefines(defines: MaterialDefines, _scene: unknown, mesh: AbstractMesh): void {
-    defines["GEARTINT"] = this.enabled && mesh.isVerticesDataPresent(REGION_ATTRIBUTE);
+    defines["GEARTINT"] = this.enabled && mesh.isVerticesDataPresent(REGION_ATTRIBUTE) && mesh.isVerticesDataPresent(REGION_EXTRA_ATTRIBUTE);
   }
 
   override getAttributes(attributes: string[], _scene: unknown, mesh: AbstractMesh): void {
-    if (this.enabled && mesh.isVerticesDataPresent(REGION_ATTRIBUTE)) attributes.push(REGION_ATTRIBUTE);
+    if (this.enabled && mesh.isVerticesDataPresent(REGION_ATTRIBUTE) && mesh.isVerticesDataPresent(REGION_EXTRA_ATTRIBUTE)) {
+      attributes.push(REGION_ATTRIBUTE, REGION_EXTRA_ATTRIBUTE);
+    }
   }
 
   override getUniforms(): { ubo: { name: string; size: number; type: string }[]; fragment: string } {
     return {
-      ubo: [0, 1, 2, 3].map((i) => ({ name: `gearTint${i}`, size: 4, type: "vec4" })),
+      ubo: [0, 1, 2, 3, 4].map((i) => ({ name: `gearTint${i}`, size: 4, type: "vec4" })),
       fragment: FRAGMENT_UNIFORMS,
     };
   }
@@ -161,7 +181,7 @@ export class GearTintPlugin extends MaterialPluginBase {
   override bindForSubMesh(uniformBuffer: UniformBuffer): void {
     if (!this.enabled) return;
     const t = this.tints;
-    for (let i = 0; i < 4; i++) uniformBuffer.updateFloat4(`gearTint${i}`, t[i * 4]!, t[i * 4 + 1]!, t[i * 4 + 2]!, t[i * 4 + 3]!);
+    for (let i = 0; i < TINT_SLOTS.length; i++) uniformBuffer.updateFloat4(`gearTint${i}`, t[i * 4]!, t[i * 4 + 1]!, t[i * 4 + 2]!, t[i * 4 + 3]!);
   }
 
   override getCustomCode(shaderType: string): { [point: string]: string } | null {
@@ -186,10 +206,11 @@ export class GearTint {
       const original = mesh.material;
       const skeleton = mesh.skeleton;
       if (!original || !skeleton || mesh.getClassName() === "InstancedMesh") continue;
-      if (!mesh.isVerticesDataPresent(REGION_ATTRIBUTE)) {
+      if (!mesh.isVerticesDataPresent(REGION_ATTRIBUTE) || !mesh.isVerticesDataPresent(REGION_EXTRA_ATTRIBUTE)) {
         const data = regionWeights(mesh, skeleton);
         if (!data) continue;
-        mesh.setVerticesData(REGION_ATTRIBUTE, data, false, 4);
+        mesh.setVerticesData(REGION_ATTRIBUTE, data.main, false, 4);
+        mesh.setVerticesData(REGION_EXTRA_ATTRIBUTE, data.extra, false, 1);
       }
       const clone = original.clone(`${original.name}-gear`);
       if (!clone) continue;

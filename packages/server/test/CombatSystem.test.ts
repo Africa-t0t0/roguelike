@@ -777,6 +777,19 @@ describe("resistencias, Última resistencia, reflejo y vampiro", () => {
     for (let i = 0; i < n; i++) cs.step(new Map([["a", c]]), from + i, SIM_DT, new Map([["a", kin()]]));
   };
 
+  it("warcryGuard: con el Grito activo el golpe encolado hace ×0,8 (tras el piso de piel de hierro); sin Grito, normal", () => {
+    const cs = new CombatSystem();
+    const c = withFx();
+    c.mods = { ...c.mods, damageTakenMult: 0.4 };
+    c.buffGuard = true;
+    c.buffLeft = 5;
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 100 })], 10);
+    expect(c.pendingHits[0]!.damage).toBeCloseTo(100 * 0.4 * 0.8, 9);
+    c.buffLeft = 0;
+    cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 100 })], 10);
+    expect(c.pendingHits[1]!.damage).toBeCloseTo(40, 9);
+  });
+
   it("resistencia al fuego 0,5 contra una zona de pirómano de 14 hace 7", () => {
     const cs = new CombatSystem();
     const c = withFx();

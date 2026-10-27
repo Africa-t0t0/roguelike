@@ -25,6 +25,7 @@ describe("parseDevCommand", () => {
       { cmd: "weapon", weaponId: "great-sword", tier: 4, nature: "fire" },
       { cmd: "gear", slot: "boots", tier: 4, action: "equip" },
       { cmd: "gear", slot: "helmet", tier: 1, action: "drop" },
+      { cmd: "gear", slot: "belt", tier: 3, action: "equip" },
       { cmd: "relic", id: "glassHeart" },
     ];
     for (const c of ok) expect(parseDevCommand(c)).toEqual(c);

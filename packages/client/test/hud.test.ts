@@ -98,6 +98,14 @@ describe("equipo en el HUD y el aviso", () => {
     expect(pickupInfo({ kind: "gear", item: legend, x: 0, z: 0, ttl: 9 }, {}, []).lines.at(-1)).toMatchObject({ inactive: true });
   });
 
+  it("cinturón: nombre, stat principal y legendarias con su habilidad", () => {
+    const belt: GearItem = { slot: "belt", tier: 4, stats: [{ stat: "regen", value: 2.5 }], legendary: "blockFree" };
+    expect(gearTooltip(belt, []).effect).toEqual({ text: "Bloquear no te ralentiza", inactive: true });
+    expect(gearTooltip(belt, ["block"]).effect?.inactive).toBe(false);
+    expect(pickupInfo({ kind: "gear", item: belt, x: 0, z: 0, ttl: 9 }, {}, [])).toMatchObject({ name: "Cinturón legendario" });
+    expect(gearCompare(undefined, belt)).toEqual(["+2,5 de regeneración por segundo"]);
+  });
+
   it("una legendaria sin habilidad requerida (lastStand) nunca está inactiva", () => {
     const chest: GearItem = { slot: "chest", tier: 4, stats: [{ stat: "damageTaken", value: 0.125 }], legendary: "lastStand" };
     expect(gearTooltip(chest, []).effect?.inactive).toBe(false);

@@ -96,6 +96,11 @@ export class FloorItemKit {
         part(CreateBox("floor-glove-r", { width: 0.12, height: 0.08, depth: 0.2 }, s), 0.11, -0.1, 0);
         break;
       }
+      case "belt": {
+        part(CreateBox("floor-belt-strap", { width: 0.36, height: 0.08, depth: 0.1 }, s), 0, 0, 0); // correa
+        part(CreateBox("floor-belt-buckle", { width: 0.1, height: 0.12, depth: 0.12 }, s), 0, 0, 0.01); // hebilla
+        break;
+      }
       case "boots": {
         for (const x of [-0.1, 0.1]) {
           part(CreateBox("floor-boot-leg", { width: 0.1, height: 0.22, depth: 0.1 }, s), x, 0, -0.05); // caña + pie: una L

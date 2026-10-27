@@ -23,9 +23,10 @@ describe("panel de pruebas", () => {
   });
 
   it("la sección Equipo manda comandos válidos para el servidor", () => {
-    const equip = devGearCommand(3, 3, "equip");
+    const equip = devGearCommand(4, 3, "equip");
     expect(equip).toEqual({ cmd: "gear", slot: "boots", tier: 4, action: "equip" });
     expect(parseDevCommand(equip)).toEqual(equip);
+    expect(devGearCommand(3, 2, "equip")).toEqual({ cmd: "gear", slot: "belt", tier: 3, action: "equip" });
     expect(devGearCommand(0, 0, "drop")).toEqual({ cmd: "gear", slot: "helmet", tier: 1, action: "drop" });
     const relics = devRelicOptions();
     expect(relics).toHaveLength(9);

@@ -2,7 +2,7 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import type { Scene } from "@babylonjs/core/scene";
 import {
   ABILITIES,
-  BLOCK_MOVE_MULT,
+  blockMoveMult,
   deadInput,
   generateDungeon,
   INTERP_DELAY_MS,
@@ -15,6 +15,7 @@ import {
   type GearItem,
   type GearSlot,
   type KinematicState,
+  type LegendaryId,
 } from "@roguelike/shared";
 import { InputState } from "./input/InputState";
 import { attachBrowserInput } from "./input/browserInput";
@@ -194,6 +195,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const DASH_WINDOW_MS = 600;
   let myGear: Partial<Record<GearSlot, GearItem>> = {}; // lo puesto y las habilidades propias, para el aviso de E
   let myAbilityIds: AbilityId[] = [];
+  let myLegendaries: LegendaryId[] = []; // efectos legendarios propios (la predicción del Bloqueo depende de blockFree)
   let lastThrustMs = -Infinity; // reloj de juego en que arrancó el último Tajo frontal propio
   let seq = 0;
   let lastFrame = performance.now();
@@ -230,7 +232,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       myGear = Object.fromEntries(Object.entries(p.gear).map(([slot, g]) => [slot, g.item]));
       myAbilityIds = p.abilities.map((a) => a.id);
       hud.setPlayer(p);
-      ability.setLegendaries(Object.values(p.gear).flatMap((g) => (g.item.legendary ? [g.item.legendary] : [])));
+      myLegendaries = Object.values(p.gear).flatMap((g) => (g.item.legendary ? [g.item.legendary] : []));
+      ability.setLegendaries(myLegendaries);
       ability.setServer(p.abilities, clock.now(performance.now()));
       if (!predictor || !prev) {
         predictor = new Predictor(p, dungeon);
@@ -335,7 +338,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         // Como el servidor: se mueve con el Bloqueo del input anterior y luego se actualiza.
         const moveSpeedMult = mine?.moveSpeedMult ?? 1;
         const statusSpeedMult = mine?.statusSpeedMult ?? 1;
-        predictor.setMoveMods({ speedMult: moveSpeedMult * statusSpeedMult * (ability.isBlocking ? BLOCK_MOVE_MULT : 1) });
+        predictor.setMoveMods({ speedMult: moveSpeedMult * statusSpeedMult * (ability.isBlocking ? blockMoveMult(myLegendaries) : 1) });
         predictor.applyLocal(sampled);
         // El golpe y la habilidad propios arrancan su clip ya (como el servidor: tras moverse, el combo
         // avanza, luego la habilidad y al final el ataque); el daño lo decide él. Con el arma que dice el

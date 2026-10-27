@@ -3,7 +3,6 @@ import {
   ABILITIES,
   BASE_REGEN,
   BLOCK_HALF_ARC_DEG,
-  BLOCK_MOVE_MULT,
   ELITE,
   STARTING_WEAPON,
   newComboTimers,
@@ -21,6 +20,8 @@ import {
   playerMods,
   playerStats,
   tryStartSwing,
+  WARCRY_GUARD_MULT,
+  blockMoveMult,
   xpToNext,
   type AbilityId,
   type ClassId,
@@ -119,6 +120,8 @@ export interface CombatState extends ComboTimers {
   /** el mayor Grito activo sobre este jugador (0 si ninguno) y los segundos que le quedan */
   buffDamage: number;
   buffLeft: number;
+  /** el Grito activo trae `warcryGuard` (de quien lo gritó): ×0,8 al daño recibido mientras dura `buffLeft` */
+  buffGuard: boolean;
   /** estados que dejan los élites: segundos que quedan de quemadura (con su daño por segundo), ralentización y aturdimiento */
   burnLeft: number;
   burnDps: number;
@@ -134,6 +137,14 @@ export function abilityRank(c: CombatState, id: AbilityId): number {
   return c.abilities.find((a) => a.id === id)?.rank ?? 0;
 }
 
+/**
+ * Guardia del Grito (`warcryGuard`): ×0,8 al daño recibido mientras dura el bono. Se multiplica DESPUÉS del piso de
+ * `damageTakenMult` (0,4), así que puede bajar de él (0,4 × 0,8 = 0,32 como mínimo).
+ */
+export function guardMult(c: CombatState): number {
+  return c.buffGuard && c.buffLeft > 0 ? WARCRY_GUARD_MULT : 1;
+}
+
 /** Efecto de sus estados en la velocidad: 0,7 ralentizado, 0 aturdido. */
 export function statusSpeedMult(c: CombatState): number {
   return (c.slowLeft > 0 ? 1 - ELITE.playerSlowFrac : 1) * (c.stunLeft > 0 ? 0 : 1);
@@ -141,7 +152,7 @@ export function statusSpeedMult(c: CombatState): number {
 
 /** Velocidad de movimiento efectiva: la de sus cartas, a la mitad mientras bloquea, más sus estados. */
 export function moveSpeedMult(c: CombatState): number {
-  return c.mods.moveSpeedMult * (c.blocking ? BLOCK_MOVE_MULT : 1) * statusSpeedMult(c);
+  return c.mods.moveSpeedMult * (c.blocking ? blockMoveMult(c.fx.legendaries) : 1) * statusSpeedMult(c);
 }
 
 /** Aplica un estado con los números de `ELITE` (la quemadura, con `burnDps` si se da). */
@@ -196,6 +207,7 @@ export function newCombatState(
     blocking: false,
     buffDamage: 0,
     buffLeft: 0,
+    buffGuard: false,
     burnLeft: 0,
     burnDps: 0,
     slowLeft: 0,
@@ -316,7 +328,7 @@ export class CombatSystem {
       if (!c || c.dead) continue;
       // Piel de hierro: se aplica al encolar, sin redondear (la vida es decimal).
       c.pendingHits.push({
-        damage: h.damage * c.mods.damageTakenMult, resolveTick: nowTick, sourceX: h.sourceX, sourceZ: h.sourceZ,
+        damage: h.damage * c.mods.damageTakenMult * guardMult(c), resolveTick: nowTick, sourceX: h.sourceX, sourceZ: h.sourceZ,
         nature: h.nature, burnDps: h.burnDps, element: h.element, sourceId: h.sourceId,
       });
     }
@@ -363,7 +375,7 @@ export class CombatSystem {
       }
       // La quemadura mata con la misma muerte que un golpe.
       if (burned > 0) {
-        c.hp = Math.max(0, c.hp - burned * (c.lastStandLeft > 0 ? LAST_STAND_DAMAGE_MULT : 1));
+        c.hp = Math.max(0, c.hp - burned * (c.lastStandLeft > 0 ? LAST_STAND_DAMAGE_MULT : 1) * guardMult(c));
         if (c.hp === 0) {
           this.die(c);
           died.push(key);

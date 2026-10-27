@@ -64,6 +64,24 @@ function gauntlet(x: number, flip: boolean): string {
 }
 const GLOVES = svg("gg", gauntlet(2, false) + gauntlet(26, true));
 
+/** Cinturón de cuero: correa con costuras, hebilla metálica con aguja y dos bolsitas con remaches. */
+const BELT = svg(
+  "gl",
+  `<path d="M2 17h44v14H2Z" fill="#6b4423" stroke="${OUT}" stroke-width="1.600" stroke-linejoin="round"/>` +
+    `<path d="M2 20h44" stroke="#9a6a3c" stroke-width="1.400" opacity="0.8"/>` +
+    `<path d="M2 28.500h44" stroke="#3a2412" stroke-width="1.200" opacity="0.7"/>` +
+    `<path d="M3 22.500h42" stroke="#d8b27a" stroke-width="0.9" stroke-dasharray="2 1.800" opacity="0.75"/>` +
+    `<path d="M3 26h42" stroke="#d8b27a" stroke-width="0.9" stroke-dasharray="2 1.800" opacity="0.75"/>` +
+    `<rect x="6" y="31" width="9" height="8" rx="1.500" fill="#7d5230" stroke="${OUT}" stroke-width="1.200"/>` +
+    `<rect x="33" y="31" width="9" height="8" rx="1.500" fill="#7d5230" stroke="${OUT}" stroke-width="1.200"/>` +
+    `<path d="M6.500 33.500h8M33.500 33.500h8" stroke="${OUT}" stroke-width="0.9" opacity="0.6"/>` +
+    `<rect x="15" y="12" width="18" height="24" rx="3" fill="url(#gls)" stroke="${OUT}" stroke-width="1.700" stroke-linejoin="round"/>` +
+    `<rect x="19.500" y="17" width="9" height="14" rx="1.500" fill="#2c3239" stroke="${OUT}" stroke-width="1.200"/>` +
+    `<path d="M24 19v10" stroke="url(#glg)" stroke-width="2.600" stroke-linecap="round"/>` +
+    `<path d="M17 14.500c3-1.500 8-1.500 12-.5" fill="none" stroke="#fff" stroke-width="1.300" stroke-linecap="round" opacity="0.8"/>` +
+    rivet(17.500, 34) + rivet(30.500, 34) + rivet(10, 24) + rivet(38, 24)
+);
+
 /** Dos grebas/botas de placas: caña con rodillera, empeine articulado y puntera. */
 function boot(x: number, flip: boolean): string {
   const t = flip ? `translate(${x + 20} 0) scale(-1 1)` : `translate(${x} 0)`;
@@ -95,7 +113,7 @@ const RELIC = svg(
     rivet(15, 43) + rivet(33, 43)
 );
 
-const SLOT_ICONS: Record<GearSlot | "relic", string> = { helmet: HELMET, chest: CHEST, gloves: GLOVES, boots: BOOTS, relic: RELIC };
+const SLOT_ICONS: Record<GearSlot | "relic", string> = { helmet: HELMET, chest: CHEST, gloves: GLOVES, belt: BELT, boots: BOOTS, relic: RELIC };
 
 /** SVG (cadena) del icono de una ranura de equipo o de la reliquia. */
 export function gearIconSvg(slot: GearSlot | "relic"): string {

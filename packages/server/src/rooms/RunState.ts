@@ -73,7 +73,7 @@ export const PlayerState = schema(
     burnLeft: t.number(),
     slowLeft: t.number(),
     stunLeft: t.number(),
-    /** equipo puesto por ranura ("helmet", "chest", "gloves", "boots") */
+    /** equipo puesto por ranura ("helmet", "chest", "gloves", "belt", "boots") */
     gear: t.map(GearState),
     /** RelicId de la reliquia puesta; "" si no tiene */
     relic: t.string(),

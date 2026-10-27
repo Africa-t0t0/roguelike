@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCard, combinedMods, createRng, gearName, gearStatText, LEGENDARY_POOL, newProgress, playerMods, rollGear,
-  rollGearTier, RELICS, type GearItem, type Progress,
+  rollGearTier, RELICS, GEAR_SLOTS, LEGENDARY_TEXT, LEGENDARY_ABILITY, blockMoveMult, BLOCK_MOVE_MULT, type GearItem, type Progress,
 } from "../src";
 
 const prog = (stats: Progress["stats"] = {}): Progress => ({ stats, abilities: [] });
@@ -30,7 +30,7 @@ describe("rollGear", () => {
   it("stats planas enteras (regen a 1 decimal) en todos los tiers", () => {
     for (let s = 0; s < 40; s++) {
       for (const tier of [1, 2, 3, 4] as const) {
-        for (const slot of ["helmet", "chest", "gloves", "boots"] as const) {
+        for (const slot of ["helmet", "chest", "gloves", "belt", "boots"] as const) {
           for (const e of rollGear(createRng(s), slot, tier, "warrior").stats) {
             if (e.stat === "maxHp" || e.stat === "lifeOnKill") expect(Number.isInteger(e.value)).toBe(true);
             if (e.stat === "regen") expect(Math.round(e.value * 10) / 10).toBe(e.value);
@@ -88,6 +88,39 @@ describe("combinedMods", () => {
     expect(m.legendaries).toEqual([]);
   });
   it("hay 9 reliquias", () => expect(Object.keys(RELICS)).toHaveLength(9));
+});
+
+describe("cinturón", () => {
+  it("orden de ranuras y principal regen ×tier (1 decimal)", () => {
+    expect(GEAR_SLOTS).toEqual(["helmet", "chest", "gloves", "belt", "boots"]);
+    const vals = ([1, 2, 3, 4] as const).map((t) => rollGear(createRng(3), "belt", t, "warrior").stats[0]);
+    expect(vals).toEqual([1, 1.5, 2, 2.5].map((value) => ({ stat: "regen", value })));
+  });
+  it("regen no se repite como secundaria", () => {
+    for (let s = 0; s < 100; s++) {
+      const g = rollGear(createRng(s), "belt", 4, "warrior");
+      expect(g.stats.filter((e) => e.stat === "regen")).toHaveLength(1);
+      expect(new Set(g.stats.map((e) => e.stat)).size).toBe(g.stats.length);
+    }
+  });
+  it("legendarias del cinturón: reserva, textos y habilidad", () => {
+    expect(LEGENDARY_POOL.warrior.belt).toEqual(["warcryGuard", "blockFree"]);
+    for (let s = 0; s < 20; s++) expect(LEGENDARY_POOL.warrior.belt).toContain(rollGear(createRng(s), "belt", 4, "warrior").legendary);
+    expect(LEGENDARY_TEXT.warcryGuard).toBe("Grito de guerra también reduce el daño recibido un 20 % mientras dura");
+    expect(LEGENDARY_TEXT.blockFree).toBe("Bloquear no te ralentiza");
+    expect(LEGENDARY_ABILITY.warcryGuard).toBe("warcry");
+    expect(LEGENDARY_ABILITY.blockFree).toBe("block");
+  });
+  it("nombre", () => {
+    expect(gearName({ slot: "belt", tier: 2, stats: [], legendary: null })).toBe("Cinturón templado");
+    expect(gearName({ slot: "belt", tier: 3, stats: [], legendary: null })).toBe("Cinturón rúnico");
+    expect(gearName({ slot: "belt", tier: 4, stats: [], legendary: null })).toBe("Cinturón legendario");
+  });
+  it("blockMoveMult: mitad salvo con blockFree", () => {
+    expect(blockMoveMult([])).toBe(BLOCK_MOVE_MULT);
+    expect(blockMoveMult(["warcryGuard"])).toBe(BLOCK_MOVE_MULT);
+    expect(blockMoveMult(["blockFree"])).toBe(1);
+  });
 });
 
 describe("nombres y textos", () => {

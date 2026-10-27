@@ -31,7 +31,9 @@ describe("boneRegion", () => {
     ["mixamorig:Head", "helmet"],
     ["mixamorig:Neck", "helmet"],
     ["mixamorig:HeadTop_End", "helmet"],
-    ["mixamorig:Hips", "chest"],
+    ["mixamorig:Hips", "belt"],
+    ["mixamorig:Spine", "belt"],
+    ["mixamorig:Spine1", "chest"],
     ["mixamorig:Spine2", "chest"],
     ["mixamorig:LeftShoulder", "chest"],
     ["mixamorig:RightArm", "chest"],
@@ -77,14 +79,18 @@ function skinned(scene: Scene): Mesh {
 }
 
 describe("regionWeights", () => {
-  it("suma los pesos de piel por región (casco, pechera, guantes, botas)", () => {
+  it("suma los pesos de piel por región (casco, pechera, guantes, cinturón; botas en el atributo extra)", () => {
     const scene = new Scene(new NullEngine());
     const mesh = skinned(scene);
-    const w = Array.from(regionWeights(mesh, mesh.skeleton!)!);
+    const r = regionWeights(mesh, mesh.skeleton!)!;
+    const w = Array.from(r.main);
+    const b = Array.from(r.extra);
     expect(w.slice(0, 4)).toEqual([1, 0, 0, 0]); // cabeza
-    expect(w.slice(4, 8)).toEqual([0, 0, 0.5, 0.5]); // mano y pie
+    expect(w.slice(4, 8)).toEqual([0, 0, 0.5, 0]); // mano (guantes); el pie va aparte
+    expect(b[1]).toBeCloseTo(0.5); // pie → botas
     expect(w[8]).toBe(0); // muslo: nada
-    expect(w[11]).toBeCloseTo(0.3);
+    expect(w[11]).toBe(0);
+    expect(b[2]).toBeCloseTo(0.3);
   });
 });
 
@@ -106,7 +112,12 @@ describe("GearTint", () => {
     expect(Array.from(plugin.tints.slice(0, 4))).toEqual(tintOf(4)!.map(Math.fround));
     expect(Array.from(plugin.tints.slice(4, 8))).toEqual([0, 0, 0, 0]); // sin pechera
     expect(plugin.tints[11]).toBeCloseTo(tintStrength(3));
-    expect(plugin.tints[15]).toBe(0); // botas tier 1
+    expect(plugin.tints[15]).toBe(0); // sin cinturón
+    expect(plugin.tints[19]).toBe(0); // botas tier 1
+    tint.set({ belt: { tier: 2 } });
+    expect(plugin.tints[15]).toBeCloseTo(tintStrength(2)); // cinturón: índice 3
+    expect(plugin.tints.length).toBe(20);
+    tint.set({ helmet: { tier: 4 }, gloves: { tier: 3 }, boots: { tier: 1 } });
     tint.set({ chest: { tier: 2 } });
     tint.set({ boots: { tier: 1 } });
     expect(plugin.isEnabled).toBe(false);

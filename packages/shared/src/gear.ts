@@ -1,11 +1,11 @@
-import { MIN_COOLDOWN_MULT, MIN_DAMAGE_TAKEN_MULT, playerMods, type AbilityId, type PlayerMods, type Progress, type StatCardId } from "./cards";
+import { BLOCK_MOVE_MULT, MIN_COOLDOWN_MULT, MIN_DAMAGE_TAKEN_MULT, playerMods, type AbilityId, type PlayerMods, type Progress, type StatCardId } from "./cards";
 import type { ClassId } from "./combat";
 import type { Rng } from "./rng";
 import { rollTier } from "./waves";
 import { TIERS, type WeaponTier } from "./weapons";
 
-export type GearSlot = "helmet" | "chest" | "gloves" | "boots";
-export const GEAR_SLOTS: readonly GearSlot[] = ["helmet", "chest", "gloves", "boots"];
+export type GearSlot = "helmet" | "chest" | "gloves" | "belt" | "boots";
+export const GEAR_SLOTS: readonly GearSlot[] = ["helmet", "chest", "gloves", "belt", "boots"];
 
 export type GearStat =
   | "maxHp" | "damageTaken" | "attackSpeed" | "moveSpeed"
@@ -17,6 +17,7 @@ export const GEAR_MAIN: Record<GearSlot, GearStat> = {
   helmet: "maxHp",
   chest: "damageTaken",
   gloves: "attackSpeed",
+  belt: "regen",
   boots: "moveSpeed",
 };
 
@@ -47,18 +48,19 @@ export const MAX_RESIST = 0.6;
 /** Piso del enfriamiento con el Reloj de arena roto (el normal es `MIN_COOLDOWN_MULT`). */
 export const MIN_COOLDOWN_MULT_HOURGLASS = 0.4;
 
-/** Secundarias posibles: todo menos las principales de las ranuras. */
+/** Secundarias posibles: todo menos las principales de las ranuras (la bolsa se filtra por la principal de la pieza: `regen` es principal del cinturón y no se repite ahí). */
 const SECONDARY_BAG: readonly GearStat[] = ["regen", "damage", "reach", "magnet", "xp", "cooldown", "lifeOnKill", "resFire", "resIce", "resLightning"];
 
 export type LegendaryId =
   | "warcryLong" | "warcryHeal" | "blockReflect" | "lastStand"
-  | "whirlCharges" | "kickStun" | "slamCracks" | "thrustDash";
+  | "whirlCharges" | "kickStun" | "slamCracks" | "thrustDash" | "warcryGuard" | "blockFree";
 
 export const LEGENDARY_POOL: Record<ClassId, Record<GearSlot, LegendaryId[]>> = {
   warrior: {
     helmet: ["warcryLong", "warcryHeal"],
     chest: ["blockReflect", "lastStand"],
     gloves: ["whirlCharges", "kickStun"],
+    belt: ["warcryGuard", "blockFree"],
     boots: ["slamCracks", "thrustDash"],
   },
 };
@@ -72,6 +74,8 @@ export const LEGENDARY_TEXT: Record<LegendaryId, string> = {
   kickStun: "Patada aturde el doble de tiempo",
   slamCracks: "Golpe sísmico deja el suelo agrietado 3 s: ralentiza un 40 %",
   thrustDash: "Tajo frontal te impulsa 3 m hacia adelante",
+  warcryGuard: "Grito de guerra también reduce el daño recibido un 20 % mientras dura",
+  blockFree: "Bloquear no te ralentiza",
 };
 
 /** Habilidad que hace falta para que el efecto sirva (en gris si falta). `lastStand` no depende de ninguna. */
@@ -83,6 +87,8 @@ export const LEGENDARY_ABILITY: Partial<Record<LegendaryId, AbilityId>> = {
   kickStun: "kick",
   slamCracks: "slam",
   thrustDash: "thrust",
+  warcryGuard: "warcry",
+  blockFree: "block",
 };
 
 /**
@@ -97,6 +103,14 @@ export interface GearItem {
   /** `stats[0]` es la principal, luego las secundarias y, en tier 4, `allRes` al final */
   stats: { stat: GearStatKey; value: number }[];
   legendary: LegendaryId | null;
+}
+
+/** Fracción de daño recibido que deja `warcryGuard` mientras dura el Grito (×0,8). Va aparte, DESPUÉS del piso de `damageTakenMult`. */
+export const WARCRY_GUARD_MULT = 0.8;
+
+/** Multiplicador de velocidad al bloquear: la mitad, salvo con `blockFree`. Lo usan el servidor y la predicción del cliente. */
+export function blockMoveMult(legendaries: readonly LegendaryId[]): number {
+  return legendaries.includes("blockFree") ? 1 : BLOCK_MOVE_MULT;
 }
 
 /** Evita restos de coma flotante (0,05 × 1,5 = 0,07500000000000001). */
@@ -114,7 +128,7 @@ export function rollGear(rng: Rng, slot: GearSlot, tier: WeaponTier, cls: ClassI
   const mult = GEAR_TIER_MULT[tier];
   const main = GEAR_MAIN[slot];
   const stats: GearItem["stats"] = [{ stat: main, value: rollValue(main, GEAR_BASE[main], mult) }];
-  const bag = [...SECONDARY_BAG];
+  const bag = SECONDARY_BAG.filter((s) => s !== main);
   for (let i = 0; i < GEAR_SECONDARIES[tier]; i++) {
     const s = bag.splice(rng.int(0, bag.length - 1), 1)[0]!;
     stats.push({ stat: s, value: rollValue(s, GEAR_BASE[s], mult) });
@@ -131,6 +145,7 @@ const GEAR_NAMES: Record<GearSlot, { name: string; gender: "f" | "m"; plural: bo
   helmet: { name: "Yelmo", gender: "m", plural: false },
   chest: { name: "Pechera", gender: "f", plural: false },
   gloves: { name: "Guanteletes", gender: "m", plural: true },
+  belt: { name: "Cinturón", gender: "m", plural: false },
   boots: { name: "Botas", gender: "f", plural: true },
 };
 

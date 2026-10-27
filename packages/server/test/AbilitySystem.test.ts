@@ -13,7 +13,7 @@ import {
   type PlayerInput,
 } from "@roguelike/shared";
 import { AbilitySystem, abilityCharges, abilityMaxCharges } from "../src/sim/AbilitySystem";
-import { CombatSystem, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
+import { CombatSystem, guardMult, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
 import { EnemySystem, type Enemy, type EnemyHit, type SimPlayer } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
 
@@ -516,6 +516,33 @@ describe("efectos legendarios y reliquias", () => {
     expect(ally.hp).toBeCloseTo(40 + 0.15 * ally.maxHp, 9);
     expect(env.c.hp).toBeCloseTo(50 + 0.15 * env.c.maxHp, 9);
     expect(dead.hp).toBe(0);
+  });
+
+  it("warcryGuard: el Grito de quien lo lleva da ×0,8 al daño recibido a todos los alcanzados mientras dura; después, nada", () => {
+    const env = setup([{ id: "warcry", rank: 1 }]);
+    withLegendary(env, "warcryGuard");
+    const other = newCombatState("warrior", 1);
+    feed(env, { abilities: 1 }, kin(), env.c, [env.c, other]);
+    expect(env.c.buffGuard).toBe(true);
+    expect(other.buffGuard).toBe(true);
+    expect(guardMult(env.c)).toBe(0.8);
+    env.c.buffLeft = 0;
+    expect(guardMult(env.c)).toBe(1);
+    // Un Grito sin la legendaria no deja guardia.
+    const env2 = setup([{ id: "warcry", rank: 1 }]);
+    feed(env2, { abilities: 1 });
+    expect(env2.c.buffGuard).toBe(false);
+    expect(guardMult(env2.c)).toBe(1);
+  });
+
+  it("blockFree: bloqueando no hay ralentización; sin la legendaria, a la mitad", () => {
+    const env = setup([{ id: "block", rank: 1 }]);
+    withLegendary(env, "blockFree");
+    feed(env, { abilities: 1 });
+    expect(env.c.blocking).toBe(true);
+    expect(moveSpeedMult(env.c)).toBe(1);
+    withLegendary(env);
+    expect(moveSpeedMult(env.c)).toBe(0.5);
   });
 
   it("warcry sin legendarias: ni cura ni dura más", () => {
