@@ -12,6 +12,7 @@ import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAni
 import type { Assets } from "./assets";
 import { CharacterView } from "./characterView";
 import { GearFxShared, GearLooks } from "./gearLooks";
+import { GearTint } from "./gearTint";
 import { PLAYER_LOOK } from "./looks";
 
 const LABEL_W = 2;
@@ -43,6 +44,8 @@ export interface HeroState {
 interface PlayerView {
   character: CharacterView;
   gearLooks: GearLooks;
+  /** tinte y contorno del color de cada pieza sobre su parte del cuerpo */
+  gearTint: GearTint;
   speed: SpeedMeter;
   /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
   swing?: { step: number; startMs: number; restart: boolean };
@@ -136,6 +139,7 @@ export class PlayerViews {
     view.character.setPose(pose.x, pose.y, pose.z, pose.facing);
     view.character.setWeapon(state.weaponId, { tier: state.weaponTier, nature: state.weaponNature });
     view.gearLooks.set(state.gear ?? {}, state.relic ?? null);
+    view.gearTint.set(state.gear ?? {});
     view.gearLooks.render(nowMs);
     let { comboStep, swingTimer } = state;
     let attackClip: string | undefined;
@@ -205,14 +209,18 @@ export class PlayerViews {
     const label = createLabel(this.scene, key, name, character.root);
     const gearLooks = new GearLooks(this.scene, this.gearFx, character);
     gearLooks.setPaused(this.paused);
+    // Mallas con esqueleto: el cuerpo (el arma cuelga de la mano sin esqueleto).
+    const gearTint = new GearTint(character.root.getChildMeshes(false).filter((m) => m.skeleton));
     return {
       character,
       gearLooks,
+      gearTint,
       speed: new SpeedMeter(),
       dispose() {
         label.material?.getActiveTextures().forEach((t) => t.dispose());
         label.material?.dispose();
         gearLooks.dispose();
+        gearTint.dispose();
         character.dispose();
       },
     };
