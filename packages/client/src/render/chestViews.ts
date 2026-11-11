@@ -2,14 +2,16 @@ import type { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicT
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Constants } from "@babylonjs/core/Engines/constants";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
+import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import "@babylonjs/core/Particles/particleSystemComponent";
 import type { Scene } from "@babylonjs/core/scene";
 import type { ChestSnapshot, WorldSnapshot } from "../net/connection";
-import { PARTICLE_SPEED, sparkTexture } from "./fxTextures";
+import { beamTexture, PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 
 const OPEN_S = 0.4; // s que tarda la tapa en abrirse
 const OPEN_ANGLE = (-110 * Math.PI) / 180;
@@ -38,6 +40,8 @@ interface ChestView {
   openAtMs?: number;
   flashed: boolean;
   goneAtMs?: number;
+  /** haz dorado mientras está cerrado */
+  beam: Mesh;
 }
 
 interface Flash {
@@ -46,12 +50,16 @@ interface Flash {
 }
 
 /** Cofres de primitivas: caja de madera oscura con bordes dorados y tapa que gira al abrirse. */
+const BEAM_HEIGHT_M = 3.4;
+
 export class ChestViews {
   private readonly views = new Map<string, ChestView>();
   private readonly flashes: Flash[] = [];
   private readonly wood: StandardMaterial;
   private readonly woodOpen: StandardMaterial;
   private readonly gold: StandardMaterial;
+  private readonly beam: StandardMaterial;
+  private readonly beamTex: DynamicTexture;
   private readonly spark: DynamicTexture;
   private paused = false;
 
@@ -66,6 +74,17 @@ export class ChestViews {
     this.wood = mat("chestWood", new Color3(0.12, 0.075, 0.045));
     this.woodOpen = mat("chestWoodOpen", new Color3(0.07, 0.045, 0.03));
     this.gold = mat("chestGold", GOLD);
+    this.beam = new StandardMaterial("chestBeam", scene);
+    this.beam.diffuseColor = Color3.Black();
+    this.beam.specularColor = Color3.Black();
+    this.beam.emissiveColor = new Color3(1, 0.8, 0.35);
+    this.beam.disableLighting = true;
+    this.beam.fogEnabled = false;
+    this.beam.alpha = 0.5;
+    this.beam.backFaceCulling = false;
+    this.beamTex = beamTexture(scene, "chest-beam");
+    this.beam.opacityTexture = this.beamTex;
+    this.beam.alphaMode = Constants.ALPHA_ADD;
     this.gold.emissiveColor = GOLD.scale(0.15);
     this.spark = sparkTexture(scene, "chest-spark");
   }
@@ -93,6 +112,7 @@ export class ChestViews {
         continue;
       }
       const at = view.openAtMs;
+      view.beam.setEnabled(at === undefined || nowMs < at);
       if (at === undefined || nowMs < at) continue;
       view.hinge.rotation.x = lidAngle((nowMs - at) / 1000);
       if (!view.flashed) {
@@ -119,8 +139,9 @@ export class ChestViews {
     this.views.clear();
     for (const f of this.flashes) f.ps.dispose(false);
     this.flashes.length = 0;
-    for (const m of [this.wood, this.woodOpen, this.gold]) m.dispose();
+    for (const m of [this.wood, this.woodOpen, this.gold, this.beam]) m.dispose();
     this.spark.dispose();
+    this.beamTex.dispose();
   }
 
   private create(c: ChestSnapshot): ChestView {
@@ -152,7 +173,12 @@ export class ChestViews {
     }
     meshes.push(box("chestRim", W + 0.02, 0.03, D + 0.02, this.gold, root, 0, BODY_H - 0.015, 0));
     meshes.push(box("chestClasp", 0.08, 0.1, 0.04, this.gold, hinge, 0, 0.04, D + 0.01));
-    return { data: c, root, meshes, woods, hinge, flashed: false };
+    const beam = CreateCylinder("chestBeam", { height: BEAM_HEIGHT_M, diameter: 0.34, tessellation: 12, cap: 0 }, this.scene);
+    beam.material = this.beam;
+    beam.parent = root;
+    beam.position.y = BODY_H + BEAM_HEIGHT_M / 2;
+    beam.isPickable = false;
+    return { data: c, root, meshes, woods, hinge, flashed: false, beam };
   }
 
   /** Destello dorado corto al abrirse. */

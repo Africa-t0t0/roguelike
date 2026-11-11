@@ -1,8 +1,13 @@
 import {
   ABILITIES,
+  BANNER_DURATION_S,
   CLEAVE_LIFE_S,
   CLEAVE_SPEED,
   ENEMY_DEFS,
+  FRENZY_DURATION_S,
+  HOOK_IMPACT_AT,
+  HOOK_RANGE,
+  HOOK_STOP_M,
   KICK_ARC_DEG,
   KICK_IMPACT_AT,
   PLAYER_RADIUS,
@@ -10,6 +15,10 @@ import {
   MOVESETS,
   SIM_DT,
   SLAM_IMPACT_S,
+  SLAM_LEAP_MAX_M,
+  THROW_RADIUS,
+  THROW_RELEASE_AT,
+  THROW_SPEED,
   THRUST_IMPACT_FRAC,
   THRUST_WIDTH,
   TILE_SIZE,
@@ -20,6 +29,8 @@ import {
   hasLineOfSight,
   inArc,
   isWalkableTile,
+  leapSpeed,
+  leapStep,
   moveCircle,
   strikeDamage,
   type AbilityId,
@@ -40,13 +51,22 @@ export interface AbilityResult {
    * posee la cinemática (vive en el PlayerRecord): RunRoom la aplica a `record.kinematic` (x, z) tras cada input.
    */
   dash?: { x: number; z: number };
+  /** Golpe sísmico que empezó en este input: metros que va a saltar (para que los demás clientes dibujen dónde cae) */
+  leapDist?: number;
   hits: ImpactResult["hits"];
   kills: ImpactResult["kills"];
 }
 
-/** Onda de corte: atraviesa enemigos, golpea a cada uno una sola vez y muere contra un muro. */
+/**
+ * Proyectil de un jugador. La Onda de corte (`wave`) atraviesa enemigos, golpea a cada uno una sola vez y muere
+ * contra un muro. La espada lanzada (`sword`) hace lo mismo a la ida y, al acabar su alcance o tocar un muro,
+ * vuelve hacia su dueño golpeando otra vez a cada uno.
+ */
 export interface PlayerShot {
   id: string;
+  kind: "wave" | "sword";
+  /** la espada ya viene de vuelta */
+  returning?: boolean;
   ownerKey: string;
   owner: CombatState;
   x: number;
@@ -69,9 +89,14 @@ export interface ShotResult {
   kills: ImpactResult["kills"];
 }
 
-/** Zona del jugador (grietas del Golpe sísmico): ralentiza a los enemigos dentro mientras dura. */
+/**
+ * Zona de un jugador mientras dura: las grietas del Golpe sísmico (`cracks`) ralentizan a los enemigos dentro;
+ * el Estandarte (`banner`) cura al grupo dentro `heal` de su vida máxima por segundo.
+ */
 export interface PlayerZone {
   id: string;
+  kind: "cracks" | "banner";
+  heal?: number;
   x: number;
   z: number;
   radius: number;
@@ -90,6 +115,9 @@ const WARCRY_HEAL_FRAC = 0.15;
 /** Torbellino con `whirlCharges`: cargas máximas. */
 const WHIRL_CHARGES = 2;
 const FULL_CIRCLE_DEG = 360;
+/** La espada lanzada: segundos que como mucho tarda en volver y a qué distancia de su dueño se da por recogida. */
+const THROW_RETURN_MAX_S = 3;
+const THROW_CATCH_M = 0.9;
 
 /** Resta `dt` y deja en 0 lo que quede por debajo de EPS (como el combo). */
 const countDown = (v: number, dt: number): number => (v - dt > EPS ? v - dt : 0);
@@ -146,6 +174,10 @@ function impactTimes(id: AbilityId, rank: number): number[] {
       return [SLAM_IMPACT_S];
     case "thrust":
       return [THRUST_IMPACT_FRAC * def.animS];
+    case "throw":
+      return [THROW_RELEASE_AT * def.animS];
+    case "hook":
+      return [HOOK_IMPACT_AT * def.animS];
     default:
       return [];
   }
@@ -203,6 +235,11 @@ export class AbilitySystem {
 
     const anim = c.abilityAnim;
     if (anim) {
+      // Salto del Golpe sísmico: avanza un paso por input hasta el impacto, que se resuelve ya donde cayó.
+      if (anim.id === "slam" && anim.impacts.length > 0 && (anim.leapSpeed ?? 0) > 0) {
+        res.dash = leapStep(this.dungeon, k.x, k.z, anim.facing, anim.leapSpeed!);
+        k = { ...k, x: res.dash.x, z: res.dash.z };
+      }
       anim.left = countDown(anim.left, SIM_DT);
       const keep: number[] = [];
       for (const t of anim.impacts) {
@@ -231,7 +268,20 @@ export class AbilitySystem {
       c.abilityAnim = {
         id, rank, left: def.animS, impacts: impactTimes(id, rank), facing: input.facing, originX: k.x, originZ: k.z,
       };
-      if (id === "warcry") this.warcry(c, party, def.ranks[rank - 1]!.buff!);
+      const r = def.ranks[rank - 1]!;
+      if (id === "slam") {
+        c.abilityAnim.leapSpeed = leapSpeed(input.aimDist);
+        res.leapDist = Math.min(SLAM_LEAP_MAX_M, Math.max(0, input.aimDist ?? 0));
+      }
+      if (id === "warcry") this.warcry(c, party, r.buff!);
+      if (id === "banner") {
+        this.zoneList.push({ id: `z${this.nextZone++}`, kind: "banner", heal: r.healFrac!, x: k.x, z: k.z, radius: r.radius!, left: BANNER_DURATION_S, total: BANNER_DURATION_S });
+      }
+      if (id === "frenzy") {
+        c.frenzyLeft = FRENZY_DURATION_S;
+        c.frenzySpeed = r.speed!;
+        c.frenzyLeech = r.leech!;
+      }
       res.started = id;
       break;
     }
@@ -249,6 +299,7 @@ export class AbilitySystem {
     const r = ABILITIES.cleave.ranks[rank - 1]!;
     this.shots.push({
       id: `w${this.nextShot++}`,
+      kind: "wave",
       ownerKey,
       owner: c,
       x: k.x,
@@ -264,8 +315,16 @@ export class AbilitySystem {
     });
   }
 
-  /** Una vez por tick (solo fuera de la pausa): enfriamientos y cargas, Grito, grietas y ondas. */
-  step(states: ReadonlyMap<string, CombatState>, enemies: EnemySystem, dt: number): ShotResult[] {
+  /**
+   * Una vez por tick (solo fuera de la pausa): enfriamientos y cargas, Grito, Frenesí, zonas y proyectiles.
+   * `positions`: dónde está cada jugador (por clave), para el Estandarte y la vuelta de la espada.
+   */
+  step(
+    states: ReadonlyMap<string, CombatState>,
+    enemies: EnemySystem,
+    dt: number,
+    positions: ReadonlyMap<string, { x: number; z: number }> = new Map(),
+  ): ShotResult[] {
     for (const c of states.values()) {
       for (const id of Object.keys(c.abilityCd) as AbilityId[]) {
         const before = c.abilityCd[id]!;
@@ -283,14 +342,32 @@ export class AbilitySystem {
           c.buffGuard = false;
         }
       }
+      c.frenzyLeft = countDown(c.frenzyLeft, dt);
     }
-    this.stepZones(enemies, dt);
-    return this.stepShots(enemies, dt);
+    this.stepZones(enemies, dt, states, positions);
+    return this.stepShots(enemies, dt, positions);
   }
 
-  /** Las grietas ralentizan cada tick a los enemigos dentro (la ralentización se renueva) y se acaban a los 3 s. */
-  private stepZones(enemies: EnemySystem, dt: number): void {
+  /**
+   * Las grietas ralentizan cada tick a los enemigos dentro (la ralentización se renueva); el Estandarte cura
+   * cada tick a los jugadores vivos dentro. Cada zona se acaba cuando se le termina el tiempo.
+   */
+  private stepZones(
+    enemies: EnemySystem,
+    dt: number,
+    states: ReadonlyMap<string, CombatState>,
+    positions: ReadonlyMap<string, { x: number; z: number }>,
+  ): void {
     for (const z of this.zoneList) {
+      if (z.kind === "banner") {
+        for (const [key, c] of states) {
+          const p = positions.get(key);
+          if (c.dead || !p || !circlesOverlap(z, { x: p.x, z: p.z, radius: 0 })) continue;
+          this.combat.heal(c, c.maxHp * (z.heal ?? 0) * dt);
+        }
+        z.left = countDown(z.left, dt);
+        continue;
+      }
       for (const e of enemies.enemies) {
         if (e.ai === "dead" || e.hp <= 0) continue;
         if (!circlesOverlap(z, { x: e.x, z: e.z, radius: ENEMY_DEFS[e.kind].radius })) continue;
@@ -302,14 +379,38 @@ export class AbilitySystem {
     this.zoneList = this.zoneList.filter((z) => z.left > 0);
   }
 
-  private stepShots(enemies: EnemySystem, dt: number): ShotResult[] {
+  private stepShots(enemies: EnemySystem, dt: number, positions: ReadonlyMap<string, { x: number; z: number }>): ShotResult[] {
     const out = new Map<string, ShotResult>();
     const keep: PlayerShot[] = [];
     for (const s of this.shots) {
+      if (s.returning) {
+        // De vuelta: persigue a su dueño por encima de los muros y se acaba al llegarle (o si ya no está).
+        const home = positions.get(s.ownerKey);
+        if (!home) continue;
+        const dx = home.x - s.x;
+        const dz = home.z - s.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist <= THROW_CATCH_M + s.speed * dt) continue;
+        s.dirX = dx / dist;
+        s.dirZ = dz / dist;
+      }
+      const fromX = s.x;
+      const fromZ = s.z;
       s.x += s.dirX * s.speed * dt;
       s.z += s.dirZ * s.speed * dt;
       s.life -= dt;
-      if (!isWalkableTile(this.dungeon, Math.floor(s.x / TILE_SIZE), Math.floor(s.z / TILE_SIZE))) continue;
+      const blocked = !s.returning && !isWalkableTile(this.dungeon, Math.floor(s.x / TILE_SIZE), Math.floor(s.z / TILE_SIZE));
+      if (blocked && s.kind !== "sword") continue;
+      if (s.kind === "sword" && !s.returning && (blocked || s.life <= EPS)) {
+        // Fin de la ida: da la vuelta desde el último punto libre y puede golpear otra vez a cada enemigo.
+        if (blocked) {
+          s.x = fromX;
+          s.z = fromZ;
+        }
+        s.returning = true;
+        s.life = THROW_RETURN_MAX_S;
+        s.hit.clear();
+      }
       for (const e of [...enemies.enemies]) {
         if (e.ai === "dead" || e.hp <= 0 || s.hit.has(e.id)) continue;
         if (!circlesOverlap(s, { x: e.x, z: e.z, radius: ENEMY_DEFS[e.kind].radius })) continue;
@@ -361,6 +462,41 @@ export class AbilitySystem {
     }
   }
 
+  /**
+   * Gancho de cadena: los `count` enemigos vivos más cercanos a la vista y dentro de `HOOK_RANGE` reciben un
+   * golpe leve, se arrastran hasta quedar a `HOOK_STOP_M` del jugador (contra los muros, como un empujón) y
+   * quedan aturdidos.
+   */
+  private hook(c: CombatState, k: KinematicState, r: { damageMult?: number; count?: number; stunS?: number }, enemies: EnemySystem, res: AbilityResult, key: string): void {
+    const near = enemies.enemies
+      .filter((e) => e.ai !== "dead" && e.hp > 0)
+      .map((e) => ({ e, dist: Math.hypot(e.x - k.x, e.z - k.z) }))
+      .filter(({ e, dist }) => dist <= HOOK_RANGE && hasLineOfSight(this.dungeon, k.x, k.z, e.x, e.z, 0))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, r.count ?? 0);
+    const amount = this.abilityDamage(c, r.damageMult ?? 0);
+    const src = { key, nature: c.weaponNature, affinity: c.mods.affinity };
+    let kills = 0;
+    let dealt = 0;
+    for (const { e, dist } of near) {
+      const results = enemies.strike(e.id, amount, src);
+      results.forEach((d, i) => {
+        dealt += d.amount;
+        res.hits.push({ enemyId: d.enemyId, amount: d.amount, killed: d.killed, x: i === 0 ? e.x : d.x, z: i === 0 ? e.z : d.z });
+        if (d.killed) {
+          res.kills.push({ x: d.x, z: d.z, xp: d.xp, drop: d.drop, gear: d.gear, relic: d.relic });
+          kills++;
+        }
+      });
+      if (results[0]!.killed) continue;
+      const pull = dist - HOOK_STOP_M - ENEMY_DEFS[e.kind].radius;
+      if (pull > 0) enemies.knockback(e.id, k.x - e.x, k.z - e.z, pull);
+      enemies.stun(e.id, r.stunS ?? 0);
+    }
+    this.combat.heal(c, c.mods.lifeOnKill * kills);
+    this.combat.vampireHeal(c, dealt);
+  }
+
   private resolveImpact(
     c: CombatState,
     k: KinematicState,
@@ -375,6 +511,29 @@ export class AbilitySystem {
     const { id, facing } = anim;
     const r = ABILITIES[id].ranks[anim.rank - 1];
     if (!r) return;
+    if (id === "throw") {
+      this.shots.push({
+        id: `w${this.nextShot++}`,
+        kind: "sword",
+        ownerKey: key,
+        owner: c,
+        x: k.x,
+        z: k.z,
+        dirX: Math.sin(facing),
+        dirZ: Math.cos(facing),
+        speed: THROW_SPEED,
+        radius: THROW_RADIUS,
+        nature: c.weaponNature,
+        damage: this.abilityDamage(c, r.damageMult!),
+        life: r.range! / THROW_SPEED,
+        hit: new Set(),
+      });
+      return;
+    }
+    if (id === "hook") {
+      this.hook(c, k, r, enemies, res, key);
+      return;
+    }
     const t = rewindTick(nowTick, input.viewTick);
     // El Tajo frontal sale de donde se lanzó; las demás, de donde está el jugador en el impacto.
     const origin = id === "thrust" ? { x: anim.originX, z: anim.originZ, facing } : { x: k.x, z: k.z, facing };
@@ -420,7 +579,7 @@ export class AbilitySystem {
     this.combat.vampireHeal(c, dealt);
 
     if (id === "slam" && c.fx.legendaries.includes("slamCracks")) {
-      this.zoneList.push({ id: `z${this.nextZone++}`, x: k.x, z: k.z, radius: r.radius!, left: CRACKS_S, total: CRACKS_S });
+      this.zoneList.push({ id: `z${this.nextZone++}`, kind: "cracks", x: k.x, z: k.z, radius: r.radius!, left: CRACKS_S, total: CRACKS_S });
     }
     if (id === "thrust" && c.fx.legendaries.includes("thrustDash")) {
       res.dash = moveCircle(this.dungeon, k.x, k.z, Math.sin(facing) * DASH_M, Math.cos(facing) * DASH_M, PLAYER_RADIUS);

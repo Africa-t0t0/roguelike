@@ -20,9 +20,14 @@ export function flinchEnvelope(elapsedS: number): number {
   return (1 - back) ** 2;
 }
 
+/** Cuánto pesa un golpe de `amount` a quien tiene `maxHp` de vida: 0 (casi nada) a 1 (`HEAVY_FRAC` de la vida o más). */
+export function hitWeight(amount: number, maxHp: number): number {
+  return maxHp > 0 ? Math.min(1, Math.max(0, amount / maxHp) / HEAVY_FRAC) : 0;
+}
+
 /** Inclinación máxima (rad) de un golpe de `amount` a un enemigo de `maxHp` de vida y `height` m de alto. */
 export function flinchStrength(amount: number, maxHp: number, height: number): number {
-  const frac = maxHp > 0 ? Math.min(1, Math.max(0, amount / maxHp) / HEAVY_FRAC) : 0;
+  const frac = hitWeight(amount, maxHp);
   const size = height > 0 ? REF_HEIGHT / height : 1;
   return BASE_LEAN * (1 + (MAX_WEIGHT - 1) * frac) * size;
 }
@@ -59,5 +64,25 @@ export class Flinches {
 
   forget(id: string): void {
     this.hits.delete(id);
+  }
+}
+
+/** Desde cuántas veces el golpe habitual empieza a contar como fuerte, y cuántas es ya el más fuerte. */
+const STRONG_FROM = 1.15;
+const STRONG_FULL = 2;
+const AVERAGE_RATE = 0.1;
+
+/**
+ * Peso de cada golpe frente a lo que se viene pegando: 0 un golpe normal, 1 el doble o más. Sirve para
+ * que el remate del combo y las habilidades se noten sin saber de qué golpe vino el daño.
+ */
+export class HitScale {
+  private average = 0;
+
+  weigh(amount: number): number {
+    if (amount <= 0) return 0;
+    const weight = this.average > 0 ? Math.min(1, Math.max(0, (amount / this.average - STRONG_FROM) / (STRONG_FULL - STRONG_FROM))) : 0;
+    this.average = this.average > 0 ? this.average + (amount - this.average) * AVERAGE_RATE : amount;
+    return weight;
   }
 }

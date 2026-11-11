@@ -189,6 +189,7 @@ export class HazardViews {
   /** Grietas del Golpe sísmico: una calcomanía por zona del estado, que dura lo que le queda y se desvanece al final. */
   private pushCracks(world: WorldSnapshot): void {
     for (const [id, z] of world.zones) {
+      if (z.kind !== "cracks") continue; // el Estandarte tiene su propia vista
       let c = this.cracks.get(id);
       if (!c) {
         const size = z.radius * CRACKS_SIZE;

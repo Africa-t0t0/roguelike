@@ -11,25 +11,35 @@ import {
   sanitizeInput,
   startSeals,
   STARTING_WEAPON,
+  LEAP_STEPS,
+  leapLanding,
+  leapSpeed,
+  SLAM_IMPACT_S,
+  SLAM_LEAP_MAX_M,
   type AbilityId,
+  type DevCommand,
   type GearItem,
   type GearSlot,
   type KinematicState,
   type LegendaryId,
 } from "@roguelike/shared";
 import { InputState } from "./input/InputState";
+import { Sfx } from "./audio/sfx";
 import { attachBrowserInput } from "./input/browserInput";
+import { PadInput } from "./input/gamepad";
+import { chooseAim } from "./input/sticks";
+import { TouchControls } from "./input/touchSticks";
 import { connect, parseFloorTimeStart, parseSandbox, type GameConnection, type PlayerSnapshot } from "./net/connection";
 import { FixedStep } from "./net/fixedStep";
 import { parseLagParams } from "./net/LagSimulator";
 import { LocalAbility } from "./net/LocalAbility";
 import { LocalCombo } from "./net/LocalCombo";
 import { PauseClock } from "./net/pauseClock";
-import { Predictor } from "./net/Predictor";
+import { Predictor, type LeapMove } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
 import { createTickClock } from "./net/tickClock";
 import { AbilityFx, SLAM_SHAKE } from "./render/abilityFx";
-import { RecentHits } from "./render/animState";
+import { FORWARD_CLIP_CANDIDATES, forwardClipOverride, RecentHits } from "./render/animState";
 import { AnimLibrary } from "./render/animLibrary";
 import { loadAssets, type Assets } from "./render/assets";
 import { ChainFx } from "./render/chainFx";
@@ -49,8 +59,10 @@ import { PlayerViews } from "./render/playerViews";
 import { HazardViews } from "./render/hazardViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { SealViews } from "./render/sealViews";
-import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
+import { HitScale } from "./render/flinch";
+import { BannerViews } from "./render/bannerViews";
 import { IsoCamera } from "./render/IsoCamera";
+import { PLAYER_LOOK } from "./render/looks";
 import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
 import { CardPanel } from "./ui/cardPanel";
 import { joinErrorMessage } from "./ui/errors";
@@ -70,6 +82,14 @@ const lag = parseLagParams(location.search);
 const floorTimeStart = import.meta.env.DEV ? parseFloorTimeStart(location.search) : undefined;
 // Solo en desarrollo: sala de pruebas con el panel de F2 (`?sandbox=1`).
 const sandbox = import.meta.env.DEV && parseSandbox(location.search);
+
+/** Al conectar un golpe propio: pausa del clip (ms) y temblor de cámara (m), del golpe más flojo al más pesado. */
+const HIT_STOP_MS = { min: 30, max: 85 } as const;
+const HIT_SHAKE = { durationS: 0.1, min: 0.01, max: 0.06 } as const;
+/** Con mando o táctil y el stick derecho suelto, el Golpe sísmico salta esta fracción de su alcance. */
+const STICK_LEAP_FRAC = 0.6;
+/** El chispazo del golpe sale a esta fracción del alto del enemigo. */
+const HIT_SPARK_HEIGHT = 0.6;
 
 let lastJoin: { code: string; name: string } | undefined;
 const lobby = new Lobby(
@@ -144,12 +164,13 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
  */
 function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims: AnimLibrary): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
-  const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets, new URLSearchParams(location.search).get("cam") === "iso");
+  const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
   const torches = createTorches(scene, dungeon);
   const views = new PlayerViews(scene, assets, anims);
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
   const hazards = new HazardViews(scene);
+  const banners = new BannerViews(scene);
   const seals = new SealViews(scene, startSeals(dungeon));
   const chests = new ChestViews(scene);
   const chainFx = new ChainFx(scene);
@@ -158,12 +179,33 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const orbs = new OrbViews(scene);
   const abilityFx = new AbilityFx(scene);
   const hits = new RecentHits();
-  // Spike: ?cam=iso prueba la cámara fija desde arriba.
-  const iso = new URLSearchParams(location.search).get("cam") === "iso" ? new IsoCamera(scene, canvas) : undefined;
-  const camera = iso ?? new ThirdPersonCamera(scene, canvas, dungeon);
+  const hitScale = new HitScale();
+  const camera = new IsoCamera(scene, canvas);
   scene.activeCamera = camera.camera;
   const input = new InputState();
   const browserInput = attachBrowserInput(input, canvas);
+  // Mando y pantalla táctil: mientras se usen, se apunta con el stick; al mover el ratón, vuelve el cursor.
+  const pad = new PadInput(input);
+  const touch = new TouchControls(input);
+  let aimDevice: "mouse" | "stick" = "mouse";
+  let lastAim = 0;
+  let lastAimDist = 0;
+  // Salto del Golpe sísmico propio en curso (se predice paso a paso, como lo mueve el servidor) y cuánto saltó
+  // cada uno la última vez (el propio, predicho; los ajenos, por evento), para dibujar el efecto donde cae.
+  let leap: (LeapMove & { stepsLeft: number }) | undefined;
+  const leapDists = new Map<string, number>();
+  const onMouseAim = (e: PointerEvent) => {
+    if (e.pointerType === "mouse") aimDevice = "mouse";
+  };
+  window.addEventListener("pointermove", onMouseAim);
+  // Sonido: el navegador lo deja sonar desde el primer gesto; M lo silencia.
+  const sfx = new Sfx();
+  const onGesture = (e: Event) => {
+    sfx.unlock();
+    if (e instanceof KeyboardEvent && e.code === "KeyM" && !(e.target instanceof HTMLInputElement)) sfx.toggleMute();
+  };
+  window.addEventListener("pointerdown", onGesture);
+  window.addEventListener("keydown", onGesture);
   const hud = new Hud();
   const abilityBar = new AbilityBar();
   const compass = new Compass();
@@ -185,6 +227,22 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         conn.sendDev(cmd);
       })
     : undefined;
+  // Sala de pruebas: los mismos comandos del panel, desde la consola o un script (`__devCmd({ cmd: "heal" })`).
+  if (conn.sandbox) (window as unknown as { __devCmd?: (cmd: DevCommand) => void }).__devCmd = (cmd) => conn.sendDev(cmd);
+  // Sala de pruebas: F4 va cambiando el clip de correr hacia adelante entre los candidatos y dice cuál suena.
+  const clipNote = document.createElement("div");
+  clipNote.style.cssText = "position:fixed;left:50%;bottom:0.6rem;transform:translateX(-50%);z-index:70;padding:0.2rem 0.7rem;font:12px monospace;color:#fff;background:#000a;pointer-events:none";
+  clipNote.hidden = true;
+  const onClipKey = (e: KeyboardEvent) => {
+    if (e.code !== "F4" || !conn.sandbox) return;
+    e.preventDefault();
+    const i = forwardClipOverride.clip ? FORWARD_CLIP_CANDIDATES.indexOf(forwardClipOverride.clip) + 1 : 0;
+    forwardClipOverride.clip = FORWARD_CLIP_CANDIDATES[i];
+    clipNote.textContent = `F4 · avanzar: ${forwardClipOverride.clip ?? "el de siempre"}`;
+    clipNote.hidden = false;
+  };
+  window.addEventListener("keydown", onClipKey);
+  document.body.append(clipNote);
   let pause = { paused: false, pauseLeft: 0 };
   let group: { name: string; choosing: boolean }[] = [];
   let panelShown = false;
@@ -211,11 +269,20 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   // alineado con el clip también para los remotos, dibujados INTERP_DELAY_MS tarde.
   views.onAbilityStart = (key, id, pose, elapsedS) => {
     const rank = lastPlayers.get(key)?.abilities.find((a) => a.id === id)?.rank ?? 1;
-    abilityFx.play(id, pose, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
+    // El Golpe sísmico se dibuja donde va a caer el salto, no donde arranca.
+    const at = id === "slam" ? { ...pose, ...leapLanding(dungeon, pose.x, pose.z, pose.facing, leapDists.get(key) ?? 0) } : pose;
+    abilityFx.play(id, at, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
+    if (key === conn.myKey) sfx.cast();
+  };
+  views.onSwingStart = (key, strike, step, pose, elapsedS) => {
+    abilityFx.slash(pose, strike, step, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
+    sfx.swing(key === conn.myKey ? 1 : 0.4);
   };
   abilityFx.onSlamImpact = (x, z) => {
     const me = predictor?.current;
-    if (me && Math.hypot(me.x - x, me.z - z) < SLAM_SHAKE.rangeM) camera.shake(SLAM_SHAKE.durationS, SLAM_SHAKE.intensity);
+    if (!me || Math.hypot(me.x - x, me.z - z) >= SLAM_SHAKE.rangeM) return;
+    camera.shake(SLAM_SHAKE.durationS, SLAM_SHAKE.intensity);
+    sfx.boom();
   };
 
   conn.onPlayers((players, receivedAt) => {
@@ -275,6 +342,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.push(world, at);
     projectiles.push(world, at);
     hazards.push(world, at);
+    banners.push(world);
     chests.push(world, at);
     chestList = [...world.chests.values()];
     playerShots.push(world, at);
@@ -292,22 +360,40 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     } else if (event.type === "ability") {
       // La propia se predice al apretar la tecla; el evento solo cuenta si no se predijo.
       if (event.key === conn.myKey) ability.fromServer(event.id, now);
-      else views.ability(event.key, event.id, now);
+      else {
+        if (event.id === "slam") leapDists.set(event.key, event.aimDist ?? 0);
+        views.ability(event.key, event.id, now);
+      }
     } else if (event.type === "damage") {
       const t = damageTiming(event, conn.myKey, now);
       hits.hit(`${event.targetKind}:${event.targetId}`, t.hitAt);
       const height = event.targetKind === "enemy" ? enemies.heightOf(event.targetId) : undefined;
-      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt, height);
-      if (t.hurtMe) hurtFlash.flash();
+      const weight = event.targetKind === "enemy" ? hitScale.weigh(event.amount) : 0;
+      damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt, height, weight);
+      if (t.hurtMe) {
+        hurtFlash.flash();
+        sfx.hurt();
+      }
       if (event.targetKind === "enemy") {
         // Se aleja de quien le pegó: el propio jugador, donde se ve (predicho); los demás, donde dice el servidor.
-        const from = event.sourceKey === conn.myKey ? predictor?.current : event.sourceKey ? lastPlayers.get(event.sourceKey) : undefined;
-        enemies.flinch(event.targetId, t.hitAt, event.amount, from ? Math.atan2(event.x - from.x, event.z - from.z) : undefined);
+        const mineHit = event.sourceKey === conn.myKey;
+        const from = mineHit ? predictor?.current : event.sourceKey ? lastPlayers.get(event.sourceKey) : undefined;
+        const dir = from ? Math.atan2(event.x - from.x, event.z - from.z) : undefined;
+        enemies.flinch(event.targetId, t.hitAt, event.amount, dir);
+        const nature = (event.sourceKey ? lastPlayers.get(event.sourceKey)?.weaponNature : undefined) ?? "none";
+        abilityFx.impact(event.x, event.z, (height ?? PLAYER_LOOK.height) * HIT_SPARK_HEIGHT, dir ?? 0, weight, t.numberAt, nature);
+        // Al conectar uno mismo: el clip se clava un instante y la cámara acusa el golpe, más cuanto más pesa.
+        if (mineHit) {
+          sfx.hit(weight);
+          views.hitStop(conn.myKey, now + HIT_STOP_MS.min + (HIT_STOP_MS.max - HIT_STOP_MS.min) * weight);
+          camera.shake(HIT_SHAKE.durationS, HIT_SHAKE.min + (HIT_SHAKE.max - HIT_SHAKE.min) * weight);
+        }
       }
     } else if (event.type === "chain") {
       chainFx.play(event.points, now);
     } else if (event.type === "levelUp") {
       hud.levelUp(event.level);
+      sfx.levelUp();
     }
   });
 
@@ -320,15 +406,23 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     const dt = paused ? 0 : Math.min(MAX_FRAME_S, (realNow - lastFrame) / 1000);
     lastFrame = realNow;
 
-    // El panel de cartas necesita el puntero libre; se vuelve a capturar con un clic en el canvas al cerrarse.
     const shown = cardPanel.render(pause, group, mine?.choosing ?? false, realNow);
-    if (shown && !panelShown) browserInput.releasePointer();
-    camera.pointerLockAllowed = !iso && !shown;
-    // Elección sin pausa: se sigue jugando (mover y atacar) con el puntero libre, solo no se gira la cámara.
-    browserInput.attackWithoutLock = !!iso || (shown && !pause.paused);
     panelShown = shown;
+    touch.setEnabled(!shown);
     hud.setChoiceOpen(shown);
 
+    const padNow = pad.poll();
+    if (padNow.used || touch.takeUsed()) aimDevice = "stick";
+    const stickMove = padNow.move ?? touch.move;
+    input.setMove(stickMove);
+    if (predictor) {
+      const mouse = camera.aim(predictor.current.x, predictor.current.z);
+      const stickAim = padNow.aim ?? touch.aim;
+      lastAim = chooseAim({ device: aimDevice, mouseAim: mouse?.facing, aim: stickAim, move: stickMove, last: lastAim });
+      // A cuántos metros se apunta (el salto del Golpe sísmico): el cursor; con sticks, cuánto se empuja el derecho.
+      if (aimDevice === "mouse") lastAimDist = mouse?.dist ?? lastAimDist;
+      else lastAimDist = SLAM_LEAP_MAX_M * (stickAim ? Math.hypot(stickAim.x, stickAim.y) : STICK_LEAP_FRAC);
+    }
     if (predictor && prev) {
       // En la pausa no se predice ni se envía nada (seq queda igual; el servidor descarta lo que llegue y
       // confirma su seq). Lo que se apriete en ella se descarta; las teclas mantenidas siguen valiendo.
@@ -337,24 +431,35 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         // Se predice y se envía lo mismo que el servidor va a simular (ya saneado). Muerto, nada
         // de acciones (el servidor igual las ignora).
         const dead = mine?.dead ?? false;
-        const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS), iso?.aimFacing(predictor.current.x, predictor.current.z));
+        const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS), lastAim, lastAimDist);
         // Aturdido tampoco ataca ni lanza habilidades (el servidor las ignora; no se predicen).
         const stunned = (mine?.stunLeft ?? 0) > 0;
-        const sampled = sanitizeInput(dead ? deadInput(raw, predictor.current) : raw);
-        if (!sampled) continue;
+        const clean = sanitizeInput(dead ? deadInput(raw, predictor.current) : raw);
+        if (!clean) continue;
+        // En el salto no se camina: lo mueve la habilidad, igual en el servidor y en la predicción.
+        if (dead) leap = undefined;
+        const leaping = leap !== undefined && leap.stepsLeft > 0;
+        const sampled = leaping ? { ...clean, moveX: 0, moveZ: 0, jump: false } : clean;
         prev = predictor.current;
         // Como el servidor: se mueve con el Bloqueo del input anterior y luego se actualiza.
         const moveSpeedMult = mine?.moveSpeedMult ?? 1;
         const statusSpeedMult = mine?.statusSpeedMult ?? 1;
         predictor.setMoveMods({ speedMult: moveSpeedMult * statusSpeedMult * (ability.isBlocking ? blockMoveMult(myLegendaries) : 1) });
-        predictor.applyLocal(sampled);
+        predictor.applyLocal(sampled, leaping ? leap : undefined);
+        if (leap && leaping) leap.stepsLeft--;
         // El golpe y la habilidad propios arrancan su clip ya (como el servidor: tras moverse, el combo
         // avanza, luego la habilidad y al final el ataque); el daño lo decide él. Con el arma que dice el
         // servidor: al tomar otra, el combo local vuelve a empezar.
         const weaponId = mine?.weaponId ?? STARTING_WEAPON;
         combo.advance(weaponId);
         ability.setCooldownMult(mine?.cooldownMult ?? 1);
-        if (ability.tick(sampled.abilities, { dead, stunned, swingTimer: combo.state().swingTimer }, now) === "thrust") lastThrustMs = now;
+        const cast = ability.tick(sampled.abilities, { dead, stunned, swingTimer: combo.state().swingTimer }, now);
+        if (cast === "thrust") lastThrustMs = now;
+        if (cast === "slam") {
+          const speed = leapSpeed(sampled.aimDist);
+          leap = { facing: sampled.facing, speed, stepsLeft: speed > 0 ? LEAP_STEPS : 0 };
+          leapDists.set(conn.myKey, speed * SLAM_IMPACT_S);
+        }
         combo.attack(sampled.attack, { dead: dead || stunned, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
       }
@@ -402,6 +507,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
     hazards.render(renderAt);
+    banners.render(now);
     seals.render(now);
     chests.render(renderAt);
     chainFx.render(renderAt);
@@ -438,10 +544,19 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     damageNumbers.dispose();
     hurtFlash.dispose();
     camera.dispose();
+    touch.dispose();
+    window.removeEventListener("pointermove", onMouseAim);
+    window.removeEventListener("pointerdown", onGesture);
+    window.removeEventListener("keydown", onGesture);
+    sfx.dispose();
+    window.removeEventListener("keydown", onClipKey);
+    clipNote.remove();
+    forwardClipOverride.clip = undefined;
     views.dispose();
     enemies.dispose();
     projectiles.dispose();
     hazards.dispose();
+    banners.dispose();
     seals.dispose();
     chests.dispose();
     chainFx.dispose();

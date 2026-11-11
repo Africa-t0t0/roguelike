@@ -23,9 +23,16 @@ const lerpShot = (a: PlayerShotSnapshot, b: PlayerShotSnapshot, t: number): Play
   z: a.z + (b.z - a.z) * t,
 });
 
+/** La espada lanzada: largo de la hoja (m), grosor y vueltas por segundo. */
+const SWORD_LENGTH = 1.7;
+const SWORD_THICKNESS = 0.09;
+const SWORD_SPIN_RAD_S = 26;
+
 interface ShotView {
   buffer: SnapshotBuffer<PlayerShotSnapshot>;
   mesh: InstancedMesh;
+  /** la espada gira sobre sí misma; la onda no */
+  spins: boolean;
   goneAtMs?: number;
 }
 
@@ -37,6 +44,8 @@ export class PlayerShotViews {
   private readonly views = new Map<string, ShotView>();
   /** Modelo y material por naturaleza ("none" es el dorado de siempre); los otros nacen al primer uso. */
   private readonly looks = new Map<Nature, { template: Mesh; material: StandardMaterial }>();
+  /** hoja de la espada lanzada por naturaleza (comparte el material de la onda) */
+  private readonly blades = new Map<Nature, Mesh>();
   private readonly path: Vector3[] = [];
   private readonly segments = 16;
 
@@ -74,16 +83,35 @@ export class PlayerShotViews {
     return look;
   }
 
+  /** Hoja que gira: un tubo recto afinado en las puntas, centrado en el origen, del color de la naturaleza. */
+  private blade(nature: Nature): Mesh {
+    let blade = this.blades.get(nature);
+    if (blade) return blade;
+    const n = 8;
+    const path = Array.from({ length: n + 1 }, (_, i) => new Vector3(0, 0, (i / n - 0.5) * SWORD_LENGTH));
+    blade = CreateTube(
+      `thrownSwordTemplate-${nature}`,
+      { path, radiusFunction: (i) => SWORD_THICKNESS * Math.sin((Math.PI * i) / n) + 0.01, tessellation: 6, cap: 0 },
+      this.scene,
+    );
+    blade.material = this.look(nature).material;
+    blade.isPickable = false;
+    blade.isVisible = false;
+    this.blades.set(nature, blade);
+    return blade;
+  }
+
   /** `receivedAtMs`: instante de recepción en el reloj de juego. La naturaleza (color) viene en cada onda. */
   push(world: WorldSnapshot, receivedAtMs: number): void {
     for (const [id, s] of world.playerShots) {
       let view = this.views.get(id);
       if (!view) {
-        const mesh = this.look(s.nature).template.createInstance(`cleaveWave-${id}`);
+        const sword = s.kind === "sword";
+        const mesh = (sword ? this.blade(s.nature) : this.look(s.nature).template).createInstance(`${sword ? "thrownSword" : "cleaveWave"}-${id}`);
         mesh.isPickable = false;
-        mesh.scaling.set(s.radius, 1, s.radius);
+        if (!sword) mesh.scaling.set(s.radius, 1, s.radius);
         mesh.rotation.y = Math.atan2(s.dirX, s.dirZ);
-        view = { buffer: new SnapshotBuffer(lerpShot), mesh };
+        view = { buffer: new SnapshotBuffer(lerpShot), mesh, spins: sword };
         this.views.set(id, view);
       }
       view.goneAtMs = undefined;
@@ -104,6 +132,7 @@ export class PlayerShotViews {
       }
       const s = view.buffer.sample(renderAtMs);
       if (s) view.mesh.position.set(s.x, WAVE_Y, s.z);
+      if (view.spins) view.mesh.rotation.y = (renderAtMs / 1000) * SWORD_SPIN_RAD_S;
     }
   }
 
@@ -115,5 +144,7 @@ export class PlayerShotViews {
       material.dispose();
     }
     this.looks.clear();
+    for (const blade of this.blades.values()) blade.dispose();
+    this.blades.clear();
   }
 }

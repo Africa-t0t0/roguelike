@@ -55,6 +55,13 @@ const STUN_ANIM_SPEED = 0.35;
 const MIN_STRIDE_RATE = 0.6;
 const MAX_STRIDE_RATE = 2.2;
 
+/**
+ * Sala de pruebas: clip que reemplaza al de correr hacia adelante de todos los héroes, para comparar
+ * candidatos con el juego delante. Vacío, cada arma usa el suyo.
+ */
+export const forwardClipOverride: { clip?: string } = {};
+export const FORWARD_CLIP_CANDIDATES: readonly string[] = ["ss_run_2", "gs_run_2", "gs_run"];
+
 type RunDir = "run" | "runBack" | "runLeft" | "runRight";
 
 /**
@@ -111,7 +118,7 @@ export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): Ani
   if (a.hurtRecently) return once(locomotion.hit);
   if (a.speed <= MOVING_SPEED) return looped(locomotion.idle);
   const { dir } = moveSector(a.moveAngle);
-  const clip = dir === "run" && a.speed > SPRINT_SPEED ? locomotion.sprint : locomotion[dir];
+  const clip = dir === "run" ? (forwardClipOverride.clip ?? (a.speed > SPRINT_SPEED ? locomotion.sprint : locomotion.run)) : locomotion[dir];
   return looped(clip, strideRate(clip, a.speed));
 }
 

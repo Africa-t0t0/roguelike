@@ -1396,7 +1396,7 @@ describe("RunRoom: habilidades", () => {
     await ticksUntil(() => player("ana").abilities[0]!.charges === 2, 10);
     expect(player("ana").abilities[1]!.charges).toBe(1);
 
-    room["abilities"]["zoneList"].push({ id: "z1", x: 5, z: 6, radius: 3.5, left: 2, total: 3 });
+    room["abilities"]["zoneList"].push({ id: "z1", kind: "cracks", x: 5, z: 6, radius: 3.5, left: 2, total: 3 });
     c.lastStandLeft = 2;
     c.lastStandCd = 20;
     await ticksUntil(() => room.state.playerZones.size === 1, 10);

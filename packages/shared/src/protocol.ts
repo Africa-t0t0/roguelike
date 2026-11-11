@@ -58,6 +58,6 @@ export type CombatEvent =
   | { type: "swing"; key: string; step: number }
   | { type: "levelUp"; level: number }
   /** un jugador empezó una habilidad activa; los demás clientes reproducen su animación */
-  | { type: "ability"; key: string; id: AbilityId }
+  | { type: "ability"; key: string; id: AbilityId; aimDist?: number }
   /** salto del rayo: puntos [x, z] de la cadena, del golpeado a los siguientes blancos */
   | { type: "chain"; points: [number, number][] };

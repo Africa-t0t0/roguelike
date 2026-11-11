@@ -3,7 +3,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
 import { describe, expect, it } from "vitest";
-import { FLASH_S, FLINCH_S, Flinches, flinchEnvelope, flinchStrength, leanRotation } from "../src/render/flinch";
+import { FLASH_S, FLINCH_S, Flinches, flinchEnvelope, flinchStrength, HitScale, leanRotation } from "../src/render/flinch";
 
 describe("flinchEnvelope", () => {
   it("empieza y termina en 0 y llega a 1 al principio", () => {
@@ -96,5 +96,24 @@ describe("Flinches", () => {
     expect(f.sample("e1", 150)!.dir).toBe(2);
     f.forget("e1");
     expect(f.sample("e1", 150)).toBeUndefined();
+  });
+});
+
+describe("HitScale", () => {
+  it("los golpes de siempre pesan 0 y uno del doble o más pesa 1", () => {
+    const h = new HitScale();
+    expect(h.weigh(10)).toBe(0); // el primero no tiene con qué compararse
+    for (let i = 0; i < 5; i++) expect(h.weigh(10)).toBe(0);
+    expect(h.weigh(15)).toBeGreaterThan(0);
+    expect(h.weigh(15)).toBeLessThan(1);
+    expect(h.weigh(40)).toBe(1);
+  });
+
+  it("se acostumbra: si todos los golpes pasan a ser fuertes, dejan de pesar", () => {
+    const h = new HitScale();
+    h.weigh(10);
+    for (let i = 0; i < 60; i++) h.weigh(30);
+    expect(h.weigh(30)).toBe(0);
+    expect(h.weigh(0)).toBe(0);
   });
 });

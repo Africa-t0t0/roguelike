@@ -1,7 +1,7 @@
 import type { Rng } from "./rng";
 
 export type StatCardId = "vitality" | "regen" | "strength" | "fury" | "reach" | "agility" | "ironskin" | "bloodlust" | "magnet" | "learning" | "haste" | "affinity";
-export type AbilityId = "whirlwind" | "kick" | "warcry" | "slam" | "block" | "cleave" | "thrust";
+export type AbilityId = "whirlwind" | "kick" | "warcry" | "slam" | "block" | "cleave" | "thrust" | "throw" | "hook" | "banner" | "frenzy";
 
 export const BASE_REGEN = 0.5;
 export const CHOICE_TIME_S = 20;
@@ -30,6 +30,19 @@ export const CLEAVE_LIFE_S = 0.5;
 /** ancho (m) de la línea del Tajo frontal e impacto como fracción de su animación */
 export const THRUST_WIDTH = 1.2;
 export const THRUST_IMPACT_FRAC = 0.45;
+/** el Golpe sísmico salta hacia donde se apunta, como mucho estos metros */
+export const SLAM_LEAP_MAX_M = 8;
+/** Lanzar la espada: momento en que sale (fracción de su animación), velocidad (m/s) y radio (m) */
+export const THROW_RELEASE_AT = 0.4;
+export const THROW_SPEED = 20;
+export const THROW_RADIUS = 0.7;
+/** Gancho de cadena: impacto (fracción de su animación), alcance (m) y a qué distancia del jugador deja a los enemigos */
+export const HOOK_IMPACT_AT = 0.4;
+export const HOOK_RANGE = 12;
+export const HOOK_STOP_M = 1.4;
+/** segundos que duran el Estandarte y el Frenesí */
+export const BANNER_DURATION_S = 8;
+export const FRENZY_DURATION_S = 6;
 /** el factor de enfriamiento de habilidades nunca baja de aquí */
 export const MIN_COOLDOWN_MULT = 0.5;
 
@@ -57,8 +70,15 @@ export interface AbilityRank {
   stunS?: number;
   buff?: number;
   reduction?: number;
-  /** alcance en metros (Tajo frontal) */
+  /** alcance en metros (Tajo frontal, Lanzar la espada) */
   range?: number;
+  /** enemigos que atrae el Gancho de cadena */
+  count?: number;
+  /** fracción de la vida máxima que el Estandarte cura por segundo */
+  healFrac?: number;
+  /** Frenesí: velocidad de ataque extra y fracción del daño hecho que cura */
+  speed?: number;
+  leech?: number;
 }
 
 export interface AbilityDef {
@@ -128,7 +148,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     ],
     text: (r) => {
       const k = ABILITIES.slam.ranks[r - 1]!;
-      return `Saltas y golpeas el suelo: ${pct(k.damageMult!)} de daño en ${k.radius} m`;
+      return `Saltas hasta donde apuntas (máx. ${SLAM_LEAP_MAX_M} m) y golpeas el suelo: ${pct(k.damageMult!)} de daño en ${k.radius} m`;
     },
   },
   thrust: {
@@ -145,6 +165,70 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     text: (r) => {
       const k = ABILITIES.thrust.ranks[r - 1]!;
       return `Te lanzas hacia adelante y golpeas en línea hasta ${k.range} m con ${pct(k.damageMult!)} de daño`;
+    },
+  },
+  throw: {
+    name: "Lanzar la espada",
+    kind: "active",
+    cooldownS: 6,
+    animS: 0.5,
+    clip: "ss_attack_4",
+    ranks: [
+      { damageMult: 1, range: 8 },
+      { damageMult: 1.3, range: 10 },
+      { damageMult: 1.6, range: 12 },
+    ],
+    text: (r) => {
+      const k = ABILITIES.throw.ranks[r - 1]!;
+      return `Arrojas la espada ${k.range} m: atraviesa enemigos con ${pct(k.damageMult!)} de daño a la ida y otra vez al volver a tu mano`;
+    },
+  },
+  hook: {
+    name: "Gancho de cadena",
+    kind: "active",
+    cooldownS: 14,
+    animS: 0.6,
+    clip: "ss_slash_3",
+    ranks: [
+      { damageMult: 0.3, count: 5, stunS: 1 },
+      { damageMult: 0.3, count: 10, stunS: 2 },
+      { damageMult: 0.3, count: 15, stunS: 3 },
+    ],
+    text: (r) => {
+      const k = ABILITIES.hook.ranks[r - 1]!;
+      return `Atrae hacia ti a los ${k.count} enemigos más cercanos (hasta ${HOOK_RANGE} m) y los aturde ${secs(k.stunS!)}`;
+    },
+  },
+  banner: {
+    name: "Estandarte",
+    kind: "active",
+    cooldownS: 25,
+    animS: 0.6,
+    clip: "ss_power_up",
+    ranks: [
+      { healFrac: 0.03, radius: 4 },
+      { healFrac: 0.04, radius: 4 },
+      { healFrac: 0.06, radius: 5 },
+    ],
+    text: (r) => {
+      const k = ABILITIES.banner.ranks[r - 1]!;
+      return `Clavas un estandarte ${BANNER_DURATION_S} s: el grupo se cura ${pct(k.healFrac!)} de su vida por segundo dentro de ${k.radius} m`;
+    },
+  },
+  frenzy: {
+    name: "Frenesí",
+    kind: "active",
+    cooldownS: 20,
+    animS: 0.5,
+    clip: "ss_power_up",
+    ranks: [
+      { speed: 0.3, leech: 0.05 },
+      { speed: 0.4, leech: 0.08 },
+      { speed: 0.5, leech: 0.12 },
+    ],
+    text: (r) => {
+      const k = ABILITIES.frenzy.ranks[r - 1]!;
+      return `Durante ${FRENZY_DURATION_S} s atacas un ${pct(k.speed!)} más rápido y te curas el ${pct(k.leech!)} del daño que haces`;
     },
   },
   block: {

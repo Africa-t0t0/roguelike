@@ -1,6 +1,9 @@
+import type { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Constants } from "@babylonjs/core/Engines/constants";
+import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -10,6 +13,7 @@ import type { FloorItem, FloorWeapon } from "../net/connection";
 import { formatWeapon, pickupInfo, tierColor, type PickupInfo } from "../ui/hud";
 import type { Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
+import { beamTexture } from "./fxTextures";
 import { attachNatureFx, NATURE_COLORS, type NatureFx } from "./natureLooks";
 import { FloorItemKit } from "./floorItemViews";
 import { itemGlow } from "./gearLooks";
@@ -76,6 +80,11 @@ export function nearestClosedChest<T extends { x: number; z: number; open: boole
  * (se congela en la pausa) y con ≤ 5 s parpadea. El equipo y las reliquias comparten lista, aviso (con comparación o texto),
  * aro y parpadeo; su forma sale de `FloorItemKit` (equipo con aro y brillo del tier; reliquia: gema con halo y rayo).
  */
+/** Haz de luz sobre lo que vale la pena: desde este tier, más alto cuanto mejor. */
+const BEAM_FROM_TIER = 2;
+const BEAM_HEIGHT_M: Record<number, number> = { 2: 2.2, 3: 3.2, 4: 4.2 };
+const BEAM_ALPHA = 0.5;
+
 export class FloorWeaponViews {
   private items: FloorItem[] = [];
   private nodes: FloorNode[] = [];
@@ -83,6 +92,7 @@ export class FloorWeaponViews {
   private paused = false;
   private shownKey = ""; // aviso mostrado ahora (para no reescribir el DOM)
   private setAtMs = 0; // instante de juego (ms) en que llegó la lista
+  private beamTex?: DynamicTexture;
   private readonly glows = new Map<string, StandardMaterial>(); // material del velo y del aro por tier
   private readonly kit: FloorItemKit;
   private readonly hint = document.createElement("div");
@@ -203,6 +213,8 @@ export class FloorWeaponViews {
     this.clear();
     for (const m of this.glows.values()) m.dispose();
     this.glows.clear();
+    this.beamTex?.dispose();
+    this.beamTex = undefined;
     this.kit.dispose();
     this.hint.remove();
   }
@@ -218,7 +230,7 @@ export class FloorWeaponViews {
     this.items = [];
   }
 
-  private glow(tier: WeaponTier, part: "veil" | "ring", nature: Nature): StandardMaterial {
+  private glow(tier: WeaponTier, part: "veil" | "ring" | "beam", nature: Nature): StandardMaterial {
     const id = nature === "none" ? `${part}-${tier}` : `${part}-${tier}-${nature}`;
     let m = this.glows.get(id);
     if (m) return m;
@@ -229,7 +241,12 @@ export class FloorWeaponViews {
     m.emissiveColor = new Color3(r, g, b);
     m.disableLighting = true;
     m.fogEnabled = false;
-    m.alpha = part === "ring" ? 0.9 : 0.12;
+    m.alpha = part === "ring" ? 0.9 : part === "beam" ? BEAM_ALPHA : 0.12;
+    if (part === "beam") {
+      m.alphaMode = Constants.ALPHA_ADD;
+      m.backFaceCulling = false;
+      m.opacityTexture = this.beamTex ??= beamTexture(this.scene, "floor-beam");
+    }
     this.glows.set(id, m);
     return m;
   }
@@ -297,5 +314,13 @@ export class FloorWeaponViews {
     ring.isPickable = false;
     ring.parent = pivot;
     ring.position.y = 0.03;
+    if (tier < BEAM_FROM_TIER) return;
+    // Haz de luz del color del tier: de lejos y desde arriba se ve dónde cayó algo bueno.
+    const height = BEAM_HEIGHT_M[tier] ?? BEAM_HEIGHT_M[2]!;
+    const beam = CreateCylinder(`floor-weapon-beam-${i}`, { height, diameter: 0.26, tessellation: 12, cap: 0 }, this.scene);
+    beam.material = this.glow(tier, "beam", nature);
+    beam.isPickable = false;
+    beam.parent = pivot;
+    beam.position.y = height / 2;
   }
 }

@@ -31,33 +31,24 @@ const attacking = (input: InputState) => input.sample(0, 0).attack;
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("ataque sin bloqueo de puntero (elección sin pausa)", () => {
-  it("con la bandera y sobre el canvas, el clic izquierdo ataca; al soltar, deja de atacar", () => {
-    const { input, bi, canvas, win } = setup();
-    bi.attackWithoutLock = true;
-    canvas.fire("mousedown", { button: 0, target: canvas });
+describe("ataque con el clic izquierdo", () => {
+  it("sobre el canvas, el clic izquierdo ataca; al soltar, deja de atacar", () => {
+    const { input, canvas, win } = setup();
+    canvas.fire("pointerdown", { button: 0, target: canvas });
     expect(attacking(input)).toBe(true);
-    win.fire("mouseup", { button: 0 });
+    win.fire("pointerup", { button: 0 });
     expect(attacking(input)).toBe(false);
   });
 
   it("un clic en otro elemento (botón de carta) no ataca", () => {
-    const { input, bi, canvas } = setup();
-    bi.attackWithoutLock = true;
-    canvas.fire("mousedown", { button: 0, target: {} });
-    expect(attacking(input)).toBe(false);
-  });
-
-  it("sin la bandera ni bloqueo no ataca", () => {
     const { input, canvas } = setup();
-    canvas.fire("mousedown", { button: 0, target: canvas });
+    canvas.fire("pointerdown", { button: 0, target: {} });
     expect(attacking(input)).toBe(false);
   });
 
   it("perder el foco suelta el ataque", () => {
-    const { input, bi, canvas, win } = setup();
-    bi.attackWithoutLock = true;
-    canvas.fire("mousedown", { button: 0, target: canvas });
+    const { input, canvas, win } = setup();
+    canvas.fire("pointerdown", { button: 0, target: canvas });
     win.fire("blur", {});
     expect(attacking(input)).toBe(false);
   });

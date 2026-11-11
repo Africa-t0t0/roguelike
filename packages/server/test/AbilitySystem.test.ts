@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ABILITIES,
+  BANNER_DURATION_S,
   ENEMY_DEFS,
+  FRENZY_DURATION_S,
+  HOOK_RANGE,
   PLAYER_RADIUS,
+  SLAM_IMPACT_S,
+  SLAM_LEAP_MAX_M,
   SIM_DT,
   createRng,
   newProgress,
@@ -13,7 +19,7 @@ import {
   type PlayerInput,
 } from "@roguelike/shared";
 import { AbilitySystem, abilityCharges, abilityMaxCharges } from "../src/sim/AbilitySystem";
-import { CombatSystem, guardMult, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
+import { attackSpeedOf, CombatSystem, guardMult, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
 import { EnemySystem, type Enemy, type EnemyHit, type SimPlayer } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
 
@@ -654,5 +660,146 @@ describe("efectos legendarios y reliquias", () => {
     env2.c.fx = { ...env2.c.fx, abilityHpCost: 4 };
     feed(env2, { abilities: 1 });
     expect(env2.c.hp).toBe(env2.c.maxHp - 4);
+  });
+});
+
+describe("Golpe sísmico con salto", () => {
+  /** Lanza el Golpe y sigue dando inputs, moviendo al jugador con cada `dash`, hasta el primero que golpee. */
+  function leap(env: Env, aimDist: number | undefined) {
+    let k = kin();
+    const start = feed(env, { abilities: 1, aimDist }, k);
+    for (let i = 0; i < 60; i++) {
+      const { a } = feed(env, { aimDist }, k);
+      if (a.dash) k = { ...k, x: a.dash.x, z: a.dash.z };
+      if (a.hits.length > 0) return { k, hits: a.hits, start };
+    }
+    return { k, hits: [], start };
+  }
+
+  it("salta hacia donde apunta y golpea donde cae, no donde salió", () => {
+    const env = setup([{ id: "slam", rank: 1 }]);
+    const [atLanding, atOrigin] = spawn(env.sys, [{ x: 28, z: 35 }, { x: 26, z: 26 }]);
+    const { k, hits, start } = leap(env, 6);
+    expect(start.a.leapDist).toBe(6);
+    expect(k.z).toBeCloseTo(34, 1);
+    expect(k.x).toBeCloseTo(28, 5);
+    expect(hits.map((h) => h.enemyId)).toEqual([atLanding!.id]);
+    expect(atOrigin!.hp).toBe(9999);
+  });
+
+  it("no pasa del tope de distancia y se frena contra un muro", () => {
+    const far = leap(setup([{ id: "slam", rank: 1 }]), 30);
+    expect(far.k.z).toBeCloseTo(28 + SLAM_LEAP_MAX_M, 1);
+    // La sala termina en z = 40: saliendo de z = 28 con el tope de 8 m no llega; desde más cerca del muro, sí.
+    const env = setup([{ id: "slam", rank: 1 }]);
+    let k = kin({ z: 37 });
+    feed(env, { abilities: 1, aimDist: 8 }, k);
+    for (let i = 0; i < inputsFor(SLAM_IMPACT_S); i++) {
+      const { a } = feed(env, {}, k);
+      if (a.dash) k = { ...k, x: a.dash.x, z: a.dash.z };
+    }
+    expect(k.z).toBeLessThanOrEqual(40 - PLAYER_RADIUS + 1e-6);
+    expect(k.z).toBeGreaterThan(39);
+  });
+
+  it("sin apuntar (aimDist ausente) salta en el sitio, como antes", () => {
+    const { k, start } = leap(setup([{ id: "slam", rank: 1 }]), undefined);
+    expect(start.a.leapDist).toBe(0);
+    expect(k).toMatchObject({ x: 28, z: 28 });
+  });
+});
+
+describe("Lanzar la espada", () => {
+  it("atraviesa a los enemigos a la ida, vuelve a su dueño golpeándolos otra vez y desaparece", () => {
+    const env = setup([{ id: "throw", rank: 1 }]);
+    const [e] = spawn(env.sys, [{ x: 28, z: 32 }]);
+    feed(env, { abilities: 1 });
+    for (let i = 0; i < inputsFor(ABILITIES.throw.animS); i++) feed(env);
+    expect(env.ab.playerShots).toHaveLength(1);
+    expect(env.ab.playerShots[0]).toMatchObject({ kind: "sword", dirX: 0, dirZ: 1 });
+    // `feed` lanza sin clave de jugador: la espada vuelve a la posición registrada con la clave vacía.
+    const positions = new Map([["", { x: 28, z: 28 }]]);
+    const states = new Map([["", env.c]]);
+    let hits = 0;
+    let returned = false;
+    for (let i = 0; i < 200 && env.ab.playerShots.length > 0; i++) {
+      for (const r of env.ab.step(states, env.sys, SIM_DT, positions)) hits += r.hits.length;
+      returned ||= env.ab.playerShots[0]?.returning === true;
+    }
+    expect(returned).toBe(true);
+    expect(hits).toBe(2);
+    expect(e!.hp).toBe(9999 - 2 * BASE);
+    expect(env.ab.playerShots).toHaveLength(0);
+  });
+
+  it("si su dueño ya no está, la espada que vuelve se pierde", () => {
+    const env = setup([{ id: "throw", rank: 1 }]);
+    feed(env, { abilities: 1 });
+    for (let i = 0; i < inputsFor(ABILITIES.throw.animS); i++) feed(env);
+    for (let i = 0; i < 200; i++) env.ab.step(new Map([["a", env.c]]), env.sys, SIM_DT);
+    expect(env.ab.playerShots).toHaveLength(0);
+  });
+});
+
+describe("Gancho de cadena", () => {
+  it("atrae y aturde solo a los más cercanos, tantos como diga su rango", () => {
+    const env = setup([{ id: "hook", rank: 1 }]);
+    // Siete en fila hacia +Z, de 3 a 9 m: el rango 1 alcanza a los cinco primeros.
+    const es = spawn(env.sys, [3, 4, 5, 6, 7, 8, 9].map((d) => ({ x: 28, z: 28 + d })));
+    const { hits } = untilHits(env, 1);
+    expect(hits).toHaveLength(5);
+    const pulled = es.slice(0, 5);
+    const left = es.slice(5);
+    for (const e of pulled) {
+      expect(e.stunned).toBe(1);
+      expect(e.z - 28).toBeLessThan(3);
+    }
+    expect(left.map((e) => e.z)).toEqual([36, 37]);
+    expect(left.every((e) => e.stunned === 0)).toBe(true);
+  });
+
+  it("no alcanza más allá de su alcance", () => {
+    const env = setup([{ id: "hook", rank: 3 }]);
+    const [e] = spawn(env.sys, [{ x: 28, z: 28 + HOOK_RANGE + 0.5 }]);
+    feed(env, { abilities: 1 });
+    for (let i = 0; i < inputsFor(ABILITIES.hook.animS); i++) feed(env);
+    expect(e!.stunned).toBe(0);
+    expect(e!.z).toBe(28 + HOOK_RANGE + 0.5);
+  });
+});
+
+describe("Estandarte", () => {
+  it("cura a los vivos que están dentro mientras dura y luego desaparece", () => {
+    const env = setup([{ id: "banner", rank: 1 }]);
+    const ally = newCombatState("warrior", 1);
+    const away = newCombatState("warrior", 1);
+    for (const c of [env.c, ally, away]) c.hp = 10;
+    feed(env, { abilities: 1 });
+    expect(env.ab.playerZones).toHaveLength(1);
+    expect(env.ab.playerZones[0]).toMatchObject({ kind: "banner", x: 28, z: 28, radius: 4 });
+    const states = new Map([["a", env.c], ["b", ally], ["c", away]]);
+    const positions = new Map([["a", { x: 28, z: 28 }], ["b", { x: 30, z: 28 }], ["c", { x: 28, z: 34 }]]);
+    for (let i = 0; i < inputsFor(1); i++) env.ab.step(states, env.sys, SIM_DT, positions);
+    expect(env.c.hp).toBeCloseTo(10 + env.c.maxHp * 0.03, 1);
+    expect(ally.hp).toBeCloseTo(10 + ally.maxHp * 0.03, 1);
+    expect(away.hp).toBe(10);
+    for (let i = 0; i < inputsFor(BANNER_DURATION_S); i++) env.ab.step(states, env.sys, SIM_DT, positions);
+    expect(env.ab.playerZones).toHaveLength(0);
+  });
+});
+
+describe("Frenesí", () => {
+  it("sube la velocidad de ataque y cura parte del daño hecho mientras dura", () => {
+    const env = setup([{ id: "frenzy", rank: 2 }]);
+    expect(attackSpeedOf(env.c)).toBe(1);
+    feed(env, { abilities: 1 });
+    expect(attackSpeedOf(env.c)).toBeCloseTo(1.4);
+    env.c.hp = 10;
+    env.cs.vampireHeal(env.c, 100);
+    expect(env.c.hp).toBeCloseTo(18);
+    tickAbilities(env, inputsFor(FRENZY_DURATION_S));
+    expect(attackSpeedOf(env.c)).toBe(1);
+    env.cs.vampireHeal(env.c, 100);
+    expect(env.c.hp).toBeCloseTo(18);
   });
 });

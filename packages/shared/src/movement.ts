@@ -2,10 +2,12 @@ import {
   GRAVITY,
   JUMP_VELOCITY,
   PLAYER_RADIUS,
+  SIM_DT,
   PLAYER_SPEED,
   SPRINT_SPEED,
   TILE_SIZE,
 } from "./constants";
+import { SLAM_IMPACT_S, SLAM_LEAP_MAX_M } from "./cards";
 import { isWalkableTile, type Dungeon } from "./dungeon";
 
 export interface KinematicState {
@@ -31,6 +33,8 @@ export interface PlayerInput {
   abilities: number;
   /** tick del servidor que el cliente estaba viendo al atacar (para rebobinar) */
   viewTick: number;
+  /** metros hasta el punto al que se apunta (el cursor); lo usa el salto del Golpe sísmico. Sin él, 0. */
+  aimDist?: number;
 }
 
 /** Modificadores de movimiento (mejoras, Bloqueo); el servidor y la predicción usan los mismos. */
@@ -46,6 +50,9 @@ const ABILITIES_MASK_MAX = 15;
 function finiteOrZero(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
+
+/** Tope de `aimDist` (m): más lejos que esto no apunta ninguna habilidad. */
+const MAX_AIM_DIST = 40;
 
 export function sanitizeInput(raw: unknown): PlayerInput | null {
   if (typeof raw !== "object" || raw === null) return null;
@@ -69,6 +76,7 @@ export function sanitizeInput(raw: unknown): PlayerInput | null {
     interact: r.interact === true,
     abilities: sanitizeAbilities(r.abilities),
     viewTick: typeof r.viewTick === "number" && Number.isFinite(r.viewTick) && r.viewTick >= 0 ? r.viewTick : 0,
+    ...(typeof r.aimDist === "number" && Number.isFinite(r.aimDist) ? { aimDist: Math.min(MAX_AIM_DIST, Math.max(0, r.aimDist)) } : {}),
   };
 }
 
@@ -176,4 +184,25 @@ export function stepPlayer(
 
   const { x, z } = moveCircle(d, s.x, s.z, dx, dz, PLAYER_RADIUS);
   return { x, z, facing: input.facing, y, vy };
+}
+
+/** Velocidad (m/s) del salto del Golpe sísmico para caer a `aimDist` metros (con tope) justo en su impacto. */
+export function leapSpeed(aimDist: number | undefined): number {
+  return Math.min(SLAM_LEAP_MAX_M, Math.max(0, aimDist ?? 0)) / SLAM_IMPACT_S;
+}
+
+/** Un paso (un input) del salto desde (x, z) hacia `facing`: avanza contra los muros como cualquier movimiento. */
+export function leapStep(d: Dungeon, x: number, z: number, facing: number, speed: number): { x: number; z: number } {
+  return moveCircle(d, x, z, Math.sin(facing) * speed * SIM_DT, Math.cos(facing) * speed * SIM_DT, PLAYER_RADIUS);
+}
+
+/** Inputs que tarda en llegar el impacto del Golpe sísmico: los mismos pasos que da el salto. */
+export const LEAP_STEPS = Math.ceil(SLAM_IMPACT_S / SIM_DT - 1e-6);
+
+/** Dónde cae el salto que sale de (x, z) hacia `facing` apuntando a `aimDist` metros. */
+export function leapLanding(d: Dungeon, x: number, z: number, facing: number, aimDist: number | undefined): { x: number; z: number } {
+  const speed = leapSpeed(aimDist);
+  let p = { x, z };
+  for (let i = 0; i < LEAP_STEPS; i++) p = leapStep(d, p.x, p.z, facing, speed);
+  return p;
 }

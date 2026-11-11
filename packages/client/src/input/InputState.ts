@@ -12,6 +12,8 @@ export class InputState {
   /** teclas de habilidad apretadas desde el último sample (aunque ya se hayan soltado) */
   private abilitiesQueued = 0;
   private facing = 0;
+  /** movimiento analógico de un stick (x derecha, y arriba, módulo ≤ 1); sin él manda el teclado */
+  private stick: { x: number; y: number } | undefined;
 
   keyDown(code: string): void {
     // La autorepetición del teclado no vuelve a disparar el salto.
@@ -24,6 +26,11 @@ export class InputState {
       if (slot >= 0) this.abilitiesQueued |= 1 << slot;
     }
     this.held.add(code);
+  }
+
+  /** Movimiento de un stick (mando o pantalla táctil): x derecha, y arriba, módulo ≤ 1. Con undefined vuelve al teclado. */
+  setMove(v: { x: number; y: number } | undefined): void {
+    this.stick = v;
   }
 
   keyUp(code: string): void {
@@ -45,18 +52,21 @@ export class InputState {
    * Un clic corto ataca una vez (aunque se suelte antes del sample); mantenerlo ataca en cada sample:
    * el servidor solo acepta un golpe cuando terminó el anterior, así que repetir no hace daño.
    * `viewTick`: tick del servidor que se está viendo (para el rebobinado de los golpes).
+   * `aimFacing` y `aimDist`: hacia dónde y a cuántos metros se apunta (el cursor o el stick derecho).
    */
-  sample(seq: number, cameraYaw: number, viewTick = 0, aimFacing?: number): PlayerInput {
-    const forward = Math.sign(this.axis("KeyW", "KeyS") + this.axis("ArrowUp", "ArrowDown"));
-    const right = Math.sign(this.axis("KeyD", "KeyA") + this.axis("ArrowRight", "ArrowLeft"));
+  sample(seq: number, cameraYaw: number, viewTick = 0, aimFacing?: number, aimDist?: number): PlayerInput {
+    const forward = this.stick ? this.stick.y : Math.sign(this.axis("KeyW", "KeyS") + this.axis("ArrowUp", "ArrowDown"));
+    const right = this.stick ? this.stick.x : Math.sign(this.axis("KeyD", "KeyA") + this.axis("ArrowRight", "ArrowLeft"));
     const sin = Math.sin(cameraYaw);
     const cos = Math.cos(cameraYaw);
     let moveX = forward * sin + right * cos;
     let moveZ = forward * cos - right * sin;
     const len = Math.hypot(moveX, moveZ);
     if (len > 0) {
-      moveX /= len;
-      moveZ /= len;
+      // El teclado siempre va a fondo; un stick conserva cuánto se empuja (caminar despacio).
+      const k = this.stick ? Math.max(1, len) : len;
+      moveX /= k;
+      moveZ /= k;
       this.facing = cameraYaw;
     } else {
       moveX = 0;
@@ -72,14 +82,14 @@ export class InputState {
     });
     // Se golpea, se lanza la habilidad y se bloquea hacia donde mira la cámara.
     if (attack || abilities) this.facing = cameraYaw;
-    // Spike cámara fija: se mira siempre al cursor.
+    // Con un punto al que apuntar (el cursor, el stick derecho), se mira siempre hacia él.
     if (aimFacing !== undefined) this.facing = aimFacing;
     const jump = this.jumpQueued;
     this.jumpQueued = false;
     const interact = this.interactQueued;
     this.interactQueued = false;
     const sprint = this.held.has("ShiftLeft") || this.held.has("ShiftRight");
-    return { seq, moveX, moveZ, facing: this.facing, sprint, jump, attack, interact, abilities, viewTick };
+    return { seq, moveX, moveZ, facing: this.facing, sprint, jump, attack, interact, abilities, viewTick, ...(aimDist === undefined ? {} : { aimDist }) };
   }
 
   private axis(positive: string, negative: string): number {

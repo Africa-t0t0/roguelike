@@ -2,10 +2,11 @@ import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTextur
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
+import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type GearSlot, type Nature, type RelicId, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type Strike, type GearSlot, type Nature, type RelicId, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { EquippedGear } from "../net/connection";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
@@ -57,6 +58,10 @@ interface PlayerView {
   ability?: { id: AbilityId; startMs: number };
   /** cuánto llevaba la habilidad dibujada en el cuadro anterior (para reiniciar el clip si empieza otra) */
   abilityElapsed?: number;
+  /** golpe que se dibujaba en el cuadro anterior (para notar cuándo empieza otro) */
+  lastSwing?: { step: number; timer: number };
+  /** hasta cuándo (reloj con que se lo dibuja) queda clavado su clip por haber conectado un golpe */
+  hitStopUntilMs?: number;
   dispose(): void;
 }
 
@@ -80,6 +85,13 @@ function createLabel(scene: Scene, key: string, text: string, parent: TransformN
   return plane;
 }
 
+/** El contador de un golpe solo baja: si sube más que esto, es que empezó otro igual. */
+const SWING_RESTART_S = 0.05;
+
+/** Aro claro bajo cada jugador: desde arriba lo separa de los enemigos (que lo llevan rojo). */
+const MARKER_RADIUS = 0.62; // m
+const MARKER_COLOR = new Color3(0.5, 0.85, 1);
+
 /** Un Kingslayer animado según el estilo de su arma, con el arma en la mano y su nombre encima. */
 export class PlayerViews {
   private readonly views = new Map<string, PlayerView>();
@@ -92,6 +104,9 @@ export class PlayerViews {
    * cuadro y cuánto lleva ya (s) en el reloj con el que se dibuja a ese jugador.
    */
   onAbilityStart?: (key: string, id: AbilityId, pose: { x: number; z: number; facing: number }, elapsedS: number) => void;
+
+  /** Empezó a dibujarse un golpe del combo (propio o ajeno): con la pose dibujada y cuánto lleva ya (s). */
+  onSwingStart?: (key: string, strike: Strike, step: number, pose: { x: number; z: number; facing: number }, elapsedS: number) => void;
 
   constructor(
     private readonly scene: Scene,
@@ -164,6 +179,13 @@ export class PlayerViews {
         s.restart = false;
       }
     }
+    const swinging = swingTimer > 0 && comboStep >= 1 && comboStep <= MOVESETS[WEAPONS[state.weaponId].movesetId].combo.length;
+    const last = view.lastSwing;
+    if (swinging && (!last || last.step !== comboStep || swingTimer > last.timer + SWING_RESTART_S)) {
+      const strike = strikeOf(state.weaponId, comboStep, state.attackSpeedMult);
+      this.onSwingStart?.(key, strike, comboStep, pose, Math.max(0, strike.duration - swingTimer));
+    }
+    view.lastSwing = swinging ? { step: comboStep, timer: swingTimer } : undefined;
     let ability = state.ability ?? undefined;
     const ev = view.ability;
     if (state.ability === undefined && ev) {
@@ -194,6 +216,14 @@ export class PlayerViews {
     const choice = chooseHeroAnim(input, this.clipLengths);
     view.character.setBodyYaw(heroBodyYaw(input));
     view.character.play(choice, attackClip !== undefined && choice.clip === attackClip);
+    // Después de `play`, que al soltarlo le devuelve su velocidad al clip.
+    view.character.setFrozen(nowMs < (view.hitStopUntilMs ?? 0));
+  }
+
+  /** Clava el clip del jugador `key` hasta `untilMs`: la pausa mínima que se siente al conectar un golpe. */
+  hitStop(key: string, untilMs: number): void {
+    const view = this.views.get(key);
+    if (view) view.hitStopUntilMs = Math.max(view.hitStopUntilMs ?? 0, untilMs);
   }
 
   /** Congela (o reanuda) las partículas de las armas en la pausa del grupo. */
@@ -216,6 +246,18 @@ export class PlayerViews {
   private create(key: string, name: string): PlayerView {
     const character = new CharacterView(this.scene, this.assets, this.anims, PLAYER_LOOK);
     const label = createLabel(this.scene, key, name, character.root);
+    const marker = CreateTorus(`playerMarker-${key}`, { diameter: MARKER_RADIUS * 2, thickness: 0.05, tessellation: 40 }, this.scene);
+    const markerMat = new StandardMaterial(`playerMarkerMat-${key}`, this.scene);
+    markerMat.diffuseColor = Color3.Black();
+    markerMat.specularColor = Color3.Black();
+    markerMat.emissiveColor = MARKER_COLOR;
+    markerMat.disableLighting = true;
+    markerMat.fogEnabled = false;
+    markerMat.alpha = 0.7;
+    marker.material = markerMat;
+    marker.parent = character.root;
+    marker.position.y = 0.035;
+    marker.isPickable = false;
     const gearLooks = new GearLooks(this.scene, this.gearFx, character);
     // Mallas con esqueleto: el cuerpo (el arma cuelga de la mano sin esqueleto).
     const gearTint = new GearTint(character.root.getChildMeshes(false).filter((m) => m.skeleton));
@@ -230,6 +272,7 @@ export class PlayerViews {
       dispose() {
         label.material?.getActiveTextures().forEach((t) => t.dispose());
         label.material?.dispose();
+        markerMat.dispose();
         gearLooks.dispose();
         gearTint.dispose();
         setAura.dispose();

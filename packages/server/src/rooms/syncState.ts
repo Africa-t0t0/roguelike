@@ -1,6 +1,6 @@
 import { GEAR_SLOTS, xpToNext, type GearItem } from "@roguelike/shared";
 import { abilityCharges, abilityMaxCharges, abilitySlots, type PlayerShot, type PlayerZone } from "../sim/AbilitySystem";
-import { abilityRank, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
+import { abilityRank, attackSpeedOf, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
 import type { Hazard } from "../sim/hazards";
 import type { Orb } from "../sim/OrbSystem";
@@ -52,7 +52,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.weaponNature = c.weaponNature;
   ps.choosing = choosing;
   ps.moveSpeedMult = c.mods.moveSpeedMult;
-  ps.attackSpeedMult = c.mods.attackSpeedMult;
+  ps.attackSpeedMult = attackSpeedOf(c);
   ps.cooldownMult = c.mods.cooldownMult;
   ps.passiveRank = abilityRank(c, "cleave");
   ps.blocking = c.blocking;
@@ -176,6 +176,7 @@ export function syncWorld(
       ws.dirZ = w.dirZ;
       ws.radius = w.radius;
       ws.nature = w.nature;
+      ws.kind = w.kind;
       state.playerShots.set(w.id, ws);
     }
     ws.x = w.x;
@@ -215,6 +216,7 @@ export function syncWorld(
       zs.z = z.z;
       zs.radius = z.radius;
       zs.total = z.total;
+      zs.kind = z.kind;
       state.playerZones.set(z.id, zs);
     }
     zs.left = z.left;

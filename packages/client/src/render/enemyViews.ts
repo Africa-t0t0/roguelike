@@ -1,4 +1,5 @@
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
@@ -49,6 +50,12 @@ const ELITE_LABEL_W = 1.4;
 const ELITE_LABEL_H = 0.17; // letras de ~0,11 m
 /** Más cerca de la cámara que esto, el rótulo se oculta: a esa distancia taparía la pantalla. */
 const ELITE_LABEL_HIDE_M = 3;
+/** Aro fino bajo cada enemigo: desde arriba separa a los enemigos del suelo y de los jugadores. */
+const MARKER_MARGIN = 0.25; // m más que su radio
+/** Muerto: el cuerpo se queda `DEATH_HOLD_S` y luego se desvanece hundiéndose (el servidor lo retira a los 2 s). */
+const DEATH_HOLD_S = 1.0;
+const DEATH_FADE_S = 0.8;
+const DEATH_SINK_M = 0.35;
 /** Destello del cuerpo al recibir un golpe. */
 const HIT_FLASH = Color3.White();
 /** Brasas al arder (estado quemado). */
@@ -104,6 +111,11 @@ interface EnemyView {
   maxHp?: number;
   /** con el destello de golpe puesto: al terminar se repone el brillo del estado */
   flashing?: boolean;
+  /** aro del suelo y mallas del cuerpo (se desvanecen al morir) */
+  marker: Mesh;
+  bodyMeshes: AbstractMesh[];
+  /** instante (reloj interpolado) en que se lo vio muerto por primera vez */
+  deadAtMs?: number;
   label?: Mesh;
   tint: BodyState;
   /** brasas del estado quemado; solo mientras arde */
@@ -119,7 +131,7 @@ interface EnemyView {
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
   private readonly flinches = new Flinches();
-  private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star", StandardMaterial>;
+  private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star" | "marker", StandardMaterial>;
   /** Materiales de los hechiceros, uno por tipo o tier (nunca por instancia). */
   private readonly casterMats = new Map<string, StandardMaterial>();
   /** Rótulos de élite compartidos por (tipo, naturaleza): material y textura. */
@@ -141,6 +153,7 @@ export class EnemyViews {
       ringEdge: flatMaterial(scene, "telegraphEdge", new Color3(0.9, 0.1, 0.05), 0.7),
       ringFill: flatMaterial(scene, "telegraphFill", new Color3(0.9, 0.1, 0.05), 0.35),
       star: flatMaterial(scene, "stunStar", new Color3(1, 0.86, 0.45)),
+      marker: flatMaterial(scene, "enemyMarker", new Color3(0.95, 0.22, 0.16), 0.55),
     };
   }
 
@@ -279,7 +292,12 @@ export class EnemyViews {
       }
       const e = view.buffer.sample(renderAtMs);
       if (!e) continue;
-      view.character.setPose(e.x, 0, e.z, e.facing);
+      const dead = e.ai === "dead";
+      if (dead) view.deadAtMs ??= renderAtMs;
+      const fade = dead ? Math.min(1, Math.max(0, ((renderAtMs - view.deadAtMs!) / 1000 - DEATH_HOLD_S) / DEATH_FADE_S)) : 0;
+      view.character.setPose(e.x, -DEATH_SINK_M * fade, e.z, e.facing);
+      for (const m of view.bodyMeshes) m.visibility = 1 - fade;
+      view.marker.setEnabled(!dead);
       // Encima del clip que sea (también la telegrafía, que sigue su curso); muerto, nada.
       const flinch = e.ai === "dead" ? undefined : this.flinches.sample(id, renderAtMs);
       view.character.setLean(flinch && !Number.isNaN(flinch.dir) ? flinch.dir : e.facing + Math.PI, flinch?.lean ?? 0);
@@ -417,6 +435,12 @@ export class EnemyViews {
     }
     for (const m of [back, barFill]) m.isPickable = false;
 
+    const marker = CreateTorus(`enemyMarker-${id}`, { diameter: (ENEMY_DEFS[kind].radius * k + MARKER_MARGIN) * 2, thickness: 0.045, tessellation: 40 }, scene);
+    marker.material = this.mats.marker;
+    marker.parent = character.root;
+    marker.position.y = RING_Y;
+    marker.isPickable = false;
+
     // Hechiceros: tinte del cuerpo y esfera de carga en la mano.
     let charge: Mesh | undefined;
     let chargePerMeter = 1;
@@ -482,6 +506,8 @@ export class EnemyViews {
       label,
       tint: "base",
       burnEmitter,
+      marker,
+      bodyMeshes: [...bodyMeshes],
     };
     // Todo lo creado tras el cuerpo (barra, aros, estrellas, aura, rótulo…) no se tiñe con él.
     for (const m of character.root.getChildMeshes(false)) if (!bodyMeshes.has(m)) markNoTint(m);

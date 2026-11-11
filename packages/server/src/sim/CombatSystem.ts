@@ -68,6 +68,8 @@ export interface AbilityAnim {
   /** posición del jugador al lanzarla; el Tajo frontal sale de aquí aunque se mueva después */
   originX: number;
   originZ: number;
+  /** Golpe sísmico: velocidad (m/s) del salto hacia `facing` hasta el impacto (0 si salta en el sitio) */
+  leapSpeed?: number;
 }
 
 /** Efectos de equipo y reliquia que no son multiplicadores (`CombinedMods` sin `PlayerMods`); `setMods` los copia. */
@@ -122,6 +124,10 @@ export interface CombatState extends ComboTimers {
   buffLeft: number;
   /** el Grito activo trae `warcryGuard` (de quien lo gritó): ×0,8 al daño recibido mientras dura `buffLeft` */
   buffGuard: boolean;
+  /** Frenesí: segundos que le quedan, velocidad de ataque extra y fracción del daño hecho que cura */
+  frenzyLeft: number;
+  frenzySpeed: number;
+  frenzyLeech: number;
   /** estados que dejan los élites: segundos que quedan de quemadura (con su daño por segundo), ralentización y aturdimiento */
   burnLeft: number;
   burnDps: number;
@@ -131,6 +137,11 @@ export interface CombatState extends ComboTimers {
 
 /** Estados que el panel de pruebas aplica a mano; cada uno es el de una naturaleza de élite. */
 export type PlayerStatus = "burn" | "slow" | "stun";
+
+/** Velocidad de ataque del jugador ahora: la de sus cartas y equipo, más el Frenesí mientras dura. */
+export function attackSpeedOf(c: CombatState): number {
+  return c.mods.attackSpeedMult * (1 + (c.frenzyLeft > 0 ? c.frenzySpeed : 0));
+}
 
 /** Rango (1..3) de esa habilidad, o 0 si no la tiene. */
 export function abilityRank(c: CombatState, id: AbilityId): number {
@@ -208,6 +219,9 @@ export function newCombatState(
     buffDamage: 0,
     buffLeft: 0,
     buffGuard: false,
+    frenzyLeft: 0,
+    frenzySpeed: 0,
+    frenzyLeech: 0,
     burnLeft: 0,
     burnDps: 0,
     slowLeft: 0,
@@ -276,7 +290,7 @@ export class CombatSystem {
   attack(c: CombatState, input: PlayerInput): AttackResult {
     const none: AttackResult = { swung: false, step: 0 };
     if (!input.attack || c.dead || c.blocking || c.abilityAnim || c.stunLeft > 0) return none;
-    const step = tryStartSwing(c, c.weaponId, c.mods.attackSpeedMult);
+    const step = tryStartSwing(c, c.weaponId, attackSpeedOf(c));
     if (step === 0) return none;
     c.swingFacing = input.facing;
     return { swung: true, step };
@@ -292,7 +306,7 @@ export class CombatSystem {
     history: PositionHistory,
     key: string,
   ): ImpactResult {
-    const strike = strikeOf(c.weaponId, step, c.mods.attackSpeedMult);
+    const strike = strikeOf(c.weaponId, step, attackSpeedOf(c));
     const range = strike.range * c.mods.reachMult;
     const arcDeg = Math.min(360, strike.arcDeg * c.mods.reachMult);
     const t = rewindTick(nowTick, input.viewTick);
@@ -415,9 +429,10 @@ export class CombatSystem {
     c.hp = Math.min(c.hp, c.maxHp);
   }
 
-  /** Colmillo del vampiro: cura la fracción `fx.vampire` del daño que hizo el jugador. */
+  /** Cura una fracción del daño que hizo el jugador: la del Colmillo del vampiro (`fx.vampire`) más la del Frenesí. */
   vampireHeal(c: CombatState, dealt: number): void {
-    if (c.fx.vampire > 0) this.heal(c, dealt * c.fx.vampire);
+    const frac = c.fx.vampire + (c.frenzyLeft > 0 ? c.frenzyLeech : 0);
+    if (frac > 0) this.heal(c, dealt * frac);
   }
 
   /**

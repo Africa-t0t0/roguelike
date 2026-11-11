@@ -86,7 +86,7 @@ describe("grietas del Golpe sísmico", () => {
     const scene = new Scene(new NullEngine());
     const views = new HazardViews(scene);
     const world = (left: number) =>
-      ({ hazards: new Map(), zones: new Map([["z1", { x: 0, z: 0, radius: 3, left, total: 4 }]]) }) as never;
+      ({ hazards: new Map(), zones: new Map([["z1", { x: 0, z: 0, radius: 3, left, total: 4, kind: "cracks" }]]) }) as never;
     const before = scene.textures.length;
     views.push(world(4), 0);
     expect(scene.textures).toHaveLength(before);

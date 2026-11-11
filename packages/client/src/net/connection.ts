@@ -149,6 +149,8 @@ export interface ZoneSnapshot {
   radius: number;
   left: number;
   total: number;
+  /** grietas del Golpe sísmico o Estandarte */
+  kind: "cracks" | "banner";
 }
 
 const ZONE_NUMBERS = ["x", "z", "radius", "left", "total"] as const;
@@ -158,7 +160,10 @@ export function parseZone(raw: unknown): ZoneSnapshot | null {
   if (typeof raw !== "object" || raw === null) return null;
   const z = raw as Record<string, unknown>;
   for (const k of ZONE_NUMBERS) if (typeof z[k] !== "number" || !Number.isFinite(z[k])) return null;
-  return { x: z.x as number, z: z.z as number, radius: z.radius as number, left: z.left as number, total: z.total as number };
+  return {
+    x: z.x as number, z: z.z as number, radius: z.radius as number, left: z.left as number, total: z.total as number,
+    kind: z.kind === "banner" ? "banner" : "cracks",
+  };
 }
 
 /** Cofre del piso: abierto o por abrir. */
@@ -217,6 +222,8 @@ export interface PlayerShotSnapshot {
   radius: number;
   /** naturaleza del arma de quien la lanzó */
   nature: Nature;
+  /** Onda de corte o espada lanzada */
+  kind: "wave" | "sword";
 }
 
 /** Todo lo del estado que no son jugadores. */
@@ -539,8 +546,8 @@ function snapshotWorld(room: Room): WorldSnapshot {
     orbs.set(id, { x: o.x, z: o.z, value: o.value });
   });
   const playerShots = new Map<string, PlayerShotSnapshot>();
-  room.state.playerShots?.forEach((w: Omit<PlayerShotSnapshot, "nature"> & { nature: string }, id: string) => {
-    playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius, nature: toNature(w.nature) });
+  room.state.playerShots?.forEach((w: Omit<PlayerShotSnapshot, "nature" | "kind"> & { nature: string; kind?: string }, id: string) => {
+    playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius, nature: toNature(w.nature), kind: w.kind === "sword" ? "sword" : "wave" });
   });
   const hazards = new Map<string, HazardSnapshot>();
   room.state.hazards?.forEach((raw: unknown, id: string) => {

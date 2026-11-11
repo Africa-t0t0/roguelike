@@ -5,23 +5,11 @@ const GAME_KEYS = new Set<string>(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "A
 export interface BrowserInput {
   /** Desconecta todo. */
   detach(): void;
-  /**
-   * Suelta el puntero desde el juego (p. ej. al abrir el panel de cartas). A diferencia de Esc, las teclas
-   * mantenidas siguen valiendo (WASD sigue moviendo en la elección sin pausa); solo se suelta el ataque.
-   * Se vuelve a capturar con el siguiente clic en el canvas (lo hace la cámara).
-   */
-  releasePointer(): void;
-  /**
-   * Con el panel de cartas abierto y sin pausa el jugador sigue jugando pero sin puntero capturado:
-   * con esto en true, un clic izquierdo sobre el canvas ataca aunque no haya bloqueo de puntero.
-   * Se fija cada frame; los clics en los botones del panel no cuentan (el objetivo no es el canvas).
-   */
-  attackWithoutLock: boolean;
 }
 
 /**
- * Conecta el teclado, el clic izquierdo y la pérdida de foco con `InputState`. El clic que bloquea el
- * puntero no ataca: solo cuenta con el puntero ya bloqueado.
+ * Conecta el teclado, el clic izquierdo y la pérdida de foco con `InputState`. Solo ataca el clic sobre el
+ * canvas: los de los paneles (cartas, pruebas) no cuentan.
  */
 export function attachBrowserInput(input: InputState, canvas: HTMLCanvasElement): BrowserInput {
   const isTyping = (e: KeyboardEvent) => e.target instanceof HTMLInputElement;
@@ -36,52 +24,27 @@ export function attachBrowserInput(input: InputState, canvas: HTMLCanvasElement)
   const onVisibility = () => {
     if (document.hidden) input.blur();
   };
-  let attackWithoutLock = false;
-  const onMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return;
-    if (document.pointerLockElement === canvas || (attackWithoutLock && e.target === canvas)) input.keyDown("Mouse0");
+  // Con eventos de puntero: Babylon cancela el `pointerdown` del canvas y con eso el navegador ya no manda `mousedown`.
+  const onMouseDown = (e: PointerEvent) => {
+    if (e.button === 0 && e.pointerType !== "touch" && e.target === canvas) input.keyDown("Mouse0"); // el toque va por los sticks
   };
-  const onMouseUp = (e: MouseEvent) => {
+  const onMouseUp = (e: PointerEvent) => {
     if (e.button === 0) input.keyUp("Mouse0");
   };
-  let selfRelease = false;
-  const onPointerLock = () => {
-    if (document.pointerLockElement === canvas) return;
-    if (selfRelease) input.keyUp("Mouse0");
-    else input.blur();
-    selfRelease = false;
-  };
-
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", onBlur);
-  canvas.addEventListener("mousedown", onMouseDown);
+  canvas.addEventListener("pointerdown", onMouseDown);
   // En window: soltar fuera del canvas también suelta el ataque.
-  window.addEventListener("mouseup", onMouseUp);
+  window.addEventListener("pointerup", onMouseUp);
   document.addEventListener("visibilitychange", onVisibility);
-  document.addEventListener("pointerlockchange", onPointerLock);
   const detach = () => {
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("blur", onBlur);
-    canvas.removeEventListener("mousedown", onMouseDown);
-    window.removeEventListener("mouseup", onMouseUp);
+    canvas.removeEventListener("pointerdown", onMouseDown);
+    window.removeEventListener("pointerup", onMouseUp);
     document.removeEventListener("visibilitychange", onVisibility);
-    document.removeEventListener("pointerlockchange", onPointerLock);
   };
-  const releasePointer = () => {
-    if (document.pointerLockElement !== canvas) return;
-    selfRelease = true;
-    document.exitPointerLock();
-  };
-  return {
-    detach,
-    releasePointer,
-    get attackWithoutLock() {
-      return attackWithoutLock;
-    },
-    set attackWithoutLock(v: boolean) {
-      attackWithoutLock = v;
-    },
-  };
+  return { detach };
 }

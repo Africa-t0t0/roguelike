@@ -437,7 +437,11 @@ export class RunRoom extends Room<{ state: RunState }> {
         const c = record.combat;
         const input = c.dead ? deadInput(raw, record.kinematic) : raw;
         // Bloqueando (según el input anterior) se mueve a la mitad.
-        record.kinematic = stepPlayer(record.kinematic, input, this.dungeon, SIM_DT, { speedMult: moveSpeedMult(c) });
+        // En el salto del Golpe sísmico no se camina: lo mueve la habilidad (más abajo), paso a paso hasta caer.
+        const leap = c.abilityAnim;
+        const leaping = leap?.id === "slam" && leap.impacts.length > 0 && (leap.leapSpeed ?? 0) > 0;
+        const moving = leaping ? { ...input, moveX: 0, moveZ: 0, jump: false } : input;
+        record.kinematic = stepPlayer(record.kinematic, moving, this.dungeon, SIM_DT, { speedMult: moveSpeedMult(c) });
         record.lastSeq = input.seq;
         // Combo, impacto y golpes pendientes avanzan por input, antes de empezar el swing de ese input.
         const res = this.combat.onInputProcessed(c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, record.key);
@@ -451,8 +455,8 @@ export class RunRoom extends Room<{ state: RunState }> {
         const ab = this.abilities.onInput(
           c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party, record.key,
         );
-        if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started });
-        // Impulso del Tajo frontal: el servidor mueve al jugador; el cliente se corrige con la reconciliación.
+        if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started, ...(ab.leapDist !== undefined ? { aimDist: ab.leapDist } : {}) });
+        // Impulso del Tajo frontal y salto del Golpe sísmico: el servidor mueve al jugador; el cliente se corrige con la reconciliación.
         if (ab.dash) record.kinematic = { ...record.kinematic, x: ab.dash.x, z: ab.dash.z };
         this.impact(record.key, ab);
         // Antes del ataque de este input: con un swing o una habilidad en curso no se cambia de arma.
@@ -485,7 +489,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
     this.burnTick();
     // Enfriamientos, Grito y ondas (por tick: se congelan en la pausa).
-    for (const r of this.abilities.step(states, this.enemySystem, SIM_DT)) this.impact(r.key, r);
+    const positions = new Map(connected.map((r) => [r.key, r.kinematic]));
+    for (const r of this.abilities.step(states, this.enemySystem, SIM_DT, positions)) this.impact(r.key, r);
     // Orbes: los atraen y recogen los vivos; la xp es del grupo y sube la vida máxima de todos los registros.
     // Si se sube de nivel, la pausa empieza al final de este tick.
     const levels = this.combat.grantXp(allStates, this.orbs.step(alive, SIM_DT));

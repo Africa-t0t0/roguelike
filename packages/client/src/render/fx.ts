@@ -6,6 +6,14 @@ const NUMBER_LIFE_MS = 800;
 const NUMBER_RISE_M = 0.8;
 /** m sobre la cabeza: encima de la barra de vida del enemigo, o del nombre del jugador. */
 const NUMBER_ABOVE_HEAD = { enemy: 0.4, player: 0.75 } as const;
+/** Un golpe de peso 1 se ve así de grande respecto de uno de peso 0; desde este peso, además, dorado. */
+const HEAVY_SCALE = 1.9;
+const HEAVY_FROM = 0.6;
+/** Rebote al aparecer: nace `POP_SCALE` veces más grande y se asienta en `POP_MS`. */
+const POP_SCALE = 1.7;
+const POP_MS = 140;
+/** Los números de un mismo blanco se abren a los lados para no taparse. */
+const SPREAD_M = 0.35;
 
 interface FloatingNumber {
   el: HTMLDivElement;
@@ -13,6 +21,7 @@ interface FloatingNumber {
   z: number;
   y: number;
   startMs: number;
+  scale: number;
 }
 
 /**
@@ -23,6 +32,7 @@ export class DamageNumbers {
   private readonly layer = document.createElement("div");
   private readonly items: FloatingNumber[] = [];
   private readonly world = new Vector3();
+  private count = 0;
 
   constructor(
     private readonly scene: Scene,
@@ -35,7 +45,7 @@ export class DamageNumbers {
 
   /**
    * `startMs`: desde cuándo se ve (mismo reloj que `render`), para que coincida con lo que se dibuja.
-   * `headHeight`: alto del blanco en m (por defecto, el del jugador).
+   * `headHeight`: alto del blanco en m (por defecto, el del jugador). `weight`: peso del golpe, de 0 a 1.
    */
   spawn(
     amount: number,
@@ -44,13 +54,15 @@ export class DamageNumbers {
     target: "enemy" | "player",
     startMs: number,
     headHeight = PLAYER_LOOK.height,
+    weight = 0,
   ): void {
     const el = document.createElement("div");
-    el.className = `fx-number fx-${target}`;
+    el.className = `fx-number fx-${target}${target === "enemy" && weight >= HEAVY_FROM ? " fx-heavy" : ""}`;
     el.textContent = String(Math.round(amount));
     el.hidden = true;
     this.layer.append(el);
-    this.items.push({ el, x, z, y: headHeight + NUMBER_ABOVE_HEAD[target], startMs });
+    const side = ((this.count++ % 3) - 1) * SPREAD_M;
+    this.items.push({ el, x: x + side, z, y: headHeight + NUMBER_ABOVE_HEAD[target], startMs, scale: 1 + (HEAVY_SCALE - 1) * Math.min(1, Math.max(0, weight)) });
   }
 
   render(nowMs: number): void {
@@ -76,7 +88,8 @@ export class DamageNumbers {
       const visible = p.z >= 0 && p.z <= 1;
       n.el.hidden = !visible;
       if (!visible) continue;
-      n.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
+      const pop = age < POP_MS ? POP_SCALE - (POP_SCALE - 1) * (age / POP_MS) : 1;
+      n.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) scale(${(n.scale * pop).toFixed(3)})`;
       n.el.style.opacity = String(t < 0.5 ? 1 : 1 - (t - 0.5) * 2);
     }
   }

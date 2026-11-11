@@ -119,7 +119,7 @@ export type ProjectileState = SchemaType<typeof ProjectileState>;
 
 /** Onda de corte de un jugador. */
 export const PlayerShotState = schema(
-  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number(), nature: t.string() },
+  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number(), nature: t.string(), /** "wave" | "sword" */ kind: t.string() },
   "PlayerShotState",
 );
 export type PlayerShotState = SchemaType<typeof PlayerShotState>;
@@ -148,7 +148,7 @@ export type HazardState = SchemaType<typeof HazardState>;
 
 /** Zona del jugador (grietas del Golpe sísmico): círculo que dura `total` s; el visual lo dibuja el cliente. */
 export const PlayerZoneState = schema(
-  { x: t.number(), z: t.number(), radius: t.number(), left: t.number(), total: t.number() },
+  { x: t.number(), z: t.number(), radius: t.number(), left: t.number(), total: t.number(), /** "cracks" | "banner" */ kind: t.string() },
   "PlayerZoneState",
 );
 export type PlayerZoneState = SchemaType<typeof PlayerZoneState>;

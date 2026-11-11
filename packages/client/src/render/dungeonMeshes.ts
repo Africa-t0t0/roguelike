@@ -76,15 +76,16 @@ function placed(scale: Vector3, yaw: number, x: number, y: number, z: number): M
 /**
  * Suelo por casilla caminable, un muro por cada borde entre casilla caminable y casilla de muro,
  * y un pilar donde dos muros se juntan en ángulo. Cada tipo de pieza es una malla con thin instances.
- * `seeThroughSouth`: con la cámara fija mirando a +Z, los muros del borde sur de cada casilla (los que
- * quedan entre la cámara y el suelo) van aparte y translúcidos.
+ * La cámara es fija y mira a +Z: los muros del borde sur de cada casilla (los que quedan entre la cámara y
+ * el suelo) y los pilares que los tocan van aparte y translúcidos.
  */
-export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets, seeThroughSouth = false): { dispose(): void } {
+export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets): { dispose(): void } {
   const walk = (tx: number, tz: number) => isWalkableTile(d, tx, tz);
   const floors: Matrix[] = [];
   const walls: Matrix[] = [];
   const nearWalls: Matrix[] = [];
   const pillars: Matrix[] = [];
+  const nearPillars: Matrix[] = [];
 
   for (let tz = 0; tz < d.height; tz++) {
     for (let tx = 0; tx < d.width; tx++) {
@@ -96,7 +97,7 @@ export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets, see
         if (walk(tx + dx, tz + dz)) continue;
         const x = c.x + dx * (TILE_SIZE / 2 + WALL_INSET);
         const z = c.z + dz * (TILE_SIZE / 2 + WALL_INSET);
-        (seeThroughSouth && dz === -1 ? nearWalls : walls).push(placed(pieceScale, Math.atan2(-dx, -dz), x, 0, z));
+        (dz === -1 ? nearWalls : walls).push(placed(pieceScale, Math.atan2(-dx, -dz), x, 0, z));
       }
     }
   }
@@ -116,37 +117,40 @@ export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets, see
       const offZ = alongX.filter((o): o is number => o !== null);
       if (offX.length === 0 || offZ.length === 0) continue;
       const mean = (v: number[]) => v.reduce((s, o) => s + o, 0) / v.length;
-      pillars.push(placed(pieceScale, 0, i * TILE_SIZE + mean(offX), 0, j * TILE_SIZE + mean(offZ)));
+      // Toca un muro del lado de la cámara (suelo al norte, muro al sur): translúcido como él.
+      const near = alongX.some((o) => o !== null && o < 0);
+      (near ? nearPillars : pillars).push(placed(pieceScale, 0, i * TILE_SIZE + mean(offX), 0, j * TILE_SIZE + mean(offZ)));
     }
   }
 
-  const wallSource = pieceSource(assets, "wall");
-  // Se clona la pieza ya horneada, antes de ponerle instancias (volver a `pieceSource` hornearía dos veces
-  // la geometría que comparten los clones del mismo modelo).
-  const nearSource = nearWalls.length > 0 ? wallSource.clone("nearWall", null) : null;
-  const meshes = [
-    withInstances(pieceSource(assets, "floor"), floors),
-    withInstances(wallSource, walls),
-    withInstances(pieceSource(assets, "pillar"), pillars),
-  ];
-  let nearMat: Material | null = null;
-  if (nearSource) {
-    nearSource.makeGeometryUnique(); // geometría propia: nada compartido con los muros opacos
-    nearSource.isPickable = false;
-    nearSource.doNotSyncBoundingInfo = true;
-    const near = withInstances(nearSource, nearWalls);
-    nearMat = near.material?.clone("nearWall") ?? null;
-    if (nearMat) {
-      nearMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
-      nearMat.alpha = NEAR_WALL_ALPHA;
-      nearMat.needDepthPrePass = true; // sin esto se transparentan también sus propias caras de atrás
-      near.material = nearMat;
+  // Las piezas translúcidas son un clon de la ya horneada, con geometría y material propios (volver a
+  // `pieceSource` hornearía dos veces la geometría que comparten los clones del mismo modelo).
+  const nearMats: Material[] = [];
+  const translucent = (source: Mesh, name: string): Mesh => {
+    const near = source.clone(name, null);
+    near.makeGeometryUnique();
+    near.isPickable = false;
+    near.doNotSyncBoundingInfo = true;
+    const mat = source.material?.clone(name) ?? null;
+    if (mat) {
+      mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+      mat.alpha = NEAR_WALL_ALPHA;
+      mat.needDepthPrePass = true; // sin esto se transparentan también sus propias caras de atrás
+      near.material = mat;
+      nearMats.push(mat);
     }
-    meshes.push(near);
-  }
+    return near;
+  };
+  const wallSource = pieceSource(assets, "wall");
+  const pillarSource = pieceSource(assets, "pillar");
+  const meshes = [withInstances(pieceSource(assets, "floor"), floors)];
+  // Los clones, antes de ponerle instancias al original.
+  if (nearWalls.length > 0) meshes.push(withInstances(translucent(wallSource, "nearWall"), nearWalls));
+  if (nearPillars.length > 0) meshes.push(withInstances(translucent(pillarSource, "nearPillar"), nearPillars));
+  meshes.push(withInstances(wallSource, walls), withInstances(pillarSource, pillars));
   return {
     dispose() {
-      nearMat?.dispose();
+      for (const m of nearMats) m.dispose();
       for (const m of meshes) m.dispose();
     },
   };

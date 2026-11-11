@@ -23,13 +23,13 @@ type RGB = readonly [number, number, number];
 export const LIGHTING = {
   /** fondo y niebla (exponencial al cuadrado) del mismo casi-negro */
   background: [0.015, 0.014, 0.022] as RGB,
-  fogDensity: 0.05,
-  /** relleno hemisférico frío y bajo */
-  ambient: { intensity: 0.18, sky: [0.55, 0.65, 0.95] as RGB, ground: [0.1, 0.09, 0.12] as RGB },
+  fogDensity: 0.013, // la cámara está a ~26 m: más densa taparía la escena
+  /** relleno hemisférico frío: alto para que desde arriba se lean las siluetas */
+  ambient: { intensity: 0.62, sky: [0.55, 0.65, 0.95] as RGB, ground: [0.1, 0.09, 0.12] as RGB },
   /** contraluz frío direccional */
-  rim: { intensity: 0.6, color: [0.55, 0.68, 1] as RGB, direction: [0.45, -0.55, 0.7] as RGB },
+  rim: { intensity: 0.95, color: [0.55, 0.68, 1] as RGB, direction: [0.45, -0.55, 0.7] as RGB },
   /** antorcha que lleva el propio jugador (sobre el hombro) */
-  playerTorch: { color: [1, 0.55, 0.2] as RGB, intensity: 9, range: 11, height: 2.4, flicker: 0.1 },
+  playerTorch: { color: [1, 0.6, 0.28] as RGB, intensity: 16, range: 16, height: 3.4, flicker: 0.1 },
   /** antorchas de pared: llamas en todas, luz real solo en las `activeLights` más cercanas */
   wallTorch: { color: [1, 0.5, 0.18] as RGB, intensity: 5, range: 9, height: 2.0, flicker: 0.15, activeLights: 3 },
   /**
