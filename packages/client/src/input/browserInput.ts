@@ -1,6 +1,6 @@
 import { ABILITY_KEYS, type InputState } from "./InputState";
 
-const GAME_KEYS = new Set<string>(["KeyW", "KeyA", "KeyS", "KeyD", "Space", ...ABILITY_KEYS]);
+const GAME_KEYS = new Set<string>(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", ...ABILITY_KEYS]);
 
 export interface BrowserInput {
   /** Desconecta todo. */

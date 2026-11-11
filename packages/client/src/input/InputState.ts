@@ -46,9 +46,9 @@ export class InputState {
    * el servidor solo acepta un golpe cuando terminó el anterior, así que repetir no hace daño.
    * `viewTick`: tick del servidor que se está viendo (para el rebobinado de los golpes).
    */
-  sample(seq: number, cameraYaw: number, viewTick = 0): PlayerInput {
-    const forward = this.axis("KeyW", "KeyS");
-    const right = this.axis("KeyD", "KeyA");
+  sample(seq: number, cameraYaw: number, viewTick = 0, aimFacing?: number): PlayerInput {
+    const forward = Math.sign(this.axis("KeyW", "KeyS") + this.axis("ArrowUp", "ArrowDown"));
+    const right = Math.sign(this.axis("KeyD", "KeyA") + this.axis("ArrowRight", "ArrowLeft"));
     const sin = Math.sin(cameraYaw);
     const cos = Math.cos(cameraYaw);
     let moveX = forward * sin + right * cos;
@@ -72,6 +72,8 @@ export class InputState {
     });
     // Se golpea, se lanza la habilidad y se bloquea hacia donde mira la cámara.
     if (attack || abilities) this.facing = cameraYaw;
+    // Spike cámara fija: se mira siempre al cursor.
+    if (aimFacing !== undefined) this.facing = aimFacing;
     const jump = this.jumpQueued;
     this.jumpQueued = false;
     const interact = this.interactQueued;

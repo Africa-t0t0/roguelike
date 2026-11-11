@@ -1,3 +1,4 @@
+import { Material } from "@babylonjs/core/Materials/material";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
@@ -14,6 +15,9 @@ const FLOOR_TOP = 0.05; // m: cara superior de floor_tile_large; se baja para qu
 const WALL_THICKNESS = 1 * DUNGEON_PIECE_SCALE; // el muro mide 1 m de grosor en el modelo
 /** El muro se corre medio grosor hacia la casilla de muro: su cara queda en el límite de colisión. */
 const WALL_INSET = WALL_THICKNESS / 2;
+
+/** Opacidad de los muros del lado de la cámara fija: dejan ver lo que tienen detrás (cofres, enemigos). */
+const NEAR_WALL_ALPHA = 0.22;
 
 const floorScale = new Vector3(DUNGEON_PIECE_SCALE, 1, DUNGEON_PIECE_SCALE);
 const pieceScale = new Vector3(DUNGEON_PIECE_SCALE, WALL_Y_SCALE, DUNGEON_PIECE_SCALE);
@@ -72,11 +76,14 @@ function placed(scale: Vector3, yaw: number, x: number, y: number, z: number): M
 /**
  * Suelo por casilla caminable, un muro por cada borde entre casilla caminable y casilla de muro,
  * y un pilar donde dos muros se juntan en ángulo. Cada tipo de pieza es una malla con thin instances.
+ * `seeThroughSouth`: con la cámara fija mirando a +Z, los muros del borde sur de cada casilla (los que
+ * quedan entre la cámara y el suelo) van aparte y translúcidos.
  */
-export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets): { dispose(): void } {
+export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets, seeThroughSouth = false): { dispose(): void } {
   const walk = (tx: number, tz: number) => isWalkableTile(d, tx, tz);
   const floors: Matrix[] = [];
   const walls: Matrix[] = [];
+  const nearWalls: Matrix[] = [];
   const pillars: Matrix[] = [];
 
   for (let tz = 0; tz < d.height; tz++) {
@@ -89,7 +96,7 @@ export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets): { 
         if (walk(tx + dx, tz + dz)) continue;
         const x = c.x + dx * (TILE_SIZE / 2 + WALL_INSET);
         const z = c.z + dz * (TILE_SIZE / 2 + WALL_INSET);
-        walls.push(placed(pieceScale, Math.atan2(-dx, -dz), x, 0, z));
+        (seeThroughSouth && dz === -1 ? nearWalls : walls).push(placed(pieceScale, Math.atan2(-dx, -dz), x, 0, z));
       }
     }
   }
@@ -113,13 +120,33 @@ export function buildDungeonMeshes(scene: Scene, d: Dungeon, assets: Assets): { 
     }
   }
 
+  const wallSource = pieceSource(assets, "wall");
+  // Se clona la pieza ya horneada, antes de ponerle instancias (volver a `pieceSource` hornearía dos veces
+  // la geometría que comparten los clones del mismo modelo).
+  const nearSource = nearWalls.length > 0 ? wallSource.clone("nearWall", null) : null;
   const meshes = [
     withInstances(pieceSource(assets, "floor"), floors),
-    withInstances(pieceSource(assets, "wall"), walls),
+    withInstances(wallSource, walls),
     withInstances(pieceSource(assets, "pillar"), pillars),
   ];
+  let nearMat: Material | null = null;
+  if (nearSource) {
+    nearSource.makeGeometryUnique(); // geometría propia: nada compartido con los muros opacos
+    nearSource.isPickable = false;
+    nearSource.doNotSyncBoundingInfo = true;
+    const near = withInstances(nearSource, nearWalls);
+    nearMat = near.material?.clone("nearWall") ?? null;
+    if (nearMat) {
+      nearMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+      nearMat.alpha = NEAR_WALL_ALPHA;
+      nearMat.needDepthPrePass = true; // sin esto se transparentan también sus propias caras de atrás
+      near.material = nearMat;
+    }
+    meshes.push(near);
+  }
   return {
     dispose() {
+      nearMat?.dispose();
       for (const m of meshes) m.dispose();
     },
   };

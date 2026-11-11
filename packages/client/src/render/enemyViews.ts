@@ -23,6 +23,7 @@ import { applyBodyGlow, applyCasterTint, bodyGlow, CASTER_COLORS, chargeScale, m
 import { flameTexture, PARTICLE_SPEED, sparkTexture } from "./fxTextures";
 import { eliteName, NATURE_COLORS } from "./natureLooks";
 import { CharacterView } from "./characterView";
+import { Flinches, flinchStrength } from "./flinch";
 import { lerpAngle } from "./interpolation";
 import { ENEMY_LOOKS } from "./looks";
 
@@ -48,6 +49,8 @@ const ELITE_LABEL_W = 1.4;
 const ELITE_LABEL_H = 0.17; // letras de ~0,11 m
 /** Más cerca de la cámara que esto, el rótulo se oculta: a esa distancia taparía la pantalla. */
 const ELITE_LABEL_HIDE_M = 3;
+/** Destello del cuerpo al recibir un golpe. */
+const HIT_FLASH = Color3.White();
 /** Brasas al arder (estado quemado). */
 const BURN_RATE = 24;
 const BURN_EMITTER_FRAC = 0.5; // altura del emisor, fracción del alto del enemigo
@@ -97,6 +100,10 @@ interface EnemyView {
   nature: Nature;
   /** alto dibujado (m): el del modelo × la escala de élite */
   height: number;
+  /** vida máxima del último snapshot: el respingo pesa según la vida que quita el golpe */
+  maxHp?: number;
+  /** con el destello de golpe puesto: al terminar se repone el brillo del estado */
+  flashing?: boolean;
   label?: Mesh;
   tint: BodyState;
   /** brasas del estado quemado; solo mientras arde */
@@ -111,6 +118,7 @@ interface EnemyView {
 /** Enemigos de Mixamo interpolados, con su arma (si la llevan), barra de vida y aro de telegrafía. */
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
+  private readonly flinches = new Flinches();
   private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star", StandardMaterial>;
   /** Materiales de los hechiceros, uno por tipo o tier (nunca por instancia). */
   private readonly casterMats = new Map<string, StandardMaterial>();
@@ -237,6 +245,7 @@ export class EnemyViews {
         this.views.set(id, view);
       }
       view.goneAtMs = undefined;
+      view.maxHp = e.maxHp;
       view.buffer.push(receivedAtMs, e);
     }
     for (const [id, view] of this.views) {
@@ -250,17 +259,30 @@ export class EnemyViews {
     return view?.height;
   }
 
+  /**
+   * El enemigo `id` recibió `amount` de daño en `atMs` (reloj interpolado): respingo y destello. `dir`: hacia
+   * dónde lo empuja el golpe (rad de mundo, 0 = +Z); sin dato, hacia su espalda.
+   */
+  flinch(id: string, atMs: number, amount: number, dir?: number): void {
+    const view = this.views.get(id);
+    if (view) this.flinches.hit(id, atMs, dir ?? NaN, flinchStrength(amount, view.maxHp ?? 0, view.height));
+  }
+
   /** `renderAtMs`: instante interpolado (ahora − INTERP_DELAY_MS). */
   render(renderAtMs: number, dtS: number, hurt: (id: string) => boolean): void {
     for (const [id, view] of this.views) {
       if (view.goneAtMs !== undefined && renderAtMs >= view.goneAtMs) {
         this.disposeView(view);
         this.views.delete(id);
+        this.flinches.forget(id);
         continue;
       }
       const e = view.buffer.sample(renderAtMs);
       if (!e) continue;
       view.character.setPose(e.x, 0, e.z, e.facing);
+      // Encima del clip que sea (también la telegrafía, que sigue su curso); muerto, nada.
+      const flinch = e.ai === "dead" ? undefined : this.flinches.sample(id, renderAtMs);
+      view.character.setLean(flinch && !Number.isNaN(flinch.dir) ? flinch.dir : e.facing + Math.PI, flinch?.lean ?? 0);
       view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, nature: e.weaponNature, gripScale: ENEMY_LOOKS[e.kind].gripScale });
       view.character.setFrozen(e.frozen && e.ai !== "dead");
       view.character.play(
@@ -279,7 +301,15 @@ export class EnemyViews {
       );
 
       const tintState: BodyState = e.frozen && e.ai !== "dead" ? "frozen" : e.slowed ? "slowed" : "base";
-      if (tintState !== view.tint) this.applyBodyGlow(view, tintState);
+      if (flinch && flinch.flash > 0) {
+        const overlay = { color: HIT_FLASH, alpha: flinch.flash };
+        applyBodyGlow(view.character.root, { ...bodyGlow(tintState, view.elite, view.nature), overlay }, view.character.unitsPerMeter());
+        view.flashing = true;
+        view.tint = tintState;
+      } else if (view.flashing || tintState !== view.tint) {
+        view.flashing = false;
+        this.applyBodyGlow(view, tintState);
+      }
       this.setBurning(view, e.burning && e.ai !== "dead");
       view.aura?.setActive(e.ai !== "dead");
       if (view.label) {

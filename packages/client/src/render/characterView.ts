@@ -5,6 +5,7 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Observer } from "@babylonjs/core/Misc/observable";
 import type { Node } from "@babylonjs/core/node";
 import type { Scene } from "@babylonjs/core/scene";
+import { leanRotation } from "./flinch";
 import type { Nature, WeaponId, WeaponTier } from "@roguelike/shared";
 import { boneKey, type AnimLibrary } from "./animLibrary";
 import type { AnimChoice } from "./animState";
@@ -118,6 +119,13 @@ export class CharacterView {
   setPose(x: number, y: number, z: number, facing: number): void {
     this.root.position.set(x, y, z);
     this.root.rotation.y = facing;
+  }
+
+  /** Inclina el cuerpo `angle` rad hacia la dirección de mundo `dir` (0 = +Z), pivotando en los pies; con 0 queda derecho. */
+  setLean(dir: number, angle: number): void {
+    const r = leanRotation(dir - this.root.rotation.y - this.body.rotation.y, angle);
+    this.body.rotation.x = r.x;
+    this.body.rotation.z = r.z;
   }
 
   /** Agranda (o achica) el cuerpo `k` veces respecto de `look.height`, con los pies en el suelo; `root` no cambia. */

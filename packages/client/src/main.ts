@@ -50,6 +50,7 @@ import { HazardViews } from "./render/hazardViews";
 import { ProjectileViews } from "./render/projectileViews";
 import { SealViews } from "./render/sealViews";
 import { ThirdPersonCamera } from "./render/ThirdPersonCamera";
+import { IsoCamera } from "./render/IsoCamera";
 import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
 import { CardPanel } from "./ui/cardPanel";
 import { joinErrorMessage } from "./ui/errors";
@@ -143,7 +144,7 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
  */
 function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims: AnimLibrary): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
-  const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
+  const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets, new URLSearchParams(location.search).get("cam") === "iso");
   const torches = createTorches(scene, dungeon);
   const views = new PlayerViews(scene, assets, anims);
   const enemies = new EnemyViews(scene, assets, anims);
@@ -157,7 +158,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const orbs = new OrbViews(scene);
   const abilityFx = new AbilityFx(scene);
   const hits = new RecentHits();
-  const camera = new ThirdPersonCamera(scene, canvas, dungeon);
+  // Spike: ?cam=iso prueba la cámara fija desde arriba.
+  const iso = new URLSearchParams(location.search).get("cam") === "iso" ? new IsoCamera(scene, canvas) : undefined;
+  const camera = iso ?? new ThirdPersonCamera(scene, canvas, dungeon);
   scene.activeCamera = camera.camera;
   const input = new InputState();
   const browserInput = attachBrowserInput(input, canvas);
@@ -296,6 +299,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       const height = event.targetKind === "enemy" ? enemies.heightOf(event.targetId) : undefined;
       damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt, height);
       if (t.hurtMe) hurtFlash.flash();
+      if (event.targetKind === "enemy") {
+        // Se aleja de quien le pegó: el propio jugador, donde se ve (predicho); los demás, donde dice el servidor.
+        const from = event.sourceKey === conn.myKey ? predictor?.current : event.sourceKey ? lastPlayers.get(event.sourceKey) : undefined;
+        enemies.flinch(event.targetId, t.hitAt, event.amount, from ? Math.atan2(event.x - from.x, event.z - from.z) : undefined);
+      }
     } else if (event.type === "chain") {
       chainFx.play(event.points, now);
     } else if (event.type === "levelUp") {
@@ -315,9 +323,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     // El panel de cartas necesita el puntero libre; se vuelve a capturar con un clic en el canvas al cerrarse.
     const shown = cardPanel.render(pause, group, mine?.choosing ?? false, realNow);
     if (shown && !panelShown) browserInput.releasePointer();
-    camera.pointerLockAllowed = !shown;
+    camera.pointerLockAllowed = !iso && !shown;
     // Elección sin pausa: se sigue jugando (mover y atacar) con el puntero libre, solo no se gira la cámara.
-    browserInput.attackWithoutLock = shown && !pause.paused;
+    browserInput.attackWithoutLock = !!iso || (shown && !pause.paused);
     panelShown = shown;
     hud.setChoiceOpen(shown);
 
@@ -329,7 +337,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         // Se predice y se envía lo mismo que el servidor va a simular (ya saneado). Muerto, nada
         // de acciones (el servidor igual las ignora).
         const dead = mine?.dead ?? false;
-        const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS));
+        const raw = input.sample(++seq, camera.yaw, tickClock.sample(now - INTERP_DELAY_MS), iso?.aimFacing(predictor.current.x, predictor.current.z));
         // Aturdido tampoco ataca ni lanza habilidades (el servidor las ignora; no se predicen).
         const stunned = (mine?.stunLeft ?? 0) > 0;
         const sampled = sanitizeInput(dead ? deadInput(raw, predictor.current) : raw);
