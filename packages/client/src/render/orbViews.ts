@@ -11,7 +11,14 @@ const BOB_M = 0.06;
 const BOB_RAD_PER_S = 3;
 const PULSE_RAD_PER_S = 5;
 const BASE_DIAMETER_M = 0.18;
-const DIAMETER_PER_XP_M = 0.03; // los orbes de más XP se ven algo más grandes
+/** Los orbes de más XP se ven algo más grandes: crece con la raíz del valor y con tope, para que uno muy cargado no tape el suelo. */
+const DIAMETER_PER_ROOT_XP_M = 0.045;
+const MAX_DIAMETER_M = 0.6;
+
+/** Diámetro (m) de un orbe de ese valor. */
+export function orbDiameter(value: number): number {
+  return Math.min(MAX_DIAMETER_M, BASE_DIAMETER_M + DIAMETER_PER_ROOT_XP_M * Math.sqrt(Math.max(0, value - 1)));
+}
 const WARM: readonly [number, number, number] = [1, 0.72, 0.25];
 
 /** Lerp exponencial de `cur` hacia `target` tras `dt` s, con constante de tiempo `tau`. */
@@ -51,11 +58,13 @@ export class OrbViews {
     for (const [id, o] of orbs) {
       const view = this.views.get(id);
       if (view) {
+        // Su valor sube cuando otro orbe se le suma: crece con él.
+        if (o.value !== view.target.value) view.mesh.scaling.setAll(orbDiameter(o.value));
         view.target = { ...o };
         continue;
       }
-      const diameter = BASE_DIAMETER_M + DIAMETER_PER_XP_M * Math.max(0, o.value - 1);
-      const mesh = CreateSphere(`xp-orb-${id}`, { diameter, segments: 6 }, this.scene);
+      const mesh = CreateSphere(`xp-orb-${id}`, { diameter: 1, segments: 6 }, this.scene);
+      mesh.scaling.setAll(orbDiameter(o.value));
       mesh.material = this.material;
       mesh.isPickable = false;
       mesh.position.set(o.x, HOVER_Y, o.z);

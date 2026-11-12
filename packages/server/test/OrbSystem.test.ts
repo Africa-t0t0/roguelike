@@ -98,18 +98,16 @@ describe("OrbSystem", () => {
     expect(sys.orbs[0]).toMatchObject({ x: 0.1, z: 0 });
   });
 
-  it("Foco 5: 60 kills de 8 XP nunca dejan más de 150 orbes y se recogen exactamente 480", () => {
+  it("Foco 5: 60 kills de 8 XP en el mismo sitio no amontonan orbes (su XP se suma a los que hay) y se recogen exactamente 480", () => {
     const sys = new OrbSystem(createRng(42));
     const rng = createRng(9);
-    let merged = false;
     for (let i = 0; i < 60; i++) {
       sys.spawn(rng.next() * 2 - 1, rng.next() * 2 - 1, 8, i);
-      expect(sys.orbs.length).toBeLessThanOrEqual(MAX_ORBS);
-      if (sys.orbs.length === MAX_ORBS) merged = true;
-      // El tope nunca pierde XP: lo que hay en el suelo sigue sumando 8 por kill.
+      // En un cuadro de 2 × 2 m caben pocos orbes: el resto de la XP engorda a los que ya están.
+      expect(sys.orbs.length).toBeLessThanOrEqual(40);
+      // Sumar en vez de crear nunca pierde XP: lo que hay en el suelo sigue sumando 8 por kill.
       expect(sys.orbs.reduce((s, o) => s + o.value, 0)).toBe(8 * (i + 1));
     }
-    expect(merged).toBe(true);
     const p = P("a", 0, 0);
     let total = 0;
     for (let i = 0; i < 60 && sys.orbs.length > 0; i++) total += sys.step([p], SIM_DT);

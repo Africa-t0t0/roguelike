@@ -3,6 +3,13 @@ import type { SimPlayer } from "./EnemySystem";
 
 /** Radio (m) en que se reparten los orbes alrededor del enemigo muerto. */
 const ORB_SPREAD = 0.6;
+/**
+ * Cuando ya hay `ORB_CROWD_MAX` orbes a `ORB_CROWD_RADIUS` m de donde cae XP nueva, no nacen más ahí: su valor se
+ * suma a los que hay (al de menos valor). Sin esto, matar muchos enemigos en un mismo punto dejaba una mancha
+ * enorme de cientos de orbes encimados.
+ */
+const ORB_CROWD_RADIUS = 1.5;
+const ORB_CROWD_MAX = 8;
 
 export interface Orb {
   id: string;
@@ -23,11 +30,19 @@ export class OrbSystem {
     return this.list;
   }
 
-  /** Reparte `xp` en orbes de 1 a 4 dentro de ORB_SPREAD m de (x, z); respeta el tope fusionando. */
+  /**
+   * Reparte `xp` en orbes de 1 a 4 dentro de ORB_SPREAD m de (x, z); respeta el tope fusionando. Si el sitio ya
+   * está lleno de orbes, la XP se suma a ellos en vez de crear más.
+   */
   spawn(x: number, z: number, xp: number, tick: number): void {
     for (const value of splitXp(xp, this.rng)) {
       const angle = this.rng.next() * 2 * Math.PI;
       const r = this.rng.next() * ORB_SPREAD;
+      const crowd = this.list.filter((o) => (o.x - x) ** 2 + (o.z - z) ** 2 <= ORB_CROWD_RADIUS ** 2);
+      if (crowd.length >= ORB_CROWD_MAX) {
+        crowd.reduce((a, b) => (b.value < a.value ? b : a)).value += value;
+        continue;
+      }
       this.list.push({ id: `o${this.nextOrb++}`, x: x + Math.sin(angle) * r, z: z + Math.cos(angle) * r, value, bornTick: tick });
     }
     while (this.list.length > MAX_ORBS) this.mergeOldest();
