@@ -25,7 +25,10 @@ export class IsoCamera {
   private shakeState = { left: 0, durationS: 0, intensity: 0, phase: 0 };
   /** cursor en píxeles del canvas; undefined hasta que se mueva */
   private mouse: { x: number; y: number } | undefined;
-  private readonly onMouseMove = (e: MouseEvent) => {
+  // Con `pointermove`, no `mousemove`: Babylon cancela el `pointerdown` del canvas y, con el botón apretado, el
+  // navegador deja de mandar `mousemove` hasta soltarlo (la puntería se quedaba clavada mientras se atacaba).
+  private readonly onMouseMove = (e: PointerEvent) => {
+    if (e.pointerType === "touch") return; // el toque apunta con los sticks
     const r = this.canvas.getBoundingClientRect();
     this.mouse = { x: e.clientX - r.left, y: e.clientY - r.top };
   };
@@ -41,7 +44,7 @@ export class IsoCamera {
     this.camera = new TargetCamera("iso", new Vector3(0, 10, -10), scene);
     this.camera.minZ = 0.5;
     this.camera.fov = FOV;
-    document.addEventListener("mousemove", this.onMouseMove);
+    document.addEventListener("pointermove", this.onMouseMove);
     canvas.addEventListener("wheel", this.onWheel, { passive: false });
   }
 
@@ -90,7 +93,7 @@ export class IsoCamera {
   }
 
   dispose(): void {
-    document.removeEventListener("mousemove", this.onMouseMove);
+    document.removeEventListener("pointermove", this.onMouseMove);
     this.canvas.removeEventListener("wheel", this.onWheel);
     this.camera.dispose();
   }
