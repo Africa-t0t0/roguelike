@@ -1,4 +1,4 @@
-import { ABILITIES, MOVESETS, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, type ClassId, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import type { AssetId } from "./assets";
 
 /**
@@ -21,11 +21,14 @@ export interface WeaponGrip {
  */
 const BLADE_OUT_OF_FIST: [number, number, number] = [0, Math.PI, Math.PI / 2];
 
-export const WEAPON_LOOKS: Record<WeaponId, { asset: AssetId; grip: WeaponGrip }> = {
+/** `asset: null`: el arma no tiene modelo y se construye por código (el bastón, `buildStaff`). */
+export const WEAPON_LOOKS: Record<WeaponId, { asset: AssetId | null; grip: WeaponGrip }> = {
   // El mango quedó dentro del puño del modelo original: entre guarda y pomo hay un hueco (~0,36 m).
   "kingslayer-sword": { asset: "kingslayer-sword", grip: { position: [0.045, 0.05, 0.02], rotation: [...BLADE_OUT_OF_FIST], scale: 2.8 } },
   "guard-sword": { asset: "guard-sword", grip: { position: [0.135, 0.05, 0.02], rotation: [...BLADE_OUT_OF_FIST], scale: 0.24 } },
   "great-sword": { asset: "great-sword", grip: { position: [0.14, 0.05, 0.02], rotation: [...BLADE_OUT_OF_FIST], scale: 0.32 } },
+  // Ya en metros: se agarra por el tercio de arriba, con el orbe hacia donde saldría la hoja.
+  staff: { asset: null, grip: { position: [0.05, 0.05, 0.02], rotation: [...BLADE_OUT_OF_FIST], scale: 1 } },
 };
 
 export interface EnemyLook {
@@ -67,6 +70,7 @@ export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
   // Sin modelos propios: los tres hechiceros comparten el del mago (se distinguen por tinte y aura).
   pyromancer: MAGE_LOOK,
   stormcaller: MAGE_LOOK,
+  healer: MAGE_LOOK,
 };
 
 /**
@@ -75,7 +79,6 @@ export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
  * por segundo, cadera ≈ 1 m). Sirve para que los pies no patinen.
  */
 export const HERO_STRIDE_MPS: Record<string, number> = {
-  ss_run: 4.9,
   ss_run_2: 5.2,
   ss_strafe_3: 3.8,
   ss_strafe_4: 3.8,
@@ -86,6 +89,12 @@ export const HERO_STRIDE_MPS: Record<string, number> = {
 };
 
 export const PLAYER_LOOK: { asset: AssetId; height: number } = { asset: "kingslayer", height: 1.8 };
+
+/** Cuerpo de cada rol: el mago usa el modelo del hechicero, a la altura del caballero. */
+export const PLAYER_LOOKS: Record<ClassId, { asset: AssetId; height: number }> = {
+  warrior: PLAYER_LOOK,
+  mage: { asset: "mage", height: 1.8 },
+};
 
 /** Todos los clips que usa el juego (estilos de combate, habilidades y enemigos), sin repetir. */
 export function allClipIds(): string[] {

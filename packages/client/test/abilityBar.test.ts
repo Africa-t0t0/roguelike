@@ -35,55 +35,51 @@ describe("abilityBarModel", () => {
     const slots = abilityBarModel(
       [
         { id: "whirlwind", rank: 2 },
-        { id: "block", rank: 1 },
+        { id: "hook", rank: 1 },
       ],
       () => 0,
-      false,
     );
     expect(slots).toHaveLength(4);
     expect(slots.map((s) => s.key)).toEqual(["1", "2", "3", "4"]);
     expect(slots.map((s) => s.empty)).toEqual([false, false, true, true]);
     expect(slots[0]).toMatchObject({ glyph: "⟳", name: "Torbellino", pips: "●●○", cooldownText: "", sweep: 0 });
-    expect(slots[1]).toMatchObject({ glyph: "⛨", name: "Bloqueo", active: false });
+    expect(slots[1]).toMatchObject({ glyph: "⛓", name: "Gancho de cadena" });
   });
 
   it("glifo de cada habilidad activa", () => {
-    const ids = ["whirlwind", "kick", "warcry", "slam"] as const;
-    const slots = abilityBarModel(ids.map((id) => ({ id, rank: 1 })), () => 0, false);
-    expect(slots.map((s) => filled(s).glyph)).toEqual(["⟳", "↯", "✶", "◎"]);
+    const ids = ["whirlwind", "hook", "warcry", "slam"] as const;
+    const slots = abilityBarModel(ids.map((id) => ({ id, rank: 1 })), () => 0);
+    expect(slots.map((s) => filled(s).glyph)).toEqual(["⟳", "⛓", "✶", "◎"]);
   });
 
   it("glifo del Tajo frontal", () => {
-    const slots = abilityBarModel([{ id: "thrust", rank: 1 }], () => 0, false);
+    const slots = abilityBarModel([{ id: "thrust", rank: 1 }], () => 0);
     expect(filled(slots[0]).glyph).toBe("➶");
   });
 
   it("el barrido es la fracción de enfriamiento que queda", () => {
-    const s = filled(abilityBarModel([{ id: "kick", rank: 1 }], () => 3, false)[0]);
-    expect(s.sweep).toBeCloseTo(3 / ABILITIES.kick.cooldownS);
+    const s = filled(abilityBarModel([{ id: "hook", rank: 1 }], () => 3)[0]);
+    expect(s.sweep).toBeCloseTo(3 / ABILITIES.hook.cooldownS);
     expect(s.cooldownText).toBe("3");
   });
 
-  it("el Bloqueo se marca activo mientras se mantiene", () => {
-    const [s] = abilityBarModel([{ id: "block", rank: 1 }], () => 0, true);
-    expect(s).toMatchObject({ active: true, sweep: 0 });
-  });
+
 });
 
 describe("Celeridad (cooldownMult)", () => {
-  it("con 0.5 predice la repetición del Empuje a los 3.6 s y la barra la muestra lista", () => {
+  it("con 0.5 predice la repetición del Tajo frontal a los 4 s y la barra la muestra lista", () => {
     const a = new LocalAbility();
     a.setCooldownMult(0.5);
     a.setServer([{ id: "thrust", cooldown: 0 }], 0);
     expect(a.tick(0b1, { dead: false, swingTimer: 0 }, 0)).toBe("thrust");
     a.tick(0, { dead: false, swingTimer: 0 }, 1);
-    const ms = 3600;
-    for (let t = 0; t < 3.6; t += SIM_DT) a.tick(0, { dead: false, swingTimer: 0 }, ms);
+    const ms = 4000;
+    for (let t = 0; t < 4; t += SIM_DT) a.tick(0, { dead: false, swingTimer: 0 }, ms);
     expect(a.cooldownLeft("thrust", ms)).toBe(0);
-    const [s] = abilityBarModel([{ id: "thrust", rank: 1 }], (id) => a.cooldownLeft(id, ms), false, 0.5);
+    const [s] = abilityBarModel([{ id: "thrust", rank: 1 }], (id) => a.cooldownLeft(id, ms), 0.5);
     expect(filled(s)).toMatchObject({ cooldownText: "", sweep: 0 });
     expect(a.tick(0b1, { dead: false, swingTimer: 0 }, ms)).toBe("thrust");
-    const half = filled(abilityBarModel([{ id: "thrust", rank: 1 }], () => ABILITIES.thrust.cooldownS * 0.25, false, 0.5)[0]);
+    const half = filled(abilityBarModel([{ id: "thrust", rank: 1 }], () => ABILITIES.thrust.cooldownS * 0.25, 0.5)[0]);
     expect(half.sweep).toBeCloseTo(0.5);
   });
 });
@@ -91,12 +87,12 @@ describe("Celeridad (cooldownMult)", () => {
 describe("LocalAbility.cooldownLeft", () => {
   it("al apretar la tecla manda el enfriamiento local (mayor) aunque el servidor aún diga 0", () => {
     const a = new LocalAbility();
-    a.setServer([{ id: "kick", cooldown: 0 }], 0);
-    expect(a.cooldownLeft("kick", 0)).toBe(0);
+    a.setServer([{ id: "hook", cooldown: 0 }], 0);
+    expect(a.cooldownLeft("hook", 0)).toBe(0);
     a.tick(0b1, { dead: false, swingTimer: 0 }, 0);
-    expect(a.cooldownLeft("kick", 0)).toBeCloseTo(ABILITIES.kick.cooldownS);
+    expect(a.cooldownLeft("hook", 0)).toBeCloseTo(ABILITIES.hook.cooldownS);
     a.tick(0b1, { dead: false, swingTimer: 0 }, SIM_DT * 1000);
-    expect(a.cooldownLeft("kick", SIM_DT * 1000)).toBeCloseTo(ABILITIES.kick.cooldownS - SIM_DT);
+    expect(a.cooldownLeft("hook", SIM_DT * 1000)).toBeCloseTo(ABILITIES.hook.cooldownS - SIM_DT);
   });
 
   it("sin lanzarla localmente, el del servidor corriendo desde que llegó", () => {
@@ -109,7 +105,7 @@ describe("LocalAbility.cooldownLeft", () => {
 
 describe("abilityBarModel con cargas", () => {
   const slots = [{ id: "whirlwind" as const, rank: 1 }];
-  const model = (cd: number, charges: number) => abilityBarModel(slots, () => cd, false, 1, () => ({ charges, max: 2 }))[0]!;
+  const model = (cd: number, charges: number) => abilityBarModel(slots, () => cd, 1, () => ({ charges, max: 2 }))[0]!;
 
   it("con 1 de 2 cargas se puede lanzar: barrido de la recarga, sin número de segundos ni atenuar", () => {
     expect(model(4, 1)).toMatchObject({ charges: 1, maxCharges: 2, cooldownText: "", cooling: false });

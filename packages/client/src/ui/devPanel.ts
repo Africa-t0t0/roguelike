@@ -4,6 +4,8 @@ import {
   RELICS,
   STAT_CARDS,
   WEAPONS,
+  CLASS_DEFS,
+  CLASS_IDS,
   weaponDisplayName,
   type AbilityId,
   type CardOffer,
@@ -47,7 +49,7 @@ export function devRelicOptions(): { id: RelicId; label: string }[] {
   return (Object.keys(RELICS) as RelicId[]).map((id) => ({ id, label: RELICS[id].name }));
 }
 
-const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo" };
+const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo", healer: "Curandero" };
 const TIER_LABELS = ["Desarmado", "Tier 1", "Tier 2", "Tier 3"];
 /** Etiquetas del selector "Naturaleza" y el valor que cada una manda (la primera es "ninguna"). */
 export const NATURE_LABELS = ["Sin naturaleza", "Fuego", "Hielo", "Rayo"];
@@ -101,6 +103,9 @@ export class DevPanel {
     const level = this.section("Nivel");
     this.button(level, "+1 nivel (elegir carta)", () => ({ cmd: "levelUp", count: 1, choose: true }));
     this.button(level, "+5 niveles (sin cartas)", () => ({ cmd: "levelUp", count: 5, choose: false }));
+
+    const role = this.section("Rol");
+    for (const cls of CLASS_IDS) this.button(role, CLASS_DEFS[cls].name, () => ({ cmd: "class", cls }));
 
     const cards = this.section("Cartas");
     const options = devCardOptions();

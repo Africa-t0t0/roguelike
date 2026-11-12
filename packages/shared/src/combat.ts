@@ -1,12 +1,20 @@
-export type ClassId = "warrior";
+export type ClassId = "warrior" | "mage";
+
+export const CLASS_IDS: readonly ClassId[] = ["warrior", "mage"];
+
+export function isClassId(v: unknown): v is ClassId {
+  return v === "warrior" || v === "mage";
+}
 
 export interface ClassDef {
+  /** nombre visible del rol */
+  name: string;
   baseHp: number;
   hpPerLevel: number;
   damagePerLevel: number;
 }
 
-export type EnemyKind = "minion" | "brute" | "mage" | "pyromancer" | "stormcaller";
+export type EnemyKind = "minion" | "brute" | "mage" | "pyromancer" | "stormcaller" | "healer";
 
 export interface EnemyDef {
   hp: number;
@@ -29,8 +37,16 @@ export interface EnemyDef {
 
 export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   warrior: {
+    name: "Caballero",
     baseHp: 120,
     hpPerLevel: 12,
+    damagePerLevel: 2,
+  },
+  // Pelea de lejos: menos vida que el caballero.
+  mage: {
+    name: "Mago",
+    baseHp: 80,
+    hpPerLevel: 8,
     damagePerLevel: 2,
   },
 };
@@ -71,10 +87,22 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     xp: 8,
     ranged: { preferredMin: 8, preferredMax: 13, losRadius: 0.3 },
   },
+  // No ataca: se queda atrás y cura a los suyos (`ENEMY_HEAL`). `cooldownS` es cada cuánto cura.
+  healer: {
+    hp: 26,
+    speed: 3.2,
+    radius: 0.5,
+    damage: 0,
+    attackRange: 0,
+    telegraphS: 0.8,
+    cooldownS: 5,
+    xp: 10,
+    ranged: { preferredMin: 7, preferredMax: 11, losRadius: 0.3 },
+  },
 };
 
 export function xpToNext(level: number): number {
-  return 60 + 40 * level;
+  return 40 + 25 * level;
 }
 
 export function playerStats(cls: ClassId, level: number): { maxHp: number } {

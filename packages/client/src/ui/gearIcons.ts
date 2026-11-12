@@ -115,9 +115,90 @@ const RELIC = svg(
 
 const SLOT_ICONS: Record<GearSlot | "relic", string> = { helmet: HELMET, chest: CHEST, gloves: GLOVES, belt: BELT, boots: BOOTS, relic: RELIC };
 
-/** SVG (cadena) del icono de una ranura de equipo o de la reliquia. */
-export function gearIconSvg(slot: GearSlot | "relic"): string {
-  return SLOT_ICONS[slot];
+/** Tela del mago: degradados de paño índigo, forro oscuro y bordado dorado (el oro y la runa son los de `defs`). */
+function clothDefs(p: string): string {
+  return (
+    `<defs>` +
+    `<linearGradient id="${p}c" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8f86e0"/><stop offset="0.45" stop-color="#4f45a8"/><stop offset="1" stop-color="#231c55"/></linearGradient>` +
+    `<linearGradient id="${p}k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a2f78"/><stop offset="1" stop-color="#140f2c"/></linearGradient>` +
+    `<linearGradient id="${p}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe9a6"/><stop offset="0.5" stop-color="#d9a93f"/><stop offset="1" stop-color="#8a5f1a"/></linearGradient>` +
+    `<linearGradient id="${p}l" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#a5764a"/><stop offset="1" stop-color="#5b3a1e"/></linearGradient>` +
+    `</defs>`
+  );
+}
+const cloth = (p: string, body: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="hud-gear-svg" aria-hidden="true">${clothDefs(p)}${body}</svg>`;
+
+/** Capucha: paño que cae en pico, sombra honda donde va la cara, ribete dorado y dos ojos que brillan. */
+const HOOD = cloth(
+  "mh",
+  `<path d="M24 3C14 6 8 15 8 26c0 7 2 13 5 17h22c3-4 5-10 5-17C40 15 34 6 24 3Z" fill="url(#mhc)" stroke="${OUT}" stroke-width="1.600" stroke-linejoin="round"/>` +
+    `<path d="M24 12c-7 2-10 8-10 15 0 5 2 10 4 13h12c2-3 4-8 4-13 0-7-3-13-10-15Z" fill="url(#mhk)" stroke="${OUT}" stroke-width="1.200"/>` +
+    `<path d="M14 27c0-7 3-13 10-15 7 2 10 8 10 15" fill="none" stroke="url(#mhg)" stroke-width="1.800"/>` +
+    `<path d="M19.500 27.500h3M25.500 27.500h3" stroke="#c9a8ff" stroke-width="2" stroke-linecap="round"/>` +
+    `<path d="M12 12c3-4 7-6.500 12-8" fill="none" stroke="#fff" stroke-width="1.300" stroke-linecap="round" opacity="0.55"/>` +
+    `<path d="M13 43h22" stroke="url(#mhg)" stroke-width="1.600"/>`,
+);
+
+/** Túnica: mangas anchas, cuello en pico, faja central bordada y caída hasta los pies. */
+const ROBE = cloth(
+  "mr",
+  `<path d="M17 4h14l3 4 9 5-3 12-5-2 2 21H11l2-21-5 2-3-12 9-5Z" fill="url(#mrc)" stroke="${OUT}" stroke-width="1.600" stroke-linejoin="round"/>` +
+    `<path d="M17 4l7 10 7-10" fill="url(#mrk)" stroke="${OUT}" stroke-width="1.200" stroke-linejoin="round"/>` +
+    `<path d="M21 14h6l1 30h-8Z" fill="url(#mrk)" opacity="0.85"/>` +
+    `<path d="M21 14v30M27 14v30" stroke="url(#mrg)" stroke-width="1.400"/>` +
+    `<path d="M22.500 20l1.500 2 1.500-2M22.500 27l1.500 2 1.500-2M22.500 34l1.500 2 1.500-2" fill="none" stroke="url(#mrg)" stroke-width="1"/>` +
+    `<path d="M5.500 22l4.500-1.500M42.500 22 38 20.500" stroke="url(#mrg)" stroke-width="1.600" stroke-linecap="round"/>` +
+    `<path d="M15 9c-2 4-2 9-1 14" fill="none" stroke="#fff" stroke-width="1.200" stroke-linecap="round" opacity="0.45"/>`,
+);
+
+/** Guantes de seda: dedos largos y finos, puño acampanado con ribete y una piedra en el dorso. */
+function silkGlove(x: number, flip: boolean): string {
+  const t = flip ? `translate(${x + 20} 0) scale(-1 1)` : `translate(${x} 0)`;
+  return (
+    `<g transform="${t}">` +
+    `<path d="M4 34V14c0-2 2.600-2 2.600 0v8h.8V8c0-2.400 2.800-2.400 2.800 0v14h.8V6c0-2.400 2.800-2.400 2.800 0v16h.8V9c0-2.200 2.600-2.200 2.600 0v18l1.500-3c1-2 3.200-1 2.400 1.200L16 34Z" fill="url(#mgc)" stroke="${OUT}" stroke-width="1.300" stroke-linejoin="round"/>` +
+    `<path d="M2 34h16l1 8H1Z" fill="url(#mgk)" stroke="${OUT}" stroke-width="1.200" stroke-linejoin="round"/>` +
+    `<path d="M2 34h16" stroke="url(#mgg)" stroke-width="1.400"/>` +
+    `<circle cx="10" cy="27" r="1.800" fill="#c9a8ff" stroke="${OUT}" stroke-width="0.7"/>` +
+    `<path d="M5.500 16v12" stroke="#fff" stroke-width="1" stroke-linecap="round" opacity="0.45"/>` +
+    `</g>`
+  );
+}
+const SILK_GLOVES = cloth("mg", silkGlove(2, false) + silkGlove(26, true));
+
+/** Fajín: banda de tela anudada con dos colas que cuelgan y flecos dorados. */
+const SASH = cloth(
+  "ms",
+  `<path d="M2 16c8 2 15 3 22 3s14-1 22-3v12c-8 2-15 3-22 3S10 30 2 28Z" fill="url(#msc)" stroke="${OUT}" stroke-width="1.500" stroke-linejoin="round"/>` +
+    `<path d="M2 19c8 2 15 3 22 3s14-1 22-3" fill="none" stroke="#fff" stroke-width="1" opacity="0.35"/>` +
+    `<path d="M22 22l-6 18 4 1 5-15Z" fill="url(#msk)" stroke="${OUT}" stroke-width="1.200" stroke-linejoin="round"/>` +
+    `<path d="M26 22l5 17-4 1-3-14Z" fill="url(#msc)" stroke="${OUT}" stroke-width="1.200" stroke-linejoin="round"/>` +
+    `<path d="M16 40l-.5 3M18 40.500l-.5 3M27.500 40l.5 3M30 39.500l.5 3" stroke="url(#msg)" stroke-width="1.200" stroke-linecap="round"/>` +
+    `<ellipse cx="24" cy="22" rx="4" ry="3.500" fill="url(#msk)" stroke="${OUT}" stroke-width="1.200"/>` +
+    `<path d="M21 21.500c2-1 4-1 6 0" fill="none" stroke="url(#msg)" stroke-width="1"/>`,
+);
+
+/** Sandalias: suela de cuero y tiras de tela cruzadas sobre el empeine y el tobillo. */
+function sandal(x: number, flip: boolean): string {
+  const t = flip ? `translate(${x + 20} 0) scale(-1 1)` : `translate(${x} 0)`;
+  return (
+    `<g transform="${t}">` +
+    `<path d="M3 38c0-3 2-5 5-5h7c4 0 7 2 7 5v3H3Z" fill="url(#mbl)" stroke="${OUT}" stroke-width="1.400" stroke-linejoin="round"/>` +
+    `<path d="M6 10h8l1 21H6Z" fill="#e7c9a3" stroke="${OUT}" stroke-width="1.200" opacity="0.9"/>` +
+    `<path d="M5 14l11 5M5 20l11 5M5 26l11 5M16 14 5 19M16 20 5 25" stroke="url(#mbc)" stroke-width="2.200" stroke-linecap="round"/>` +
+    `<path d="M5 33c4-2 10-2 15 1" fill="none" stroke="url(#mbc)" stroke-width="2.400" stroke-linecap="round"/>` +
+    `<circle cx="10.500" cy="12" r="1.300" fill="url(#mbg)" stroke="${OUT}" stroke-width="0.6"/>` +
+    `</g>`
+  );
+}
+const SANDALS = cloth("mb", sandal(2, false) + sandal(26, true));
+
+const CLOTH_ICONS: Record<GearSlot, string> = { helmet: HOOD, chest: ROBE, gloves: SILK_GLOVES, belt: SASH, boots: SANDALS };
+
+/** SVG (cadena) del icono de una ranura de equipo o de la reliquia; con `cloth`, la versión de tela del mago. */
+export function gearIconSvg(slot: GearSlot | "relic", cloth = false): string {
+  return cloth && slot !== "relic" ? CLOTH_ICONS[slot] : SLOT_ICONS[slot];
 }
 
 /** Color base del halo de cada tier (oxidado: marrón apagado); el resto sale del brillo del tier. */

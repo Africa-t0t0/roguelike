@@ -1091,7 +1091,7 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     await ticksUntil(() => !room.state.players.has("ana"));
     const r = record("ana");
     r.progress.stats.strength = 2;
-    r.progress.abilities.push({ id: "kick", rank: 2 });
+    r.progress.abilities.push({ id: "hook", rank: 2 });
     room["levelUp"].onLevelsGained(1, [], room["registry"].all());
     expect(r.pendingChoices).toBe(1);
 
@@ -1102,7 +1102,7 @@ describe("RunRoom: subir de nivel y elegir cartas", () => {
     expect(room.state.paused).toBe(false);
     expect(player("ana").choosing).toBe(true);
     expect(record("ana").progress.stats.strength).toBe(2);
-    expect(record("ana").progress.abilities).toEqual([{ id: "kick", rank: 2 }]);
+    expect(record("ana").progress.abilities).toEqual([{ id: "hook", rank: 2 }]);
     // Sigue jugando mientras elige.
     const t0 = room.state.tick;
     back.client.send(MSG.input, moveInput(1));
@@ -1174,7 +1174,7 @@ describe("RunRoom: vencimiento de las armas del suelo", () => {
     await ticksUntil(() => ana.floors.length >= 1, 10);
     record("ana").floorWeapons = [];
     const me = record("ana").kinematic;
-    room["dropItem"]({ kind: "weapon", weaponId: "great-sword", tier: 2, nature: "none", x: me.x + 5, z: me.z });
+    room["dropWeapon"]("great-sword", 2, "none", me.x + 5, me.z);
     await ticksUntil(() => ana.floors.length >= 2, 10);
     const f = record("ana").floorWeapons[0]!;
     expect(f.expiresAt).toBeCloseTo(room["floorTime"] + FLOOR_WEAPON_TTL_S, 0);
@@ -1340,47 +1340,24 @@ describe("RunRoom: habilidades", () => {
     const seen = collect(beto.client);
     grant("ana", { kind: "ability", id: "cleave", rank: 1 });
     grant("ana", { kind: "ability", id: "whirlwind", rank: 1 });
-    grant("ana", { kind: "ability", id: "block", rank: 2 });
+    grant("ana", { kind: "ability", id: "banner", rank: 2 });
 
     ana.client.send(MSG.input, keyInput(1, 1));
     await ticksUntil(() => player("ana").lastSeq === 1, 10);
     expect(record("ana").combat.abilityCd.whirlwind).toBeGreaterThan(7.9);
     await ticksUntil(() => seen.some((e) => e.type === "ability"), 10);
-    expect(seen.find((e) => e.type === "ability")).toEqual({ type: "ability", key: "ana", id: "whirlwind" });
+    expect(seen.find((e) => e.type === "ability")).toEqual({ type: "ability", key: "ana", id: "whirlwind", rank: 1 });
 
     await ticksUntil(() => beto.client.state.players.get("ana")?.abilities?.length === 2, 10);
     const synced = beto.client.state.players.get("ana");
     expect(synced.passiveRank).toBe(1);
     expect(synced.abilities[0].id).toBe("whirlwind");
     expect(synced.abilities[0].cooldown).toBeGreaterThan(7);
-    expect(synced.abilities[1]).toMatchObject({ id: "block", rank: 2, cooldown: 0 });
+    expect(synced.abilities[1]).toMatchObject({ id: "banner", rank: 2, cooldown: 0 });
   });
 
-  const legendaryBoots = (legendary: "thrustDash" | "slamCracks"): GearItem => ({
+  const legendaryBoots = (legendary: "thrustScar" | "slamCracks"): GearItem => ({
     slot: "boots", tier: 4, stats: [{ stat: "moveSpeed", value: 0.1 }], legendary,
-  });
-
-  it("thrustDash: el servidor adelanta al jugador 3 m en el impacto del Tajo frontal", async () => {
-    const ana = await join("Ana", "t-ana");
-    await ana.welcome;
-    startRun();
-    const { d, cr } = combatRoom();
-    const spot = roomSpawnPoints(d, cr.id, 1)[0]!;
-    teleport("ana", spot);
-    grant("ana", { kind: "ability", id: "thrust", rank: 1 });
-    record("ana").gear.boots = legendaryBoots("thrustDash");
-    room["refreshMods"](record("ana"));
-    const before = { ...record("ana").kinematic };
-    ana.client.send(MSG.input, keyInput(1, 1));
-    await ticksUntil(() => player("ana").lastSeq === 1, 10);
-    // El impacto llega a los 0,45 × 0,7 s; los inputs vacíos hacen avanzar la animación.
-    for (let seq = 2; seq <= 14; seq++) ana.client.send(MSG.input, keyInput(seq, 0));
-    await ticksUntil(() => player("ana").lastSeq === 14, 20);
-    const after = record("ana").kinematic;
-    const moved = Math.hypot(after.x - before.x, after.z - before.z);
-    // Contra un muro puede quedarse corto, nunca pasar de 3 m.
-    expect(moved).toBeGreaterThan(0.01);
-    expect(moved).toBeLessThanOrEqual(3 + 1e-6);
   });
 
   it("charges y playerZones se sincronizan; las zonas y el escudo de Última resistencia no avanzan en la pausa", async () => {
@@ -1388,7 +1365,7 @@ describe("RunRoom: habilidades", () => {
     await ana.welcome;
     startRun();
     grant("ana", { kind: "ability", id: "whirlwind", rank: 1 });
-    grant("ana", { kind: "ability", id: "kick", rank: 1 });
+    grant("ana", { kind: "ability", id: "hook", rank: 1 });
     const c = record("ana").combat;
     await ticksUntil(() => player("ana").abilities.length === 2, 10);
     expect(player("ana").abilities[0]!.charges).toBe(1);
@@ -1435,7 +1412,7 @@ describe("RunRoom: habilidades", () => {
     ana.client.send(MSG.input, keyInput(1, 1));
     await ticksUntil(() => player("ana").lastSeq === 1, 10);
     const c = record("ana").combat;
-    expect(c.buffDamage).toBe(0.25);
+    expect(c.buffDamage).toBe(0.2);
     room["levelUp"].onLevelsGained(1, room["registry"].connected(), room["registry"].all());
     await ticksUntil(() => room.state.paused, 5);
     const [cd, buff] = [c.abilityCd.warcry, c.buffLeft];
@@ -2003,7 +1980,7 @@ describe("RunRoom: sandbox", () => {
 
   it("card da cartas y habilidades (sin pasar de 4 activas) y clearCards las quita", async () => {
     const { ana } = await sandboxRoom();
-    for (const id of ["whirlwind", "kick", "warcry", "slam", "thrust"]) {
+    for (const id of ["whirlwind", "hook", "warcry", "slam", "thrust"]) {
       dev(ana.client, { cmd: "card", card: { kind: "ability", id, rank: 3 } });
     }
     dev(ana.client, { cmd: "card", card: { kind: "ability", id: "cleave", rank: 2 } });
@@ -2011,11 +1988,11 @@ describe("RunRoom: sandbox", () => {
     await settle();
     const p = record("ana").progress;
     expect(p.abilities).toEqual([
-      { id: "whirlwind", rank: 3 }, { id: "kick", rank: 3 }, { id: "warcry", rank: 3 }, { id: "slam", rank: 3 },
+      { id: "whirlwind", rank: 3 }, { id: "hook", rank: 3 }, { id: "warcry", rank: 3 }, { id: "slam", rank: 3 },
       { id: "cleave", rank: 2 },
     ]);
     expect(player("ana").cooldownMult).toBeCloseTo(0.9, 12);
-    expect(player("ana").abilities.map((a) => a.id)).toEqual(["whirlwind", "kick", "warcry", "slam"]);
+    expect(player("ana").abilities.map((a) => a.id)).toEqual(["whirlwind", "hook", "warcry", "slam"]);
 
     dev(ana.client, { cmd: "clearCards" });
     await settle();

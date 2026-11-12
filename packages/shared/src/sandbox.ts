@@ -1,5 +1,5 @@
 import { ABILITIES, STAT_CARDS, type AbilityId, type CardOffer, type StatCardId } from "./cards";
-import { ENEMY_DEFS, type EnemyKind } from "./combat";
+import { ENEMY_DEFS, isClassId, type ClassId, type EnemyKind } from "./combat";
 import { ELEMENTS, type Nature } from "./natures";
 import { WEAPONS, type WeaponId, type WeaponTier } from "./weapons";
 import { GEAR_SLOTS, RELICS, type GearSlot, type RelicId } from "./gear";
@@ -32,6 +32,7 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `chest`: un cofre cerrado nuevo delante del jugador.
  * - `gear`: equipa una pieza nueva de esa ranura y tier (`equip`) o la suelta delante del jugador (`drop`).
  * - `relic`: equipa esa reliquia.
+ * - `class`: cambia de rol: arma de partida de ese rol y sin habilidades (las cartas de stat se conservan).
  * - `weapon`: equipa el arma con su tier y naturaleza (`"none"` si no se indica).
  */
 export type DevCommand =
@@ -51,7 +52,8 @@ export type DevCommand =
   | { cmd: "status"; kind: "burn" | "slow" | "stun" }
   | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature }
   | { cmd: "gear"; slot: GearSlot; tier: WeaponTier; action: "equip" | "drop" }
-  | { cmd: "relic"; id: RelicId };
+  | { cmd: "relic"; id: RelicId }
+  | { cmd: "class"; cls: ClassId };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -119,6 +121,8 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
       return (GEAR_SLOTS as readonly unknown[]).includes(m.slot) && isWeaponTierCmd(m.tier) && (m.action === "equip" || m.action === "drop")
         ? { cmd: "gear", slot: m.slot as GearSlot, tier: m.tier, action: m.action }
         : null;
+    case "class":
+      return isClassId(m.cls) ? { cmd: "class", cls: m.cls } : null;
     case "relic":
       return has(RELICS, m.id) ? { cmd: "relic", id: m.id as RelicId } : null;
     default:

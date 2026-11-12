@@ -1,8 +1,8 @@
 import { natureSuffix, type Nature } from "./natures";
 import { CLASS_DEFS, ENEMY_DEFS, type ClassId, type EnemyKind } from "./combat";
 
-export type MovesetId = "one-hand-sword" | "great-sword";
-export type WeaponId = "kingslayer-sword" | "guard-sword" | "great-sword";
+export type MovesetId = "one-hand-sword" | "great-sword" | "staff";
+export type WeaponId = "kingslayer-sword" | "guard-sword" | "great-sword" | "staff";
 
 export interface Strike {
   clip: string;
@@ -30,6 +30,11 @@ export interface Moveset {
   };
   combo: readonly Strike[];
   comboResetS: number;
+  /**
+   * Arma a distancia (bastón): cada golpe del combo no pega en arco, sino que suelta en su impacto un proyectil
+   * con esta velocidad (m/s) y radio (m); `Strike.range` es lo que recorre.
+   */
+  ranged?: { speed: number; radius: number };
 }
 
 export interface Weapon {
@@ -37,6 +42,8 @@ export interface Weapon {
   name: string;
   /** género gramatical del nombre, para concordar el sufijo del tier */
   gender: "f" | "m";
+  /** rol que la usa: a cada jugador solo le caen las de su rol */
+  cls: ClassId;
   movesetId: MovesetId;
   damage: number;
   rangeMult: number;
@@ -49,11 +56,11 @@ export const MOVESETS: Record<MovesetId, Moveset> = {
     id: "one-hand-sword",
     locomotion: {
       idle: "ss_idle",
-      run: "ss_run",
+      run: "ss_run_2",
       runBack: "ss_run_2",
       runLeft: "ss_strafe_3",
       runRight: "ss_strafe_4",
-      sprint: "ss_run",
+      sprint: "ss_run_2",
       jump: "ss_jump",
       hit: "ss_impact",
       death: "ss_death",
@@ -84,15 +91,59 @@ export const MOVESETS: Record<MovesetId, Moveset> = {
     ],
     comboResetS: 0.8,
   },
+  // El paquete de magia no trae carrera, salto, golpe recibido ni muerte: se usan los del caballero.
+  staff: {
+    id: "staff",
+    locomotion: {
+      idle: "mg_idle",
+      run: "ss_run_2",
+      runBack: "ss_run_2",
+      runLeft: "ss_strafe_3",
+      runRight: "ss_strafe_4",
+      sprint: "ss_run_2",
+      jump: "ss_jump",
+      hit: "ss_impact",
+      death: "ss_death",
+    },
+    combo: [
+      { clip: "mg_attack_1h_1", duration: 0.45, damageMult: 1, range: 14, arcDeg: 0, impactAt: 0.45 },
+      { clip: "mg_attack_1h_2", duration: 0.45, damageMult: 1, range: 14, arcDeg: 0, impactAt: 0.45 },
+      { clip: "mg_attack_1h_3", duration: 0.55, damageMult: 1.5, range: 14, arcDeg: 0, impactAt: 0.5 },
+    ],
+    comboResetS: 0.6,
+    ranged: { speed: 18, radius: 0.4 },
+  },
 };
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
-  "kingslayer-sword": { id: "kingslayer-sword", name: "Espada del Kingslayer", gender: "f", movesetId: "one-hand-sword", damage: 12, rangeMult: 1, arcMult: 1, speedMult: 1 },
-  "guard-sword": { id: "guard-sword", name: "Espada de guardia", gender: "f", movesetId: "one-hand-sword", damage: 10, rangeMult: 0.9, arcMult: 1, speedMult: 1.15 },
-  "great-sword": { id: "great-sword", name: "Mandoble", gender: "m", movesetId: "great-sword", damage: 18, rangeMult: 1, arcMult: 1, speedMult: 1 },
+  "kingslayer-sword": { id: "kingslayer-sword", name: "Espada del Kingslayer", gender: "f", cls: "warrior", movesetId: "one-hand-sword", damage: 12, rangeMult: 1, arcMult: 1, speedMult: 1 },
+  "guard-sword": { id: "guard-sword", name: "Espada de guardia", gender: "f", cls: "warrior", movesetId: "one-hand-sword", damage: 10, rangeMult: 0.9, arcMult: 1, speedMult: 1.15 },
+  "great-sword": { id: "great-sword", name: "Mandoble", gender: "m", cls: "warrior", movesetId: "great-sword", damage: 18, rangeMult: 1, arcMult: 1, speedMult: 1 },
+  staff: { id: "staff", name: "Bastón", gender: "m", cls: "mage", movesetId: "staff", damage: 10, rangeMult: 1, arcMult: 1, speedMult: 1 },
 };
 
 export const STARTING_WEAPON: WeaponId = "kingslayer-sword";
+
+/** Arma con la que empieza cada rol. */
+export const STARTING_WEAPONS: Record<ClassId, WeaponId> = { warrior: "kingslayer-sword", mage: "staff" };
+
+/** Las armas de ese rol, en el orden de `WEAPONS`. */
+export function weaponsOf(cls: ClassId): WeaponId[] {
+  return (Object.keys(WEAPONS) as WeaponId[]).filter((id) => WEAPONS[id].cls === cls);
+}
+
+/**
+ * El arma que le toca a un jugador de rol `cls` cuando cae `weaponId`: la misma si es de su rol; si no, la de
+ * partida del suyo (de la misma caída el caballero ve una espada y el mago, un bastón).
+ */
+export function weaponForClass(weaponId: WeaponId, cls: ClassId): WeaponId {
+  return WEAPONS[weaponId].cls === cls ? weaponId : STARTING_WEAPONS[cls];
+}
+
+/** ¿El arma dispara proyectiles en vez de golpear en arco? */
+export function isRanged(weaponId: WeaponId): boolean {
+  return MOVESETS[WEAPONS[weaponId].movesetId].ranged !== undefined;
+}
 
 export function isWeaponId(v: unknown): v is WeaponId {
   return typeof v === "string" && Object.prototype.hasOwnProperty.call(WEAPONS, v);
@@ -132,7 +183,9 @@ export function isWeaponTier(v: unknown): v is WeaponTier {
 /** Nombre visible: "Mandoble templado" o, con naturaleza, "Mandoble templado de fuego". */
 export function weaponDisplayName(id: WeaponId, tier: WeaponTier, nature: Nature = "none"): string {
   const w = WEAPONS[id];
-  const base = `${w.name} ${TIERS[tier].suffix[w.gender]}`;
+  // La madera no se oxida: el bastón de calidad 1 está astillado.
+  const suffix = w.cls === "mage" && tier === 1 ? { f: "astillada", m: "astillado" }[w.gender] : TIERS[tier].suffix[w.gender];
+  const base = `${w.name} ${suffix}`;
   return nature === "none" ? base : `${base} ${natureSuffix(nature)}`;
 }
 
@@ -151,6 +204,7 @@ export const ARMED_CHANCE: Record<EnemyKind, { chance: number; weaponId: WeaponI
   mage: null,
   pyromancer: null,
   stormcaller: null,
+  healer: null,
 };
 
 /** Daño y alcance del ataque de un enemigo, con o sin arma. */

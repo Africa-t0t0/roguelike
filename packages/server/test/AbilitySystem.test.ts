@@ -3,8 +3,6 @@ import {
   ABILITIES,
   BANNER_DURATION_S,
   ENEMY_DEFS,
-  FRENZY_DURATION_S,
-  HOOK_RANGE,
   PLAYER_RADIUS,
   SLAM_IMPACT_S,
   SLAM_LEAP_MAX_M,
@@ -126,92 +124,16 @@ describe("Torbellino", () => {
     expect(feed(env, { abilities: 1 }).a.started).toBeUndefined();
   });
 
-  it("rango 3: golpea dos veces, con 0,4 s entre golpes", () => {
-    const env = setup([{ id: "whirlwind", rank: 3 }]);
-    const [e] = spawn(env.sys, [{ x: 28, z: 30.5 }]);
-    feed(env, { abilities: 1 });
-    const first = untilHits(env, 0);
-    const second = untilHits(env, 0);
-    expect(first.at).toBe(inputsFor(0.45));
-    expect(second.at).toBe(inputsFor(0.4));
-    expect(e!.hp).toBe(9999 - 2 * Math.round(BASE * 1.6));
-  });
-});
-
-describe("Patada", () => {
-  it("daña al de enfrente, lo empuja ~3 m y lo aturde 1 s; al de la espalda no", () => {
-    const env = setup([{ id: "kick", rank: 1 }]);
-    const [front, back] = spawn(env.sys, [{ x: 28, z: 29.5 }, { x: 28, z: 26.5 }]);
-    expect(feed(env, { abilities: 1 }).a.started).toBe("kick");
-    const { at, hits } = untilHits(env, 1);
-    expect(at).toBe(inputsFor(0.4 * 0.6));
-    expect(hits.map((x) => x.enemyId)).toEqual([front!.id]);
-    expect(front!.hp).toBe(9999 - Math.round(BASE * 0.5));
-    expect(front!.z).toBeCloseTo(32.5, 5);
-    expect(front!.x).toBeCloseTo(28, 5);
-    expect(front!.stunned).toBe(1);
-    expect(back!.hp).toBe(9999);
-    expect(back!.z).toBe(26.5);
-    expect(back!.stunned).toBe(0);
-    expect(env.c.abilityCd.kick).toBe(6);
-
-    // Aturdido: no se mueve durante ese segundo.
-    const players = [P("a", 28, 28)];
-    for (let i = 0; i < inputsFor(1) - 1; i++) env.sys.step(players, SIM_DT);
-    expect(front!.z).toBeCloseTo(32.5, 5);
-    expect(front!.stunned).toBeGreaterThan(0);
-    env.sys.step(players, SIM_DT);
-    expect(front!.stunned).toBe(0);
-    env.sys.step(players, SIM_DT);
-    expect(front!.z).toBeLessThan(32.5);
-  });
-
-  it("el empuje no atraviesa un muro cercano", () => {
-    const env = setup([{ id: "kick", rank: 1 }]);
-    const [e] = spawn(env.sys, [{ x: 28, z: 38.5 }]);
-    feed(env, { abilities: 1 }, kin({ z: 37 }));
-    untilHits(env, 0, kin({ z: 37 }));
-    expect(e!.z).toBeCloseTo(40 - ENEMY_DEFS.minion.radius, 5);
-  });
-
-  it("el aturdido cancela la telegrafía y no ataca en ese tiempo", () => {
-    const env = setup([]);
-    const [e] = spawn(env.sys, [{ x: 28, z: 29 }]);
-    const players = [P("a", 28, 28)];
-    env.sys.step(players, SIM_DT);
-    expect(e!.ai).toBe("telegraph");
-    env.sys.stun(e!.id, 1);
-    expect(e!.ai).toBe("chase");
-    const hits: EnemyHit[] = [];
-    for (let i = 0; i < inputsFor(1); i++) hits.push(...env.sys.step(players, SIM_DT));
-    expect(hits).toEqual([]);
-    for (let i = 0; i < 30; i++) hits.push(...env.sys.step(players, SIM_DT));
-    expect(hits.length).toBeGreaterThan(0);
-  });
-
-  it("stunImmune no se aturde (el empuje sí)", () => {
-    const env = setup([]);
-    const [e] = spawn(env.sys, [{ x: 28, z: 29 }]);
-    ENEMY_DEFS.minion.stunImmune = true;
-    try {
-      env.sys.stun(e!.id, 1);
-      expect(e!.stunned).toBe(0);
-      env.sys.knockback(e!.id, 0, 2, 3);
-      expect(e!.z).toBeCloseTo(32, 5);
-    } finally {
-      delete ENEMY_DEFS.minion.stunImmune;
-    }
-  });
 });
 
 describe("Grito de guerra", () => {
-  it("da +25 % a los dos del grupo durante 8 s y el golpe del otro hace round(base × 1,25)", () => {
+  it("da +20 % a los dos del grupo durante 8 s y el golpe del otro hace round(base × 1,2)", () => {
     const env = setup([{ id: "warcry", rank: 1 }]);
     const other = newCombatState("warrior", 1);
     const party = [env.c, other];
     expect(feed(env, { abilities: 1 }, kin(), env.c, party).a.started).toBe("warcry");
     for (const p of party) {
-      expect(p.buffDamage).toBe(0.25);
+      expect(p.buffDamage).toBe(0.2);
       expect(p.buffLeft).toBe(8);
     }
 
@@ -222,12 +144,12 @@ describe("Grito de guerra", () => {
       const r = feed(env, {}, kin(), other, party).r;
       if (r.impact) hit = r.impact.hits[0]!.amount;
     }
-    expect(hit).toBe(Math.round(BASE * 1.25));
+    expect(hit).toBe(Math.round(BASE * 1.2));
     expect(e!.hp).toBe(9999 - hit);
 
     const states = new Map([["a", env.c], ["b", other]]);
     tickAbilities(env, inputsFor(8) - 1, states);
-    expect(other.buffDamage).toBe(0.25);
+    expect(other.buffDamage).toBe(0.2);
     tickAbilities(env, 1, states);
     expect(other.buffDamage).toBe(0);
     expect(env.c.buffDamage).toBe(0);
@@ -277,51 +199,6 @@ describe("Golpe sísmico", () => {
     env.c.abilities[0]!.rank = 2;
     const { hits } = untilHits(env, 0);
     expect(hits[0]!.amount).toBe(Math.round(BASE * 1.5));
-  });
-});
-
-describe("Bloqueo", () => {
-  const hitFrom = (sx: number, sz: number): EnemyHit => ({ targetKey: "a", damage: 10, sourceId: "e1", sourceX: sx, sourceZ: sz });
-
-  it("mantenido: de frente 30 %, por la espalda 100 %, velocidad a la mitad y sin atacar; al soltar vuelve todo", () => {
-    const env = setup([{ id: "block", rank: 1 }]);
-    const states = new Map([["a", env.c]]);
-    feed(env, { abilities: 1 });
-    expect(env.c.blocking).toBe(true);
-    expect(moveSpeedMult(env.c)).toBe(0.5);
-    expect(feed(env, { abilities: 1, attack: true }).swing!.swung).toBe(false);
-
-    env.cs.queueEnemyHits(states, [hitFrom(28, 31)], NOW);
-    expect(feed(env, { abilities: 1 }).r.damage).toBeCloseTo(3, 9);
-    env.cs.queueEnemyHits(states, [hitFrom(28, 25)], NOW);
-    expect(feed(env, { abilities: 1 }).r.damage).toBeCloseTo(10, 9);
-
-    feed(env, { abilities: 0 });
-    expect(env.c.blocking).toBe(false);
-    expect(moveSpeedMult(env.c)).toBe(1);
-    env.cs.queueEnemyHits(states, [hitFrom(28, 31)], NOW);
-    expect(feed(env, { abilities: 0 }).r.damage).toBeCloseTo(10, 9);
-    expect(feed(env, { attack: true }).swing!.swung).toBe(true);
-  });
-
-  it("se combina con la Agilidad y vale para los golpes que vencen por plazo en step", () => {
-    const env = setup([{ id: "block", rank: 2 }]);
-    env.c.mods = playerMods({ ...newProgress(), stats: { agility: 1 } });
-    feed(env, { abilities: 1 });
-    expect(moveSpeedMult(env.c)).toBeCloseTo(1.08 * 0.5, 9);
-    const states = new Map([["a", env.c]]);
-    env.cs.queueEnemyHits(states, [hitFrom(29, 30)], NOW);
-    const { damaged } = env.cs.step(states, NOW + 10, SIM_DT, new Map([["a", kin()]]));
-    expect(damaged[0]!.amount).toBeCloseTo(2, 9);
-  });
-
-  it("un swing en curso no bloquea hasta que termina", () => {
-    const env = setup([{ id: "block", rank: 1 }]);
-    feed(env, { attack: true });
-    feed(env, { abilities: 1 });
-    expect(env.c.blocking).toBe(false);
-    for (let i = 0; i < 20; i++) feed(env, { abilities: 1 });
-    expect(env.c.blocking).toBe(true);
   });
 });
 
@@ -381,14 +258,29 @@ describe("Onda de corte", () => {
 });
 
 describe("exclusión con el combo", () => {
-  it("una habilidad durante un swing no hace nada, y atacar durante la animación tampoco", () => {
+  it("una habilidad apretada durante un swing espera y sale al terminar el golpe; atacar durante la animación no hace nada", () => {
     const env = setup([{ id: "whirlwind", rank: 1 }]);
     expect(feed(env, { attack: true }).swing!.swung).toBe(true);
     expect(feed(env, { abilities: 1 }).a.started).toBeUndefined();
     expect(env.c.abilityCd.whirlwind ?? 0).toBe(0);
-    for (let i = 0; i < 20; i++) feed(env);
+    // Sin volver a apretar: sale sola en el input en que termina el golpe.
+    let started: AbilityId | undefined;
+    let inputs = 0;
+    while (!started && inputs++ < 30) started = feed(env).a.started;
+    expect(started).toBe("whirlwind");
+    expect(inputs).toBeLessThanOrEqual(inputsFor(0.35));
+    expect(feed(env, { attack: true }).swing!.swung).toBe(false);
+  });
+
+  it("la tecla en espera caduca: apretada mucho antes de poder lanzarla, no sale", () => {
+    const env = setup([{ id: "whirlwind", rank: 1 }, { id: "hook", rank: 1 }]);
     expect(feed(env, { abilities: 1 }).a.started).toBe("whirlwind");
-    expect(feed(env, { abilities: 1, attack: true }).swing!.swung).toBe(false);
+    // La Patada, apretada al empezar el Torbellino (0,9 s), caduca antes de que termine.
+    feed(env, { abilities: 0 });
+    feed(env, { abilities: 2 });
+    let started: AbilityId | undefined;
+    for (let i = 0; i < inputsFor(1.5) && !started; i++) started = feed(env, { abilities: 0 }).a.started;
+    expect(started).toBeUndefined();
   });
 
   it("una tecla sin habilidad no hace nada", () => {
@@ -404,44 +296,6 @@ describe("Celeridad", () => {
     env.c.mods = playerMods({ ...newProgress(), stats: { haste: 2 } });
     expect(feed(env, { abilities: 1 }).a.started).toBe("whirlwind");
     expect(env.c.abilityCd.whirlwind).toBeCloseTo(8 * 0.9 ** 2, 12);
-  });
-});
-
-describe("Tajo frontal", () => {
-  it("rango 3: golpea a 2 enemigos alineados a 3 y 7,5 m en su impacto; no al de 1,5 m de costado", () => {
-    const env = setup([{ id: "thrust", rank: 3 }]);
-    const inLine = spawn(env.sys, [{ x: 28, z: 31 }, { x: 28, z: 35.5 }]);
-    const [side] = spawn(env.sys, [{ x: 29.5, z: 31 }]);
-    expect(feed(env, { abilities: 1 }).a.started).toBe("thrust");
-    expect(env.c.abilityCd.thrust).toBe(7);
-    const { at, hits } = untilHits(env, 1);
-    expect(at).toBe(inputsFor(0.45 * 0.7));
-    const amount = Math.round(BASE * 2);
-    expect(hits.map((x) => x.enemyId).sort()).toEqual(inLine.map((e) => e.id).sort());
-    expect(hits.every((x) => x.amount === amount)).toBe(true);
-    expect(side!.hp).toBe(9999);
-  });
-
-  it("la línea queda fija al lanzarla: girar después no la cambia", () => {
-    const env = setup([{ id: "thrust", rank: 1 }]);
-    const [ahead] = spawn(env.sys, [{ x: 28, z: 31 }]);
-    feed(env, { abilities: 1, facing: 0 });
-    const hits: string[] = [];
-    for (let i = 0; i < 30; i++) hits.push(...feed(env, { facing: Math.PI }).a.hits.map((h) => h.enemyId));
-    expect(hits).toEqual([ahead!.id]);
-  });
-
-  it("Foco 4: no golpea a un enemigo detrás de un muro", () => {
-    const env = setup([{ id: "thrust", rank: 3 }]);
-    // Muro de 2 casillas (x 26-30 m, z 30-32 m) entre el jugador (28, 28) y el enemigo (28, 33,5).
-    for (const tx of [13, 14]) env.dungeon.tiles[15 * env.dungeon.width + tx] = 0;
-    const [behind] = spawn(env.sys, [{ x: 28, z: 33.5 }]);
-    const [front] = spawn(env.sys, [{ x: 28, z: 29.2 }]);
-    feed(env, { abilities: 1 });
-    const hits: string[] = [];
-    for (let i = 0; i < 30; i++) hits.push(...feed(env).a.hits.map((h) => h.enemyId));
-    expect(hits).toEqual([front!.id]);
-    expect(behind!.hp).toBe(9999);
   });
 });
 
@@ -481,23 +335,14 @@ describe("efectos legendarios y reliquias", () => {
   });
 
   it("sin whirlCharges (o en otra habilidad) hay 1 carga como siempre", () => {
-    const env = setup([{ id: "whirlwind", rank: 1 }, { id: "kick", rank: 1 }]);
+    const env = setup([{ id: "whirlwind", rank: 1 }, { id: "hook", rank: 1 }]);
     expect(abilityMaxCharges(env.c, "whirlwind")).toBe(1);
     withLegendary(env, "whirlCharges");
-    expect(abilityMaxCharges(env.c, "kick")).toBe(1);
+    expect(abilityMaxCharges(env.c, "hook")).toBe(1);
     withLegendary(env);
     feed(env, { abilities: 1 });
     settle(env);
     expect(feed(env, { abilities: 1 }).a.started).toBeUndefined();
-  });
-
-  it("kickStun: la Patada aturde el doble (rango 1: 2 s)", () => {
-    const env = setup([{ id: "kick", rank: 1 }]);
-    withLegendary(env, "kickStun");
-    const [front] = spawn(env.sys, [{ x: 28, z: 29.5 }]);
-    feed(env, { abilities: 1 });
-    untilHits(env, 1);
-    expect(front!.stunned).toBe(2);
   });
 
   it("warcryLong: el bono dura ×1,5 (12 s)", () => {
@@ -539,16 +384,6 @@ describe("efectos legendarios y reliquias", () => {
     feed(env2, { abilities: 1 });
     expect(env2.c.buffGuard).toBe(false);
     expect(guardMult(env2.c)).toBe(1);
-  });
-
-  it("blockFree: bloqueando no hay ralentización; sin la legendaria, a la mitad", () => {
-    const env = setup([{ id: "block", rank: 1 }]);
-    withLegendary(env, "blockFree");
-    feed(env, { abilities: 1 });
-    expect(env.c.blocking).toBe(true);
-    expect(moveSpeedMult(env.c)).toBe(1);
-    withLegendary(env);
-    expect(moveSpeedMult(env.c)).toBe(0.5);
   });
 
   it("warcry sin legendarias: ni cura ni dura más", () => {
@@ -598,36 +433,9 @@ describe("efectos legendarios y reliquias", () => {
     expect(env.ab.playerZones).toEqual([]);
   });
 
-  it("thrustDash: el jugador avanza 3 m en su dirección al impacto (la línea sale del origen) y se detiene en un muro", () => {
-    const env = setup([{ id: "thrust", rank: 1 }]);
-    withLegendary(env, "thrustDash");
-    // Hacia +z desde (28, 28).
-    feed(env, { abilities: 1 });
-    let dash: { x: number; z: number } | undefined;
-    for (let i = 0; i < 30 && !dash; i++) dash = feed(env).a.dash;
-    expect(dash!.x).toBeCloseTo(28, 9);
-    expect(dash!.z).toBeCloseTo(31, 9);
-
-    // Hacia +x desde (38.5, 28): el muro está en x = 40 (borde de la sala) y el jugador mide PLAYER_RADIUS.
-    const env2 = setup([{ id: "thrust", rank: 1 }]);
-    withLegendary(env2, "thrustDash");
-    const k = kin({ x: 38.5, z: 28 });
-    feed(env2, { abilities: 1, facing: Math.PI / 2 }, k);
-    let dash2: { x: number; z: number } | undefined;
-    for (let i = 0; i < 30 && !dash2; i++) dash2 = feed(env2, { facing: Math.PI / 2 }, k).a.dash;
-    expect(dash2!.x).toBeCloseTo(40 - PLAYER_RADIUS, 6);
-    expect(dash2!.z).toBeCloseTo(28, 9);
-  });
-
-  it("thrust sin thrustDash no impulsa", () => {
-    const env = setup([{ id: "thrust", rank: 1 }]);
-    feed(env, { abilities: 1 });
-    for (let i = 0; i < 30; i++) expect(feed(env).a.dash).toBeUndefined();
-  });
-
   it("legendaria sin la habilidad correspondiente no hace nada", () => {
-    const env = setup([{ id: "kick", rank: 1 }]);
-    withLegendary(env, "slamCracks", "thrustDash", "whirlCharges", "warcryLong");
+    const env = setup([{ id: "hook", rank: 1 }]);
+    withLegendary(env, "slamCracks", "thrustScar", "whirlCharges", "warcryLong");
     const [e] = spawn(env.sys, [{ x: 28, z: 29.5 }]);
     feed(env, { abilities: 1 });
     untilHits(env, 1);
@@ -647,16 +455,13 @@ describe("efectos legendarios y reliquias", () => {
     expect(env.c.hp).toBeCloseTo(50 + dealt * 0.05, 9);
   });
 
-  it("Reloj de arena: lanzar una habilidad con 3 de vida deja 1; con la vida llena resta 4; el Bloqueo no cuesta", () => {
-    const env = setup([{ id: "kick", rank: 1 }, { id: "block", rank: 1 }]);
+  it("Reloj de arena: lanzar una habilidad con 3 de vida deja 1; con la vida llena resta 4", () => {
+    const env = setup([{ id: "hook", rank: 1 }]);
     env.c.fx = { ...env.c.fx, abilityHpCost: 4 };
-    feed(env, { abilities: 2 });
-    expect(env.c.hp).toBe(env.c.maxHp);
-    feed(env, { abilities: 0 });
     env.c.hp = 3;
-    expect(feed(env, { abilities: 1 }).a.started).toBe("kick");
+    expect(feed(env, { abilities: 1 }).a.started).toBe("hook");
     expect(env.c.hp).toBe(1);
-    const env2 = setup([{ id: "kick", rank: 1 }]);
+    const env2 = setup([{ id: "hook", rank: 1 }]);
     env2.c.fx = { ...env2.c.fx, abilityHpCost: 4 };
     feed(env2, { abilities: 1 });
     expect(env2.c.hp).toBe(env2.c.maxHp - 4);
@@ -759,12 +564,12 @@ describe("Gancho de cadena", () => {
   });
 
   it("no alcanza más allá de su alcance", () => {
-    const env = setup([{ id: "hook", rank: 3 }]);
-    const [e] = spawn(env.sys, [{ x: 28, z: 28 + HOOK_RANGE + 0.5 }]);
+    const env = setup([{ id: "hook", rank: 1 }]);
+    const [e] = spawn(env.sys, [{ x: 28, z: 28 + 12.5 }]);
     feed(env, { abilities: 1 });
     for (let i = 0; i < inputsFor(ABILITIES.hook.animS); i++) feed(env);
     expect(e!.stunned).toBe(0);
-    expect(e!.z).toBe(28 + HOOK_RANGE + 0.5);
+    expect(e!.z).toBe(28 + 12.5);
   });
 });
 
@@ -788,18 +593,3 @@ describe("Estandarte", () => {
   });
 });
 
-describe("Frenesí", () => {
-  it("sube la velocidad de ataque y cura parte del daño hecho mientras dura", () => {
-    const env = setup([{ id: "frenzy", rank: 2 }]);
-    expect(attackSpeedOf(env.c)).toBe(1);
-    feed(env, { abilities: 1 });
-    expect(attackSpeedOf(env.c)).toBeCloseTo(1.4);
-    env.c.hp = 10;
-    env.cs.vampireHeal(env.c, 100);
-    expect(env.c.hp).toBeCloseTo(18);
-    tickAbilities(env, inputsFor(FRENZY_DURATION_S));
-    expect(attackSpeedOf(env.c)).toBe(1);
-    env.cs.vampireHeal(env.c, 100);
-    expect(env.c.hp).toBeCloseTo(18);
-  });
-});

@@ -2,7 +2,6 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import type { Scene } from "@babylonjs/core/scene";
 import {
   ABILITIES,
-  blockMoveMult,
   deadInput,
   generateDungeon,
   INTERP_DELAY_MS,
@@ -11,12 +10,25 @@ import {
   sanitizeInput,
   startSeals,
   STARTING_WEAPON,
+  SPELL_AIM_MAX_M,
+  isRanged,
+  isWalkableTile,
+  MAGE_LEGENDARY,
+  MOVESETS,
+  strikeOf,
+  TILE_SIZE,
+  WEAPONS,
+  type Nature,
+  spellAimDist,
   LEAP_STEPS,
   leapLanding,
   leapSpeed,
   SLAM_IMPACT_S,
   SLAM_LEAP_MAX_M,
+  SIM_DT,
+  THRUST_DASH_S,
   type AbilityId,
+  type ClassId,
   type DevCommand,
   type GearItem,
   type GearSlot,
@@ -39,7 +51,7 @@ import { Predictor, type LeapMove } from "./net/Predictor";
 import { SnapshotBuffer } from "./net/SnapshotBuffer";
 import { createTickClock } from "./net/tickClock";
 import { AbilityFx, SLAM_SHAKE } from "./render/abilityFx";
-import { FORWARD_CLIP_CANDIDATES, forwardClipOverride, RecentHits } from "./render/animState";
+import { RecentHits } from "./render/animState";
 import { AnimLibrary } from "./render/animLibrary";
 import { loadAssets, type Assets } from "./render/assets";
 import { ChainFx } from "./render/chainFx";
@@ -47,7 +59,7 @@ import { ChestViews } from "./render/chestViews";
 import { createScene } from "./render/createScene";
 import { damageTiming } from "./render/damageTiming";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
-import { EnemyViews } from "./render/enemyViews";
+import { ENEMY_BUFF_COLOR, EnemyViews } from "./render/enemyViews";
 import { FloorWeaponViews } from "./render/floorWeaponViews";
 import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
@@ -61,6 +73,7 @@ import { ProjectileViews } from "./render/projectileViews";
 import { SealViews } from "./render/sealViews";
 import { HitScale } from "./render/flinch";
 import { BannerViews } from "./render/bannerViews";
+import { SpellZoneViews } from "./render/spellZoneViews";
 import { IsoCamera } from "./render/IsoCamera";
 import { PLAYER_LOOK } from "./render/looks";
 import { AbilityBar, abilityBarModel } from "./ui/abilityBar";
@@ -91,9 +104,9 @@ const STICK_LEAP_FRAC = 0.6;
 /** El chispazo del golpe sale a esta fracción del alto del enemigo. */
 const HIT_SPARK_HEIGHT = 0.6;
 
-let lastJoin: { code: string; name: string } | undefined;
+let lastJoin: { code: string; name: string; cls: ClassId } | undefined;
 const lobby = new Lobby(
-  { onCreate: (name) => void join({ name }), onJoin: (name, code) => void join({ name, code }) },
+  { onCreate: (name, cls) => void join({ name, cls }), onJoin: (name, code, cls) => void join({ name, code, cls }) },
   () => void (lastJoin && join(lastJoin)),
 );
 lobby.showLobby();
@@ -106,7 +119,7 @@ loading.style.textAlign = "center";
 loading.hidden = true;
 document.body.append(loading);
 
-async function join(opts: { name: string; code?: string }): Promise<void> {
+async function join(opts: { name: string; code?: string; cls: ClassId }): Promise<void> {
   // Mismo criterio que el servidor, sin tocarlo: así no queda viva una sala vacía por un nombre inválido.
   if (!normalizeName(opts.name)) {
     lobby.showLobby(joinErrorMessage({ code: JOIN_ERROR_STATUS["invalid-name"] }));
@@ -120,7 +133,7 @@ async function join(opts: { name: string; code?: string }): Promise<void> {
     return;
   }
   // Reconectar es volver a entrar con el mismo código, nombre y token.
-  lastJoin = { code: conn.roomCode, name: opts.name };
+  lastJoin = { code: conn.roomCode, name: opts.name, cls: opts.cls };
   lobby.showGame(conn.roomCode);
   // Se escucha el corte antes de cargar: si llega durante la carga, la sesión no arranca.
   let stop: (() => void) | undefined;
@@ -171,10 +184,12 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const projectiles = new ProjectileViews(scene);
   const hazards = new HazardViews(scene);
   const banners = new BannerViews(scene);
+  const spellZones = new SpellZoneViews(scene);
   const seals = new SealViews(scene, startSeals(dungeon));
   const chests = new ChestViews(scene);
   const chainFx = new ChainFx(scene);
   const playerShots = new PlayerShotViews(scene);
+  playerShots.myKey = conn.myKey;
   const floorWeapons = new FloorWeaponViews(scene, assets);
   const orbs = new OrbViews(scene);
   const abilityFx = new AbilityFx(scene);
@@ -192,8 +207,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   let lastAimDist = 0;
   // Salto del Golpe sísmico propio en curso (se predice paso a paso, como lo mueve el servidor) y cuánto saltó
   // cada uno la última vez (el propio, predicho; los ajenos, por evento), para dibujar el efecto donde cae.
+  // Los hechizos apuntados del mago guardan ahí mismo a cuántos metros caen.
   let leap: (LeapMove & { stepsLeft: number }) | undefined;
   const leapDists = new Map<string, number>();
+  /** Hechizos cuyo efecto de lanzamiento se dibuja en el punto apuntado, no en el mago. */
+  const AIMED_SPELLS: readonly AbilityId[] = ["frost", "mine", "meteors"];
   const onMouseAim = (e: PointerEvent) => {
     if (e.pointerType === "mouse") aimDevice = "mouse";
   };
@@ -229,20 +247,6 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     : undefined;
   // Sala de pruebas: los mismos comandos del panel, desde la consola o un script (`__devCmd({ cmd: "heal" })`).
   if (conn.sandbox) (window as unknown as { __devCmd?: (cmd: DevCommand) => void }).__devCmd = (cmd) => conn.sendDev(cmd);
-  // Sala de pruebas: F4 va cambiando el clip de correr hacia adelante entre los candidatos y dice cuál suena.
-  const clipNote = document.createElement("div");
-  clipNote.style.cssText = "position:fixed;left:50%;bottom:0.6rem;transform:translateX(-50%);z-index:70;padding:0.2rem 0.7rem;font:12px monospace;color:#fff;background:#000a;pointer-events:none";
-  clipNote.hidden = true;
-  const onClipKey = (e: KeyboardEvent) => {
-    if (e.code !== "F4" || !conn.sandbox) return;
-    e.preventDefault();
-    const i = forwardClipOverride.clip ? FORWARD_CLIP_CANDIDATES.indexOf(forwardClipOverride.clip) + 1 : 0;
-    forwardClipOverride.clip = FORWARD_CLIP_CANDIDATES[i];
-    clipNote.textContent = `F4 · avanzar: ${forwardClipOverride.clip ?? "el de siempre"}`;
-    clipNote.hidden = false;
-  };
-  window.addEventListener("keydown", onClipKey);
-  document.body.append(clipNote);
   let pause = { paused: false, pauseLeft: 0 };
   let group: { name: string; choosing: boolean }[] = [];
   let panelShown = false;
@@ -256,8 +260,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const DASH_WINDOW_MS = 600;
   let myGear: Partial<Record<GearSlot, GearItem>> = {}; // lo puesto y las habilidades propias, para el aviso de E
   let myAbilityIds: AbilityId[] = [];
-  let myLegendaries: LegendaryId[] = []; // efectos legendarios propios (la predicción del Bloqueo depende de blockFree)
-  let lastThrustMs = -Infinity; // reloj de juego en que arrancó el último Tajo frontal propio
+  let myLegendaries: LegendaryId[] = []; // efectos legendarios propios (cargas de habilidades, proyectiles del bastón)
+  let lastDashMs = -Infinity; // reloj de juego en que arrancó el último retroceso del Remolino (`gustDash`) propio
   let seq = 0;
   let lastFrame = performance.now();
   let frameNow = clock.now(lastFrame); // reloj de juego del cuadro en curso
@@ -270,13 +274,59 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   views.onAbilityStart = (key, id, pose, elapsedS) => {
     const rank = lastPlayers.get(key)?.abilities.find((a) => a.id === id)?.rank ?? 1;
     // El Golpe sísmico se dibuja donde va a caer el salto, no donde arranca.
-    const at = id === "slam" ? { ...pose, ...leapLanding(dungeon, pose.x, pose.z, pose.facing, leapDists.get(key) ?? 0) } : pose;
+    const aimed = leapDists.get(key) ?? 0;
+    const at =
+      id === "slam" ? { ...pose, ...leapLanding(dungeon, pose.x, pose.z, pose.facing, aimed) }
+      : AIMED_SPELLS.includes(id) ? { ...pose, x: pose.x + Math.sin(pose.facing) * aimed, z: pose.z + Math.cos(pose.facing) * aimed }
+      : pose;
     abilityFx.play(id, at, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
     if (key === conn.myKey) sfx.cast();
   };
-  views.onSwingStart = (key, strike, step, pose, elapsedS) => {
-    abilityFx.slash(pose, strike, step, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
-    sfx.swing(key === conn.myKey ? 1 : 0.4);
+  // El golpe pega hacia donde se apunta en su impacto, no hacia donde empezó: su efecto (el tajo, el destello del
+  // bastón) espera a ese instante y se dibuja con la pose que el jugador tenga entonces.
+  type PendingSwing = { key: string; strike: Parameters<NonNullable<typeof views.onSwingStart>>[1]; step: number; startMs: number; ranged: boolean };
+  const pendingSwings: PendingSwing[] = [];
+  const drawnPoses = new Map<string, { x: number; z: number; facing: number }>();
+  /** Cuánto antes del impacto (ms) se suelta el efecto: el tajo se adelanta un poco al golpe. */
+  const SWING_FX_LEAD_MS = 60;
+  views.onSwingStart = (key, strike, step, _pose, elapsedS) => {
+    const p = lastPlayers.get(key);
+    const ranged = p !== undefined && isRanged(p.weaponId);
+    pendingSwings.push({ key, strike, step, startMs: frameNow - elapsedS * 1000, ranged });
+    if (ranged) {
+      if (key === conn.myKey) sfx.cast();
+    } else sfx.swing(key === conn.myKey ? 1 : 0.4);
+  };
+  /**
+   * Los proyectiles del bastón propio salen ya en pantalla, desde donde se ve al mago y hacia donde apunta (como en
+   * el servidor, que usa la puntería del input del impacto); con `tripleShot`, el último golpe sale en abanico.
+   */
+  const predictStaffBolts = (pose: { x: number; z: number }, step: number, nature: Nature) => {
+    const weaponId = mine?.weaponId ?? STARTING_WEAPON;
+    const moveset = MOVESETS[WEAPONS[weaponId].movesetId];
+    if (!moveset.ranged) return;
+    // Sin el Alcance: al mago no le sale ni en cartas ni en equipo.
+    const range = strikeOf(weaponId, step).range;
+    const fan = step === moveset.combo.length && myLegendaries.includes("tripleShot");
+    const spread = MAGE_LEGENDARY.tripleShotSpreadRad;
+    for (const off of fan ? [-spread, 0, spread] : [0]) {
+      playerShots.predictBolt(pose.x, pose.z, lastAim + off, { ...moveset.ranged, range, nature }, frameNow);
+    }
+  };
+  const flushSwings = (nowMs: number) => {
+    for (let i = pendingSwings.length - 1; i >= 0; i--) {
+      const s = pendingSwings[i]!;
+      if (nowMs < s.startMs + s.strike.impactAt * s.strike.duration * 1000 - SWING_FX_LEAD_MS) continue;
+      pendingSwings.splice(i, 1);
+      const pose = drawnPoses.get(s.key);
+      if (!pose) continue;
+      const nature = lastPlayers.get(s.key)?.weaponNature ?? "none";
+      // El bastón no da un tajo: suelta un proyectil con un destello en la punta.
+      if (s.ranged) {
+        abilityFx.staffCast(pose, s.strike, s.startMs, nature);
+        if (s.key === conn.myKey) predictStaffBolts(pose, s.step, nature);
+      } else abilityFx.slash(pose, s.strike, s.step, s.startMs, nature);
+    }
   };
   abilityFx.onSlamImpact = (x, z) => {
     const me = predictor?.current;
@@ -312,9 +362,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       } else {
         const before = predictor.current;
         const after = predictor.reconcile(p, p.lastSeq, p.dead);
-        // Tajo frontal con `thrustDash`: el servidor mueve ~3 m y el cliente no lo predice; si fue una habilidad propia
+        // Remolino con `gustDash`: el servidor mueve 4 m y el cliente no lo predice; si fue un lanzamiento propio
         // reciente, esa corrección se desliza (~0,15 s) en vez de teletransportar.
-        const dashing = clock.now(performance.now()) - lastThrustMs < ABILITIES.thrust.animS * 1000 + DASH_WINDOW_MS;
+        const dashing = clock.now(performance.now()) - lastDashMs < ABILITIES.gust.animS * 1000 + DASH_WINDOW_MS;
         smoother.correct(before, after, dashing);
         prev = { ...prev, x: prev.x + after.x - before.x, z: prev.z + after.z - before.z };
       }
@@ -343,6 +393,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     projectiles.push(world, at);
     hazards.push(world, at);
     banners.push(world);
+    spellZones.push(world, at);
     chests.push(world, at);
     chestList = [...world.chests.values()];
     playerShots.push(world, at);
@@ -361,8 +412,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       // La propia se predice al apretar la tecla; el evento solo cuenta si no se predijo.
       if (event.key === conn.myKey) ability.fromServer(event.id, now);
       else {
-        if (event.id === "slam") leapDists.set(event.key, event.aimDist ?? 0);
-        views.ability(event.key, event.id, now);
+        if (event.aimDist !== undefined || event.id === "slam") leapDists.set(event.key, event.aimDist ?? 0);
+        views.ability(event.key, event.id, now, event.rank ?? 1);
       }
     } else if (event.type === "damage") {
       const t = damageTiming(event, conn.myKey, now);
@@ -391,6 +442,28 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       }
     } else if (event.type === "chain") {
       chainFx.play(event.points, now);
+    } else if (event.type === "beam") {
+      // El haz propio sale de donde se ve al mago (predicho), no de donde lo tenía el servidor.
+      const me = event.key === conn.myKey ? predictor?.current : undefined;
+      const points = me && event.points.length > 1 ? ([[me.x, me.z], ...event.points.slice(1)] as [number, number][]) : event.points;
+      chainFx.beam(points, now, "arcane", event.nature ?? "none");
+    } else if (event.type === "blast") {
+      abilityFx.blast(event.kind, event.x, event.z, event.radius, now, event.nature ?? "none");
+      if (event.kind === "meteorBig") {
+        camera.shake(SLAM_SHAKE.durationS * 1.6, SLAM_SHAKE.intensity * 1.5);
+        sfx.boom();
+      }
+    } else if (event.type === "enemyBuff") {
+      // Lo de los enemigos se dibuja INTERP_DELAY_MS tarde, como ellos.
+      abilityFx.enemyBuff(event.x, event.z, event.radius, event.castS, ENEMY_BUFF_COLOR, now + INTERP_DELAY_MS);
+    } else if (event.type === "enemyHeal") {
+      chainFx.beam([event.from, event.to], now, "heal");
+      abilityFx.healed(event.to[0], event.to[1], now + INTERP_DELAY_MS);
+    } else if (event.type === "heal") {
+      for (const key of event.keys) {
+        const p = key === conn.myKey ? predictor?.current : lastPlayers.get(key);
+        if (p) abilityFx.healed(p.x, p.z, now);
+      }
     } else if (event.type === "levelUp") {
       hud.levelUp(event.level);
       sfx.levelUp();
@@ -421,7 +494,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       lastAim = chooseAim({ device: aimDevice, mouseAim: mouse?.facing, aim: stickAim, move: stickMove, last: lastAim });
       // A cuántos metros se apunta (el salto del Golpe sísmico): el cursor; con sticks, cuánto se empuja el derecho.
       if (aimDevice === "mouse") lastAimDist = mouse?.dist ?? lastAimDist;
-      else lastAimDist = SLAM_LEAP_MAX_M * (stickAim ? Math.hypot(stickAim.x, stickAim.y) : STICK_LEAP_FRAC);
+      else lastAimDist = (mine?.cls === "mage" ? SPELL_AIM_MAX_M : SLAM_LEAP_MAX_M) * (stickAim ? Math.hypot(stickAim.x, stickAim.y) : STICK_LEAP_FRAC);
     }
     if (predictor && prev) {
       // En la pausa no se predice ni se envía nada (seq queda igual; el servidor descarta lo que llegue y
@@ -441,10 +514,10 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const leaping = leap !== undefined && leap.stepsLeft > 0;
         const sampled = leaping ? { ...clean, moveX: 0, moveZ: 0, jump: false } : clean;
         prev = predictor.current;
-        // Como el servidor: se mueve con el Bloqueo del input anterior y luego se actualiza.
+        // Como el servidor: con lo que frenan sus estados y sus habilidades en curso (sincronizado en `statusSpeedMult`).
         const moveSpeedMult = mine?.moveSpeedMult ?? 1;
         const statusSpeedMult = mine?.statusSpeedMult ?? 1;
-        predictor.setMoveMods({ speedMult: moveSpeedMult * statusSpeedMult * (ability.isBlocking ? blockMoveMult(myLegendaries) : 1) });
+        predictor.setMoveMods({ speedMult: moveSpeedMult * statusSpeedMult });
         predictor.applyLocal(sampled, leaping ? leap : undefined);
         if (leap && leaping) leap.stepsLeft--;
         // El golpe y la habilidad propios arrancan su clip ya (como el servidor: tras moverse, el combo
@@ -454,11 +527,18 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         combo.advance(weaponId);
         ability.setCooldownMult(mine?.cooldownMult ?? 1);
         const cast = ability.tick(sampled.abilities, { dead, stunned, swingTimer: combo.state().swingTimer }, now);
-        if (cast === "thrust") lastThrustMs = now;
+        if (cast === "gust") lastDashMs = now;
+        if (cast && ABILITIES[cast].cls === "mage") leapDists.set(conn.myKey, spellAimDist(sampled.aimDist));
         if (cast === "slam") {
           const speed = leapSpeed(sampled.aimDist);
           leap = { facing: sampled.facing, speed, stepsLeft: speed > 0 ? LEAP_STEPS : 0 };
           leapDists.set(conn.myKey, speed * SLAM_IMPACT_S);
+        }
+        // La embestida del Tajo frontal se predice igual que el salto: los mismos pasos que da el servidor.
+        if (cast === "thrust") {
+          const rank = mine?.abilities.find((a) => a.id === "thrust")?.rank ?? 1;
+          const range = ABILITIES.thrust.ranks[rank - 1]!.range!;
+          leap = { facing: sampled.facing, speed: range / THRUST_DASH_S, stepsLeft: Math.ceil(THRUST_DASH_S / SIM_DT - 1e-6) };
         }
         combo.attack(sampled.attack, { dead: dead || stunned, locked: ability.locked() }, now, weaponId, mine?.attackSpeedMult ?? 1);
         conn.sendInput(sampled);
@@ -479,13 +559,13 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         weaponId: mine?.weaponId ?? STARTING_WEAPON,
         weaponTier: mine?.weaponTier ?? 1,
         weaponNature: mine?.weaponNature ?? "none",
-        blocking: ability.isBlocking,
         attackSpeedMult: mine?.attackSpeedMult ?? 1,
         ability: heroAbility,
         gear: mine?.gear,
         relic: mine?.relic,
       };
       views.render(conn.myKey, pose, state, hits.recently(`player:${conn.myKey}`, now), now, dt);
+      drawnPoses.set(conn.myKey, pose);
       // La cámara sigue solo en XZ: con saltos de ~1 m queda más estable.
       camera.follow(x, z, dt);
       torches.update(x, z, now);
@@ -500,21 +580,27 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       const s = buffer.sample(renderAt);
       if (!s) continue;
       views.render(key, s, s, hits.recently(`player:${key}`, renderAt), renderAt, dt);
+      drawnPoses.set(key, s);
       allies.push(s);
     }
+    // Con todos ya dibujados en este cuadro: los efectos de los golpes cuyo impacto llegó (sus inicios están en el reloj de juego).
+    flushSwings(now);
+    for (const key of drawnPoses.keys()) if (key !== conn.myKey && !remotes.has(key)) drawnPoses.delete(key);
     compass.render(camera.yaw);
     if (predictor) minimap.render(predictor.current, camera.yaw, allies, chestList);
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
     projectiles.render(renderAt);
     hazards.render(renderAt);
     banners.render(now);
+    spellZones.render(now);
     seals.render(now);
     chests.render(renderAt);
     chainFx.render(renderAt);
     playerShots.render(renderAt);
+    playerShots.renderLocal(now, (x, z) => !isWalkableTile(dungeon, Math.floor(x / TILE_SIZE), Math.floor(z / TILE_SIZE)), enemies.liveBodies());
     // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
     abilityBar.render(
-      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), ability.isBlocking, mine?.cooldownMult ?? 1, (id) => ability.chargesOf(id, now)),
+      abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), mine?.cooldownMult ?? 1, (id) => ability.chargesOf(id, now)),
       mine?.passiveRank ?? 0,
     );
     orbs.render(dt, now);
@@ -549,14 +635,12 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     window.removeEventListener("pointerdown", onGesture);
     window.removeEventListener("keydown", onGesture);
     sfx.dispose();
-    window.removeEventListener("keydown", onClipKey);
-    clipNote.remove();
-    forwardClipOverride.clip = undefined;
     views.dispose();
     enemies.dispose();
     projectiles.dispose();
     hazards.dispose();
     banners.dispose();
+    spellZones.dispose();
     seals.dispose();
     chests.dispose();
     chainFx.dispose();

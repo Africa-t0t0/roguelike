@@ -1,6 +1,6 @@
 import { GEAR_SLOTS, xpToNext, type GearItem } from "@roguelike/shared";
 import { abilityCharges, abilityMaxCharges, abilitySlots, type PlayerShot, type PlayerZone } from "../sim/AbilitySystem";
-import { abilityRank, attackSpeedOf, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
+import { abilityRank, attackSpeedOf, channelSpeedMult, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
 import type { Hazard } from "../sim/hazards";
 import type { Orb } from "../sim/OrbSystem";
@@ -41,6 +41,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.vy = k.vy;
   ps.lastSeq = record.lastSeq;
   const c = record.combat;
+  ps.cls = c.cls;
   ps.hp = c.hp;
   ps.maxHp = c.maxHp;
   ps.dead = c.dead;
@@ -55,12 +56,14 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.attackSpeedMult = attackSpeedOf(c);
   ps.cooldownMult = c.mods.cooldownMult;
   ps.passiveRank = abilityRank(c, "cleave");
-  ps.blocking = c.blocking;
-  ps.buffDamage = c.buffDamage;
-  ps.statusSpeedMult = statusSpeedMult(c);
+  // La carga de la Nova larga y el giro del Torbellino largo frenan como un estado: la predicción del cliente lo aplica igual.
+  ps.statusSpeedMult = statusSpeedMult(c) * channelSpeedMult(c);
+  // El Grito y el Estandarte suman: el HUD brilla con cualquiera de los dos.
+  ps.buffDamage = c.buffDamage + (c.bannerLeft > 0 ? c.bannerDamage : 0);
   ps.burnLeft = c.burnLeft;
   ps.slowLeft = c.slowLeft;
   ps.stunLeft = c.stunLeft;
+  ps.shield = c.shieldLeft > 0 ? c.shield : 0;
   ps.relic = record.relic ?? "";
   for (const slot of GEAR_SLOTS) {
     const item = record.gear[slot];
@@ -132,6 +135,9 @@ export function syncWorld(
     es.burning = e.burn !== null;
     es.slowed = e.slow !== null;
     es.frozen = e.frozen > 0;
+    es.marked = e.marked > 0;
+    es.bladeMarked = e.bladeMark > 0;
+    es.buffed = e.buffLeft > 0;
     es.spellTier = e.spellTier;
   }
   for (const id of [...state.enemies.keys()]) if (!liveEnemies.has(id)) state.enemies.delete(id);
@@ -177,6 +183,7 @@ export function syncWorld(
       ws.radius = w.radius;
       ws.nature = w.nature;
       ws.kind = w.kind;
+      ws.owner = w.ownerKey;
       state.playerShots.set(w.id, ws);
     }
     ws.x = w.x;
@@ -217,6 +224,7 @@ export function syncWorld(
       zs.radius = z.radius;
       zs.total = z.total;
       zs.kind = z.kind;
+      zs.nature = z.nature ?? "none";
       state.playerZones.set(z.id, zs);
     }
     zs.left = z.left;

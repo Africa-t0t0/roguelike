@@ -1,4 +1,4 @@
-import { ABILITIES, SIM_DT, type AbilityId, type LegendaryId } from "@roguelike/shared";
+import { ABILITIES, ABILITY_BUFFER_S, MAGE_LEGENDARY, SIM_DT, abilityAnimS, abilityCooldownS, type AbilityId, type LegendaryId } from "@roguelike/shared";
 
 /** Lo mismo que el `countDown` del servidor: por debajo de esto cuenta como 0. */
 const EPS = 1e-9;
@@ -19,6 +19,8 @@ export interface AbilitySlotView {
   /** segundos que le quedan al ciclo de recarga en curso; 0 solo con las cargas al máximo */
   cooldown: number;
   charges?: number;
+  /** rango (1..3): algunos hechizos cambian de enfriamiento y de duración con él; sin dato, 1 */
+  rank?: number;
 }
 
 /** Estado de una habilidad con cargas: cargas disponibles y segundos que le quedan al ciclo de recarga (0 con el máximo). */
@@ -54,7 +56,7 @@ export function isAbilityId(id: unknown): id is AbilityId {
 /**
  * Copia local de las habilidades del propio jugador (el mismo orden y las mismas reglas que
  * `AbilitySystem.onInput` del servidor, por cada input) para que la animación arranque al apretar la
- * tecla y el Bloqueo frene y deje de atacar sin esperar al servidor. Solo es visual: el daño, los
+ * tecla sin esperar al servidor. Solo es visual: el daño, los
  * enfriamientos de verdad y el Grito los decide el servidor.
  */
 export class LocalAbility {
@@ -70,11 +72,13 @@ export class LocalAbility {
   private localCd = new Map<AbilityId, number>();
   private lastCastMs = new Map<AbilityId, number>();
   private heldMask = 0;
+  /** teclas apretadas a destiempo que siguen en espera y segundos que les quedan (como en el servidor) */
+  private queuedMask = 0;
+  private queuedLeft = 0;
   /** animación en curso según los inputs (lo que bloquea otras habilidades y el ataque) */
   private anim: { id: AbilityId; left: number } | null = null;
   /** animación a dibujar (`startMs` en el reloj de `tick`) */
   private shown: { id: AbilityId; startMs: number } | null = null;
-  private blockingNow = false;
   /** multiplicador de enfriamiento (Celeridad), el sincronizado del servidor */
   private cooldownMult = 1;
 
@@ -87,13 +91,20 @@ export class LocalAbility {
     this.legendaries = l;
   }
 
-  /** Cargas máximas de la habilidad: 2 el Torbellino con `whirlCharges`, 1 las demás (lo mismo que el servidor). */
+  /** Cargas máximas de la habilidad (lo mismo que `abilityMaxCharges` del servidor). */
   maxCharges(id: AbilityId): number {
+    if (id === "thrust") return Math.max(1, ABILITIES.thrust.ranks[this.rankOf(id) - 1]?.count ?? 1);
+    if (id === "throw" && this.legendaries.includes("throwCharges")) return 2;
+    if (id === "mine" && this.legendaries.includes("mineCharges")) return MAGE_LEGENDARY.mineCharges;
     return id === "whirlwind" && this.legendaries.includes("whirlCharges") ? WHIRL_CHARGES : 1;
   }
 
+  private rankOf(id: AbilityId): number {
+    return this.slots.find((s) => s.id === id)?.rank ?? 1;
+  }
+
   private cycle(id: AbilityId): number {
-    return ABILITIES[id].cooldownS * this.cooldownMult;
+    return abilityCooldownS(id, this.rankOf(id)) * this.cooldownMult;
   }
 
   /** Panel de pruebas: el servidor puso los enfriamientos a cero; aquí se olvidan los predichos. */
@@ -115,7 +126,7 @@ export class LocalAbility {
   /**
    * Un input: después de avanzar el combo y antes del ataque, como el servidor. `mask`: teclas 1-4
    * mantenidas; `swingTimer`: el del combo ya avanzado. `stunned`: aturdido, no puede empezar habilidades
-   * nuevas ni bloquear, pero la animación en curso sigue (como en el servidor, donde el aturdimiento no la corta).
+   * nuevas, pero la animación en curso sigue (como en el servidor, donde el aturdimiento no la corta).
    * Devuelve la habilidad que arrancó, si alguna.
    */
   tick(mask: number, ctx: { dead: boolean; swingTimer: number; stunned?: boolean }, nowMs: number): AbilityId | undefined {
@@ -126,8 +137,14 @@ export class LocalAbility {
     if (ctx.dead) {
       this.anim = null;
       this.shown = null;
-      this.blockingNow = false;
+      this.queuedMask = 0;
       return undefined;
+    }
+    this.queuedLeft = countDown(this.queuedLeft, SIM_DT);
+    if (this.queuedLeft === 0) this.queuedMask = 0;
+    if (pressed !== 0) {
+      this.queuedMask = pressed;
+      this.queuedLeft = ABILITY_BUFFER_S;
     }
     if (this.anim) {
       this.anim.left = countDown(this.anim.left, SIM_DT);
@@ -136,36 +153,29 @@ export class LocalAbility {
 
     let started: AbilityId | undefined;
     for (let i = 0; i < this.slots.length; i++) {
-      if ((pressed & (1 << i)) === 0) continue;
+      if ((this.queuedMask & (1 << i)) === 0) continue;
       const { id } = this.slots[i]!;
       const def = ABILITIES[id];
-      if (def.kind !== "active" || ctx.stunned || !this.ready(id, nowMs) || ctx.swingTimer > 0 || this.anim) continue;
+      if (def.kind !== "active" || ctx.stunned || !this.ready(id, nowMs)) {
+        this.queuedMask &= ~(1 << i);
+        continue;
+      }
+      if (ctx.swingTimer > 0 || this.anim) continue;
+      this.queuedMask = 0;
       this.spend(id, nowMs);
       this.lastCastMs.set(id, nowMs);
-      this.anim = { id, left: def.animS };
+      this.anim = { id, left: abilityAnimS(id, this.rankOf(id)) };
       this.shown = { id, startMs: nowMs };
       started = id;
       break;
     }
 
-    this.blockingNow = this.blocking(mask) && !ctx.stunned && ctx.swingTimer === 0 && !this.anim;
     return started;
   }
 
-  /** Si con estas teclas mantenidas se pide el Bloqueo (tiene la casilla y mantiene su tecla). */
-  blocking(held: number): boolean {
-    const slot = this.slots.findIndex((s) => s.id === "block");
-    return slot >= 0 && (held & (1 << slot)) !== 0;
-  }
-
-  /** Bloqueando según el último input (lo que frena el movimiento del siguiente, como en el servidor). */
-  get isBlocking(): boolean {
-    return this.blockingNow;
-  }
-
-  /** No se puede atacar: una habilidad en curso o el Bloqueo. */
+  /** No se puede atacar: hay una habilidad en curso. */
   locked(): boolean {
-    return this.anim !== null || this.blockingNow;
+    return this.anim !== null;
   }
 
   /**
@@ -179,15 +189,16 @@ export class LocalAbility {
   }
 
   /** Qué animación de habilidad dibujar para el propio jugador y cuánto lleva (s), o null. */
-  heroAbility(nowMs: number): { id: AbilityId; elapsed: number } | null {
+  heroAbility(nowMs: number): { id: AbilityId; elapsed: number; rank: number } | null {
     const s = this.shown;
     if (!s) return null;
     const elapsed = (nowMs - s.startMs) / 1000;
-    if (elapsed >= ABILITIES[s.id].animS) {
+    const rank = this.rankOf(s.id);
+    if (elapsed >= abilityAnimS(s.id, rank)) {
       this.shown = null;
       return null;
     }
-    return { id: s.id, elapsed: Math.max(0, elapsed) };
+    return { id: s.id, elapsed: Math.max(0, elapsed), rank };
   }
 
   /**

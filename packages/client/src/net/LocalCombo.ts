@@ -52,7 +52,7 @@ export class LocalCombo {
 
   /**
    * Segunda mitad del paso: intenta arrancar un golpe. `locked`: algo impide atacar (una habilidad en curso
-   * o el Bloqueo). `attackSpeedMult`: el sincronizado (Furia), el mismo que usa el servidor.
+   * en curso). `attackSpeedMult`: el sincronizado (Furia), el mismo que usa el servidor.
    */
   attack(
     attack: boolean,

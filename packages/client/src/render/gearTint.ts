@@ -48,9 +48,19 @@ export function tintStrength(tier: WeaponTier): number {
   }
 }
 
-/** Color (r, g, b) y fuerza del tinte de una pieza; null si no tiñe (tier 1). */
-export function tintOf(tier: WeaponTier): [number, number, number, number] | null {
-  const glow = TIERS[tier].glow;
+/**
+ * Tela del mago por rareza: tonos de tinte de ropa (índigo, ciruela, carmesí con oro) en vez del brillo de metal
+ * del caballero. La rareza se sigue leyendo en el tooltip y en el borde de los iconos.
+ */
+export const CLOTH_COLORS: Record<2 | 3 | 4, [number, number, number]> = {
+  2: [0.3, 0.42, 0.95],
+  3: [0.62, 0.28, 0.85],
+  4: [0.85, 0.22, 0.25],
+};
+
+/** Color (r, g, b) y fuerza del tinte de una pieza; null si no tiñe (tier 1). Con `cloth`, la paleta de tela. */
+export function tintOf(tier: WeaponTier, cloth = false): [number, number, number, number] | null {
+  const glow = cloth && tier !== 1 ? CLOTH_COLORS[tier] : TIERS[tier].glow;
   const s = tintStrength(tier);
   return glow && s > 0 ? [glow[0], glow[1], glow[2], s] : null;
 }
@@ -120,10 +130,12 @@ uniform vec4 gearTint1;
 uniform vec4 gearTint2;
 uniform vec4 gearTint3;
 uniform vec4 gearTint4;
+uniform vec4 gearStyle;
 #endif`;
 /**
  * Tras el procesado de imagen (como el overlay de los élites, que se dibuja encima): mezcla hacia el color de la pieza
- * (hasta 0,4 con fuerza 1) y suma un borde de Fresnel (más brillante de canto: el contorno).
+ * (hasta 0,4 con fuerza 1) y suma un borde de Fresnel (más brillante de canto: el contorno). Con tela
+ * (`gearStyle.x` = 1) la mezcla llega más lejos (la prenda toma el color) y el borde casi no brilla: mate, no metal.
  */
 const fragmentBeforeFragColor = (out: string) => `#ifdef GEARTINT
 {
@@ -134,7 +146,8 @@ vec3 gc=gearTint0.rgb*gs.x+gearTint1.rgb*gs.y+gearTint2.rgb*gs.z+gearTint3.rgb*g
 float gsum=gs.x+gs.y+gs.z+gs.w+gs4;
 if (gsum>0.001) {
 float rim=pow(1.0-clamp(dot(normalW,viewDirectionW),0.0,1.0),2.5);
-${out}.rgb=mix(${out}.rgb,gc/gsum,clamp(gsum*0.4,0.0,0.4))+gc*(0.08+rim*1.6);
+float gmix=mix(0.4,0.6,gearStyle.x);
+${out}.rgb=mix(${out}.rgb,gc/gsum,clamp(gsum*gmix,0.0,gmix))+gc*(0.08+rim*mix(1.6,0.3,gearStyle.x));
 }
 }
 #endif`;
@@ -147,6 +160,8 @@ ${out}.rgb=mix(${out}.rgb,gc/gsum,clamp(gsum*0.4,0.0,0.4))+gc*(0.08+rim*1.6);
 export class GearTintPlugin extends MaterialPluginBase {
   /** (r, g, b, fuerza) por región, en el orden de `TINT_SLOTS` */
   readonly tints = new Float32Array(TINT_SLOTS.length * 4);
+  /** tela (el mago): mezcla más fuerte y sin brillo de canto */
+  cloth = false;
   private enabled = false;
 
   constructor(material: Material) {
@@ -183,7 +198,7 @@ export class GearTintPlugin extends MaterialPluginBase {
 
   override getUniforms(): { ubo: { name: string; size: number; type: string }[]; fragment: string } {
     return {
-      ubo: [0, 1, 2, 3, 4].map((i) => ({ name: `gearTint${i}`, size: 4, type: "vec4" })),
+      ubo: [...[0, 1, 2, 3, 4].map((i) => ({ name: `gearTint${i}`, size: 4, type: "vec4" })), { name: "gearStyle", size: 4, type: "vec4" }],
       fragment: FRAGMENT_UNIFORMS,
     };
   }
@@ -192,6 +207,7 @@ export class GearTintPlugin extends MaterialPluginBase {
     if (!this.enabled) return;
     const t = this.tints;
     for (let i = 0; i < TINT_SLOTS.length; i++) uniformBuffer.updateFloat4(`gearTint${i}`, t[i * 4]!, t[i * 4 + 1]!, t[i * 4 + 2]!, t[i * 4 + 3]!);
+    uniformBuffer.updateFloat4("gearStyle", this.cloth ? 1 : 0, 0, 0, 0);
   }
 
   override getCustomCode(shaderType: string): { [point: string]: string } | null {
@@ -211,7 +227,8 @@ export class GearTint {
   private readonly entries: { mesh: AbstractMesh; original: Material; clone: Material; plugin: GearTintPlugin }[] = [];
   private key = "";
 
-  constructor(meshes: readonly AbstractMesh[]) {
+  /** `cloth`: el cuerpo viste tela (el mago): paleta y acabado de `CLOTH_COLORS`. */
+  constructor(meshes: readonly AbstractMesh[], private readonly cloth = false) {
     for (const mesh of meshes) {
       const original = mesh.material;
       const skeleton = mesh.skeleton;
@@ -225,6 +242,7 @@ export class GearTint {
       const clone = original.clone(`${original.name}-gear`);
       if (!clone) continue;
       const plugin = new GearTintPlugin(clone);
+      plugin.cloth = cloth;
       mesh.material = clone;
       this.entries.push({ mesh, original, clone, plugin });
     }
@@ -241,7 +259,7 @@ export class GearTint {
       let any = false;
       for (let i = 0; i < TINT_SLOTS.length; i++) {
         const g = gear[TINT_SLOTS[i]!];
-        const tint = g ? tintOf(g.tier) : null;
+        const tint = g ? tintOf(g.tier, this.cloth) : null;
         if (!tint) continue;
         t.set(tint, i * 4);
         any = true;

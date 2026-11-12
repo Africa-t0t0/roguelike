@@ -7,6 +7,12 @@ import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder";
 import { CreatePolyhedron } from "@babylonjs/core/Meshes/Builders/polyhedronBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
+import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+import { ARCANE_COLOR } from "./staffMesh";
+
+/** Color del refuerzo de los enemigos (aro a los pies, aviso del gesto) y capa del curandero. */
+export const ENEMY_BUFF_COLOR = new Color3(1, 0.42, 0.12);
+const HEALER_OVERLAY = { color: new Color3(0.75, 1, 0.35), alpha: 0.35 };
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -86,6 +92,8 @@ function flatMaterial(scene: Scene, name: string, color: Color3, alpha = 1): Sta
 
 interface EnemyView {
   kind: EnemyKind;
+  /** estado con que se dibujó en el último cuadro */
+  drawn?: EnemySnapshot;
   /** el arma no cambia en la vida del enemigo; si cambiara, la vista se rehace */
   weaponId: WeaponId | null;
   buffer: SnapshotBuffer<EnemySnapshot>;
@@ -113,6 +121,10 @@ interface EnemyView {
   flashing?: boolean;
   /** aro del suelo y mallas del cuerpo (se desvanecen al morir) */
   marker: Mesh;
+  /** rombo que gira sobre su cabeza mientras lleva una marca (del Rayo arcano o de las espadas); nace con la primera */
+  mark?: Mesh;
+  /** aro que late a sus pies mientras lo refuerza un hechicero; nace con el primer refuerzo */
+  buffRing?: Mesh;
   bodyMeshes: AbstractMesh[];
   /** instante (reloj interpolado) en que se lo vio muerto por primera vez */
   deadAtMs?: number;
@@ -131,7 +143,7 @@ interface EnemyView {
 export class EnemyViews {
   private readonly views = new Map<string, EnemyView>();
   private readonly flinches = new Flinches();
-  private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star" | "marker", StandardMaterial>;
+  private readonly mats: Record<"barBack" | "barFill" | "ringEdge" | "ringFill" | "star" | "marker" | "mark" | "blade" | "buff", StandardMaterial>;
   /** Materiales de los hechiceros, uno por tipo o tier (nunca por instancia). */
   private readonly casterMats = new Map<string, StandardMaterial>();
   /** Rótulos de élite compartidos por (tipo, naturaleza): material y textura. */
@@ -154,6 +166,9 @@ export class EnemyViews {
       ringFill: flatMaterial(scene, "telegraphFill", new Color3(0.9, 0.1, 0.05), 0.35),
       star: flatMaterial(scene, "stunStar", new Color3(1, 0.86, 0.45)),
       marker: flatMaterial(scene, "enemyMarker", new Color3(0.95, 0.22, 0.16), 0.55),
+      mark: flatMaterial(scene, "enemyMark", ARCANE_COLOR, 0.95),
+      blade: flatMaterial(scene, "enemyBladeMark", new Color3(0.85, 0.92, 1), 0.95),
+      buff: flatMaterial(scene, "enemyBuff", ENEMY_BUFF_COLOR, 0.95),
     };
   }
 
@@ -199,7 +214,10 @@ export class EnemyViews {
    */
   private applyBodyGlow(view: EnemyView, state: BodyState): void {
     view.tint = state;
-    applyBodyGlow(view.character.root, bodyGlow(state, view.elite, view.nature), view.character.unitsPerMeter());
+    const glow = bodyGlow(state, view.elite, view.nature);
+    // El curandero lleva siempre su capa verde dorada (salvo que un estado ponga la suya): así se le reconoce.
+    const shown = view.kind === "healer" && !glow.overlay ? { ...glow, overlay: HEALER_OVERLAY } : glow;
+    applyBodyGlow(view.character.root, shown, view.character.unitsPerMeter());
   }
 
   private sparkTex(): DynamicTexture {
@@ -267,6 +285,16 @@ export class EnemyViews {
   }
 
   /** Alto (m) del enemigo `id`, si existe su vista. */
+  /** Enemigos vivos tal como se dibujan ahora (posición interpolada y radio), para lo que el cliente predice. */
+  liveBodies(): { x: number; z: number; radius: number }[] {
+    const out: { x: number; z: number; radius: number }[] = [];
+    for (const view of this.views.values()) {
+      const e = view.drawn;
+      if (e && e.ai !== "dead") out.push({ x: e.x, z: e.z, radius: ENEMY_DEFS[view.kind].radius * (view.elite ? ELITE.scale : 1) });
+    }
+    return out;
+  }
+
   heightOf(id: string): number | undefined {
     const view = this.views.get(id);
     return view?.height;
@@ -292,6 +320,7 @@ export class EnemyViews {
       }
       const e = view.buffer.sample(renderAtMs);
       if (!e) continue;
+      view.drawn = e;
       const dead = e.ai === "dead";
       if (dead) view.deadAtMs ??= renderAtMs;
       const fade = dead ? Math.min(1, Math.max(0, ((renderAtMs - view.deadAtMs!) / 1000 - DEATH_HOLD_S) / DEATH_FADE_S)) : 0;
@@ -329,6 +358,41 @@ export class EnemyViews {
         this.applyBodyGlow(view, tintState);
       }
       this.setBurning(view, e.burning && e.ai !== "dead");
+      const marked = (e.marked || e.bladeMarked) && e.ai !== "dead";
+      if (marked && !view.mark) {
+        // Dos pirámides unidas por la base: un rombo que flota sobre la cabeza.
+        view.mark = CreateCylinder(`enemyMark-${id}`, { height: 0.42, diameterTop: 0, diameterBottom: 0.3, tessellation: 4 }, this.scene);
+        const lower = CreateCylinder(`enemyMarkLow-${id}`, { height: 0.42, diameterTop: 0.3, diameterBottom: 0, tessellation: 4 }, this.scene);
+        lower.parent = view.mark;
+        lower.position.y = -0.42;
+        for (const m of [view.mark, lower]) {
+          m.material = this.mats.mark;
+          m.isPickable = false;
+        }
+        view.mark.parent = view.character.root;
+        view.mark.position.y = view.height + 1.0;
+      }
+      if (view.mark) {
+        view.mark.setEnabled(marked);
+        // Violeta la del Rayo arcano; acero la de las espadas del caballero.
+        const mat = e.bladeMarked ? this.mats.blade : this.mats.mark;
+        if (marked && view.mark.material !== mat) for (const m of [view.mark, ...view.mark.getChildMeshes()]) m.material = mat;
+        view.mark.rotation.y = (renderAtMs / 1000) * 4;
+      }
+      const buffed = e.buffed && e.ai !== "dead";
+      if (buffed && !view.buffRing) {
+        const size = (ENEMY_DEFS[e.kind].radius * (view.elite ? ELITE.scale : 1) + MARKER_MARGIN) * 2 + 0.3;
+        view.buffRing = CreateTorus(`enemyBuffRing-${id}`, { diameter: size, thickness: 0.09, tessellation: 40 }, this.scene);
+        view.buffRing.material = this.mats.buff;
+        view.buffRing.isPickable = false;
+        view.buffRing.parent = view.character.root;
+        view.buffRing.position.y = RING_Y + 0.02;
+      }
+      if (view.buffRing) {
+        view.buffRing.setEnabled(buffed);
+        const pulse = 1 + 0.1 * Math.sin((renderAtMs / 1000) * 9);
+        view.buffRing.scaling.set(pulse, 1, pulse);
+      }
       view.aura?.setActive(e.ai !== "dead");
       if (view.label) {
         // Cerca de la cámara el rótulo taparía la pantalla: se oculta.
@@ -511,7 +575,7 @@ export class EnemyViews {
     };
     // Todo lo creado tras el cuerpo (barra, aros, estrellas, aura, rótulo…) no se tiñe con él.
     for (const m of character.root.getChildMeshes(false)) if (!bodyMeshes.has(m)) markNoTint(m);
-    if (e.elite) this.applyBodyGlow(view, "base");
+    if (e.elite || kind === "healer") this.applyBodyGlow(view, "base");
     if (e.elite || isCaster(kind)) view.aura = this.createAura(view);
     return view;
   }

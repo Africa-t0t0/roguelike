@@ -21,9 +21,9 @@ describe("looks", () => {
     }
   });
 
-  it("allClipIds incluye los clips de las habilidades (y el Bloqueo), y existen en public/", () => {
+  it("allClipIds incluye los clips de las habilidades, y existen en public/", () => {
     const ids = allClipIds();
-    for (const clip of ["ss_kick", "ss_power_up", "ss_block_idle", "gs_jump_attack", "gs_slide_attack", "gs_high_spin_attack"]) {
+    for (const clip of ["ss_slash_3", "ss_power_up", "gs_jump_attack", "gs_slide_attack", "gs_high_spin_attack"]) {
       expect(ids).toContain(clip);
       expect(ANIM_FILES).toContain(clip);
     }
@@ -43,6 +43,7 @@ describe("looks", () => {
       mage: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
       pyromancer: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
       stormcaller: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
+      healer: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
     };
     for (const [kind, [asset, height, clips]] of Object.entries(expected)) {
       const look = ENEMY_LOOKS[kind as EnemyKind];

@@ -1,18 +1,23 @@
-import { ABILITIES, MAX_ACTIVE_ABILITIES, type AbilityId } from "@roguelike/shared";
+import { ABILITIES, MAX_ACTIVE_ABILITIES, abilityCooldownS, type AbilityId } from "@roguelike/shared";
 
 /** Glifo de cada habilidad (texto, sin imágenes). */
 export const ABILITY_GLYPHS: Record<AbilityId, string> = {
   whirlwind: "⟳",
-  kick: "↯",
   warcry: "✶",
   slam: "◎",
-  block: "⛨",
   cleave: "☽",
   thrust: "➶",
   throw: "⚔",
   hook: "⛓",
   banner: "⚑",
-  frenzy: "♨",
+  frost: "❄",
+  nova: "✹",
+  beam: "⟿",
+  mine: "✪",
+  gust: "༄",
+  orb: "◉",
+  heal: "✚",
+  meteors: "☄",
 };
 
 const MAX_RANK = 3;
@@ -44,8 +49,6 @@ export type AbilitySlotModel =
       cooldownText: string;
       /** fracción del enfriamiento que queda (0..1), para el barrido */
       sweep: number;
-      /** el Bloqueo mantenido */
-      active: boolean;
       /** cargas disponibles y máximas (máximo 1: sin cargas); se pueden lanzar con `charges` ≥ 1 */
       charges: number;
       maxCharges: number;
@@ -55,14 +58,12 @@ export type AbilitySlotModel =
 
 /**
  * Las 4 casillas de la barra (lógica pura): las habilidades en orden de casilla y el resto vacías.
- * `cooldownOf`: enfriamiento que queda (s; con cargas, el del ciclo de recarga en curso, 0 con el máximo); `blocking`: el Bloqueo está
- * activo; `cooldownMult`: el de Celeridad (denominador del barrido); `chargesOf`: cargas de cada habilidad (sin él, 1 de 1).
+ * `cooldownOf`: enfriamiento que queda (s; con cargas, el del ciclo de recarga en curso, 0 con el máximo); `cooldownMult`: el de Celeridad (denominador del barrido); `chargesOf`: cargas de cada habilidad (sin él, 1 de 1).
  * El barrido solo se dibuja mientras recarga (cargas < máximo); el número de segundos, solo sin cargas.
  */
 export function abilityBarModel(
   slots: readonly { id: AbilityId; rank: number }[],
   cooldownOf: (id: AbilityId) => number,
-  blocking: boolean,
   cooldownMult = 1,
   chargesOf: (id: AbilityId) => { charges: number; max: number } = () => ({ charges: 1, max: 1 }),
 ): AbilitySlotModel[] {
@@ -75,7 +76,8 @@ export function abilityBarModel(
       continue;
     }
     const def = ABILITIES[s.id];
-    const cd = def.cooldownS > 0 ? Math.max(0, cooldownOf(s.id)) : 0;
+    const cycle = abilityCooldownS(s.id, s.rank);
+    const cd = cycle > 0 ? Math.max(0, cooldownOf(s.id)) : 0;
     const have = chargesOf(s.id);
     const maxCharges = Math.max(1, have.max);
     // Sin cargas (máximo 1) manda el enfriamiento: lista cuando no queda nada por esperar.
@@ -88,8 +90,7 @@ export function abilityBarModel(
       name: def.name,
       pips: rankPips(s.rank),
       cooldownText: charges < 1 ? formatCooldown(cd) : "",
-      sweep: def.cooldownS > 0 ? Math.min(1, cd / (def.cooldownS * cooldownMult)) : 0,
-      active: def.kind === "held" && blocking,
+      sweep: cycle > 0 ? Math.min(1, cd / (cycle * cooldownMult)) : 0,
       charges,
       maxCharges,
       cooling: charges < 1,
@@ -171,7 +172,6 @@ export class AbilityBar {
       setText(s.pips, m.pips);
       s.root.title = m.name;
       s.root.classList.toggle("ab-cooling", m.cooling);
-      s.root.classList.toggle("ab-active", m.active);
       s.sweep.style.setProperty("--cd", m.sweep.toFixed(3));
     });
     this.passive.hidden = passiveRank <= 0;

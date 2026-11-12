@@ -11,6 +11,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, type AbilityId, type GearItem, type GearSlot, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { FloorItem, FloorWeapon } from "../net/connection";
 import { formatWeapon, pickupInfo, tierColor, type PickupInfo } from "../ui/hud";
+import { buildStaff } from "./staffMesh";
 import type { Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
 import { beamTexture } from "./fxTextures";
@@ -262,7 +263,7 @@ export class FloorWeaponViews {
     spin.parent = weapon;
     if (item.kind === "gear") {
       const nature = itemGlow(item.item);
-      this.kit.gear(spin, item.item.slot, item.item.tier, nature);
+      this.kit.gear(spin, item.item.slot, item.item.tier, nature, item.item.cls === "mage");
       this.addRing(pivot, item.item.tier, nature, i);
     } else {
       this.kit.relic(spin, weapon, item.id);
@@ -284,12 +285,20 @@ export class FloorWeaponViews {
     tilt.parent = lean;
     tilt.rotation.z = Math.PI;
     tilt.scaling.setAll(grip.scale);
-    const model = this.assets.container(asset).instantiateModelsToScene((n) => `${n}-floor-${i}`, false, {
-      doNotInstantiate: true,
-    });
-    for (const root of model.rootNodes) root.parent = tilt;
+    // Sin modelo (el bastón) se construye por código; el brillo del tier va a la vara, no al orbe.
+    let glowRoot: TransformNode = tilt;
+    if (asset === null) {
+      const staff = buildStaff(this.scene, `floor-${i}`, f.nature);
+      staff.root.parent = tilt;
+      glowRoot = staff.shaft;
+    } else {
+      const model = this.assets.container(asset).instantiateModelsToScene((n) => `${n}-floor-${i}`, false, {
+        doNotInstantiate: true,
+      });
+      for (const root of model.rootNodes) root.parent = tilt;
+    }
     for (const mesh of tilt.getChildMeshes()) mesh.isPickable = false;
-    applyTierGlow(tilt, f.tier, f.nature);
+    applyTierGlow(glowRoot, f.tier, f.nature);
     // Centra el arma sobre el eje (gira sobre su centro) y clava la punta SINK_M bajo el piso; la
     // inclinación se aplica después, alrededor del punto del suelo, así la punta no se corre.
     const { min, max } = pivot.getHierarchyBoundingVectors(true);

@@ -2,9 +2,11 @@ import {
   type Nature,
   ABILITIES,
   BASE_REGEN,
-  BLOCK_HALF_ARC_DEG,
   ELITE,
-  STARTING_WEAPON,
+  NOVA_CHARGE_MOVE_MULT,
+  MAGE_LEGENDARY,
+  STARTING_WEAPONS,
+  isRanged,
   newComboTimers,
   strikeOf,
   strikeDamage,
@@ -21,7 +23,8 @@ import {
   playerStats,
   tryStartSwing,
   WARCRY_GUARD_MULT,
-  blockMoveMult,
+  BANNER_GUARD_MULT,
+  WHIRL_MOVE_MULT,
   xpToNext,
   type AbilityId,
   type ClassId,
@@ -68,8 +71,13 @@ export interface AbilityAnim {
   /** posición del jugador al lanzarla; el Tajo frontal sale de aquí aunque se mueva después */
   originX: number;
   originZ: number;
-  /** Golpe sísmico: velocidad (m/s) del salto hacia `facing` hasta el impacto (0 si salta en el sitio) */
+  /** Golpe sísmico y Tajo frontal: velocidad (m/s) del salto o la embestida hacia `facing` (0 si salta en el sitio) */
   leapSpeed?: number;
+  /** segundos que le quedan al salto o a la embestida (después, quieto hasta el impacto) */
+  leapLeft?: number;
+  /** hechizos apuntados del mago: el punto donde caen */
+  aimX?: number;
+  aimZ?: number;
 }
 
 /** Efectos de equipo y reliquia que no son multiplicadores (`CombinedMods` sin `PlayerMods`); `setMods` los copia. */
@@ -82,8 +90,6 @@ const LAST_STAND_S = 3;
 const LAST_STAND_CD_S = 30;
 const LAST_STAND_HP_FRAC = 0.3;
 const LAST_STAND_DAMAGE_MULT = 0.2;
-/** Fracción del daño evitado por el Bloqueo que devuelve `blockReflect`. */
-const BLOCK_REFLECT_FRAC = 0.3;
 
 /** El combo (ComboTimers) avanza por input procesado; respawnIn, invulnFor y los plazos, por tick. */
 export interface CombatState extends ComboTimers {
@@ -91,7 +97,7 @@ export interface CombatState extends ComboTimers {
   weaponId: WeaponId;
   weaponTier: WeaponTier;
   weaponNature: Nature;
-  /** dirección del clic que empezó el swing en curso; el impacto la usa aunque el jugador gire */
+  /** dirección del golpe: la del clic que lo empezó y, desde su impacto, la que se apuntaba en ese momento (la usan el arco, la onda y el proyectil) */
   swingFacing: number;
   hp: number;
   maxHp: number;
@@ -106,8 +112,6 @@ export interface CombatState extends ComboTimers {
   /** segundos que le quedan al escudo de Última resistencia y a su enfriamiento; cuentan por tick simulado */
   lastStandLeft: number;
   lastStandCd: number;
-  /** daño que el Bloqueo devuelve a quien lo golpeó, a la espera de que RunRoom lo aplique (`flushReflects`) */
-  pendingReflects: { sourceId: string; amount: number }[];
   /** habilidades aprendidas con su rango, en orden de aprendizaje (copia de `progress.abilities`) */
   abilities: { id: AbilityId; rank: number }[];
   /** enfriamiento restante (s) de cada habilidad; cuenta por tick simulado */
@@ -117,30 +121,52 @@ export interface CombatState extends ComboTimers {
   abilityAnim: AbilityAnim | null;
   /** máscara de teclas de habilidad del último input procesado (para detectar flancos) */
   heldMask: number;
-  /** mantiene el Bloqueo en este momento */
-  blocking: boolean;
+  /** teclas de habilidad apretadas a destiempo que siguen en espera y segundos que les quedan (`ABILITY_BUFFER_S`) */
+  queuedMask: number;
+  queuedLeft: number;
   /** el mayor Grito activo sobre este jugador (0 si ninguno) y los segundos que le quedan */
   buffDamage: number;
   buffLeft: number;
   /** el Grito activo trae `warcryGuard` (de quien lo gritó): ×0,8 al daño recibido mientras dura `buffLeft` */
   buffGuard: boolean;
-  /** Frenesí: segundos que le quedan, velocidad de ataque extra y fracción del daño hecho que cura */
-  frenzyLeft: number;
-  frenzySpeed: number;
-  frenzyLeech: number;
+  /** velocidad de ataque extra del Grito de rango 3 mientras dura `buffLeft` */
+  buffSpeed: number;
+  /**
+   * Estandarte bajo el que está (se renueva cada tick que sigue dentro): daño extra, si sus ataques llevan las tres
+   * naturalezas, si quien lo clavó tiene `bannerGuard` y cuánto le queda (s).
+   */
+  bannerDamage: number;
+  bannerAll: boolean;
+  bannerGuard: boolean;
+  bannerLeft: number;
   /** estados que dejan los élites: segundos que quedan de quemadura (con su daño por segundo), ralentización y aturdimiento */
   burnLeft: number;
   burnDps: number;
   slowLeft: number;
   stunLeft: number;
+  /** escudo de la Sanación con `healShield`: vida que absorbe y segundos que le quedan */
+  shield: number;
+  shieldLeft: number;
+  /** enemigos que golpearon a quien lleva `frostArmor` (y dónde estaba él), a la espera de que `flushReflects` ralentice a los cercanos */
+  pendingChills: { id: string; x: number; z: number }[];
 }
 
 /** Estados que el panel de pruebas aplica a mano; cada uno es el de una naturaleza de élite. */
 export type PlayerStatus = "burn" | "slow" | "stun";
 
-/** Velocidad de ataque del jugador ahora: la de sus cartas y equipo, más el Frenesí mientras dura. */
+/** Velocidad de ataque del jugador ahora: la de sus cartas y equipo, más la del Grito de rango 3 mientras dura. */
 export function attackSpeedOf(c: CombatState): number {
-  return c.mods.attackSpeedMult * (1 + (c.frenzyLeft > 0 ? c.frenzySpeed : 0));
+  return c.mods.attackSpeedMult * (1 + (c.buffLeft > 0 ? c.buffSpeed : 0));
+}
+
+/** Multiplicador de daño de sus golpes ahora: cartas y equipo, más el Grito y el Estandarte bajo el que esté. */
+export function damageMultOf(c: CombatState): number {
+  return c.mods.damageMult * (1 + c.buffDamage + (c.bannerLeft > 0 ? c.bannerDamage : 0));
+}
+
+/** De quién y con qué naturaleza golpea: la de su arma o, bajo un Estandarte de rango 3, las tres a la vez. */
+export function strikeSource(c: CombatState, key: string): { key: string; nature: Nature; affinity: number; allNatures?: boolean } {
+  return { key, nature: c.weaponNature, affinity: c.mods.affinity, ...(c.bannerLeft > 0 && c.bannerAll ? { allNatures: true } : {}) };
 }
 
 /** Rango (1..3) de esa habilidad, o 0 si no la tiene. */
@@ -153,7 +179,11 @@ export function abilityRank(c: CombatState, id: AbilityId): number {
  * `damageTakenMult` (0,4), así que puede bajar de él (0,4 × 0,8 = 0,32 como mínimo).
  */
 export function guardMult(c: CombatState): number {
-  return c.buffGuard && c.buffLeft > 0 ? WARCRY_GUARD_MULT : 1;
+  const a = c.abilityAnim;
+  // `novaGuard`: mientras la Nova carga (aún no estalló), la mitad de daño.
+  const nova = a?.id === "nova" && a.impacts.length > 0 && c.fx.legendaries.includes("novaGuard") ? MAGE_LEGENDARY.novaGuardMult : 1;
+  const banner = c.bannerLeft > 0 && c.bannerGuard ? BANNER_GUARD_MULT : 1;
+  return (c.buffGuard && c.buffLeft > 0 ? WARCRY_GUARD_MULT : 1) * nova * banner;
 }
 
 /** Efecto de sus estados en la velocidad: 0,7 ralentizado, 0 aturdido. */
@@ -161,9 +191,26 @@ export function statusSpeedMult(c: CombatState): number {
   return (c.slowLeft > 0 ? 1 - ELITE.playerSlowFrac : 1) * (c.stunLeft > 0 ? 0 : 1);
 }
 
-/** Velocidad de movimiento efectiva: la de sus cartas, a la mitad mientras bloquea, más sus estados. */
+/** ¿Está cargando la Nova larga (rango 3)? Mientras tanto se mueve a la mitad. */
+export function chargingNova(c: CombatState): boolean {
+  const a = c.abilityAnim;
+  return a?.id === "nova" && a.rank >= 3 && a.impacts.length > 0;
+}
+
+/** ¿Está girando con el Torbellino largo (rango 3)? Mientras tanto se mueve más despacio. */
+export function spinning(c: CombatState): boolean {
+  const a = c.abilityAnim;
+  return a?.id === "whirlwind" && a.rank >= 3 && a.impacts.length > 0;
+}
+
+/** Lo que frenan las habilidades en curso: la Nova larga cargando y el Torbellino largo girando. */
+export function channelSpeedMult(c: CombatState): number {
+  return (chargingNova(c) ? NOVA_CHARGE_MOVE_MULT : 1) * (spinning(c) ? WHIRL_MOVE_MULT : 1);
+}
+
+/** Velocidad de movimiento efectiva: la de sus cartas, lo que frenen sus habilidades en curso y sus estados. */
 export function moveSpeedMult(c: CombatState): number {
-  return c.mods.moveSpeedMult * (c.blocking ? blockMoveMult(c.fx.legendaries) : 1) * statusSpeedMult(c);
+  return c.mods.moveSpeedMult * channelSpeedMult(c) * statusSpeedMult(c);
 }
 
 /** Aplica un estado con los números de `ELITE` (la quemadura, con `burnDps` si se da). */
@@ -188,7 +235,7 @@ export function maxHpFor(cls: ClassId, level: number, mods: PlayerMods): number 
 export function newCombatState(
   cls: ClassId,
   level: number,
-  weaponId: WeaponId = STARTING_WEAPON,
+  weaponId: WeaponId = STARTING_WEAPONS[cls],
   tier: WeaponTier = 1,
 ): CombatState {
   const maxHp = playerStats(cls, level).maxHp;
@@ -209,23 +256,28 @@ export function newCombatState(
     fx: NO_GEAR_EFFECTS,
     lastStandLeft: 0,
     lastStandCd: 0,
-    pendingReflects: [],
     abilities: [],
     abilityCd: {},
     abilityCharges: {},
     abilityAnim: null,
     heldMask: 0,
-    blocking: false,
+    queuedMask: 0,
+    queuedLeft: 0,
     buffDamage: 0,
     buffLeft: 0,
     buffGuard: false,
-    frenzyLeft: 0,
-    frenzySpeed: 0,
-    frenzyLeech: 0,
+    buffSpeed: 0,
+    bannerDamage: 0,
+    bannerAll: false,
+    bannerGuard: false,
+    bannerLeft: 0,
     burnLeft: 0,
     burnDps: 0,
     slowLeft: 0,
     stunLeft: 0,
+    shield: 0,
+    shieldLeft: 0,
+    pendingChills: [],
   };
 }
 
@@ -247,6 +299,8 @@ export interface InputResult {
   died: boolean;
   /** impacto del swing propio que venció en este input (no da xp: el llamador crea los orbes de `kills`) */
   impact: ImpactResult | null;
+  /** con un arma a distancia (bastón): golpe del combo cuyo proyectil sale en este input */
+  shot?: number;
 }
 
 const EPS = 1e-9;
@@ -254,11 +308,16 @@ const EPS = 1e-9;
 export class CombatSystem {
   level = 1;
   xp = 0;
+  /**
+   * Estallido de la marca de las espadas (Lanzar la espada de rango 3) que un golpe del combo hizo saltar; lo pone
+   * AbilitySystem, que es quien la conoce. Anota golpes y muertes en `sink`.
+   */
+  bladeBlast?: (c: CombatState, key: string, at: { x: number; z: number; id: string }, enemies: EnemySystem, sink: Pick<ImpactResult, "hits" | "kills">) => void;
 
   /**
    * Llamar justo después de simular cada input del jugador (`k` ya refleja ese input) y antes de su ataque.
    * 1. Avanza el combo un SIM_DT; si vence el impacto (y no está muerto), lo resuelve rebobinando al
-   *    `viewTick` de este input con la dirección guardada del clic.
+   *    `viewTick` de este input, hacia donde apunta este input.
    * 2. Resuelve los golpes enemigos pendientes: si está invulnerable se descartan; si no, se aplican
    *    los que ya vio (`viewTick >= resolveTick`).
    */
@@ -273,14 +332,19 @@ export class CombatSystem {
   ): InputResult {
     const step = c.comboStep;
     const due = advanceCombo(c, SIM_DT);
-    const impact = due && !c.dead ? this.resolveImpact(c, k, step, input, nowTick, enemies, history, key) : null;
+    // El golpe pega hacia donde se apunta en el impacto, no hacia donde empezó: se puede corregir moviendo el cursor.
+    if (due) c.swingFacing = input.facing;
+    // El bastón no golpea en arco: su impacto suelta un proyectil (lo crea AbilitySystem.staffShot).
+    const ranged = isRanged(c.weaponId);
+    const impact = due && !c.dead && !ranged ? this.resolveImpact(c, k, step, input, nowTick, enemies, history, key) : null;
+    const shot = due && !c.dead && ranged ? { shot: step } : {};
 
-    if (c.dead || c.pendingHits.length === 0) return { damage: 0, died: false, impact };
+    if (c.dead || c.pendingHits.length === 0) return { damage: 0, died: false, impact, ...shot };
     if (c.invulnFor > 0) {
       c.pendingHits = [];
-      return { damage: 0, died: false, impact };
+      return { damage: 0, died: false, impact, ...shot };
     }
-    return { ...this.applyDue(c, k, (h) => input.viewTick >= h.resolveTick), impact };
+    return { ...this.applyDue(c, k, (h) => input.viewTick >= h.resolveTick), impact, ...shot };
   }
 
   /**
@@ -289,7 +353,7 @@ export class CombatSystem {
    */
   attack(c: CombatState, input: PlayerInput): AttackResult {
     const none: AttackResult = { swung: false, step: 0 };
-    if (!input.attack || c.dead || c.blocking || c.abilityAnim || c.stunLeft > 0) return none;
+    if (!input.attack || c.dead || c.abilityAnim || c.stunLeft > 0) return none;
     const step = tryStartSwing(c, c.weaponId, attackSpeedOf(c));
     if (step === 0) return none;
     c.swingFacing = input.facing;
@@ -311,7 +375,7 @@ export class CombatSystem {
     const arcDeg = Math.min(360, strike.arcDeg * c.mods.reachMult);
     const t = rewindTick(nowTick, input.viewTick);
     const amount = Math.round(
-      strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier) * c.mods.damageMult * (1 + c.buffDamage),
+      strikeDamage(c.weaponId, c.cls, this.level, step, c.weaponTier) * damageMultOf(c),
     );
     const origin = { x: k.x, z: k.z, facing: c.swingFacing };
     const result: ImpactResult = { step, hits: [], kills: [] };
@@ -322,13 +386,16 @@ export class CombatSystem {
       if (e.ai === "dead" || e.hp <= 0) continue;
       const pos = history.at(t, e.id) ?? { x: e.x, z: e.z };
       if (!inArc(origin, { x: pos.x, z: pos.z, radius: ENEMY_DEFS[e.kind].radius }, range, arcDeg)) continue;
-      const src = { key, nature: c.weaponNature, affinity: c.mods.affinity };
+      const src = strikeSource(c, key);
+      // La marca de las espadas (cualquier golpe de un caballero la hace estallar) se lee antes del golpe: si lo mata, también estalla.
+      const marked = c.cls === "warrior" && enemies.takeBladeMark(e.id);
       // El primero es el golpeado (posición actual en el golpe); los demás, encadenados por el rayo.
       enemies.strike(e.id, amount, src).forEach((r, i) => {
         result.hits.push({ enemyId: r.enemyId, amount: r.amount, killed: r.killed, x: i === 0 ? e.x : r.x, z: i === 0 ? e.z : r.z });
         if (r.killed) result.kills.push({ x: r.x, z: r.z, xp: r.xp, drop: r.drop, gear: r.gear, relic: r.relic });
         dealt += r.amount;
       });
+      if (marked) this.bladeBlast?.(c, key, { x: e.x, z: e.z, id: e.id }, enemies, result);
     }
     // Sed de sangre: cada kill propio cura.
     this.heal(c, c.mods.lifeOnKill * result.kills.length);
@@ -367,6 +434,8 @@ export class CombatSystem {
       c.invulnFor = Math.max(0, c.invulnFor - dt);
       c.lastStandLeft = Math.max(0, c.lastStandLeft - dt);
       c.lastStandCd = Math.max(0, c.lastStandCd - dt);
+      c.shieldLeft = Math.max(0, c.shieldLeft - dt);
+      if (c.shieldLeft === 0) c.shield = 0;
 
       if (c.dead) {
         c.respawnIn -= dt;
@@ -429,9 +498,9 @@ export class CombatSystem {
     c.hp = Math.min(c.hp, c.maxHp);
   }
 
-  /** Cura una fracción del daño que hizo el jugador: la del Colmillo del vampiro (`fx.vampire`) más la del Frenesí. */
+  /** Cura una fracción del daño que hizo el jugador: la del Colmillo del vampiro (`fx.vampire`). */
   vampireHeal(c: CombatState, dealt: number): void {
-    const frac = c.fx.vampire + (c.frenzyLeft > 0 ? c.frenzyLeech : 0);
+    const frac = c.fx.vampire;
     if (frac > 0) this.heal(c, dealt * frac);
   }
 
@@ -447,26 +516,16 @@ export class CombatSystem {
   }
 
   /**
-   * Aplica el reflejo del Bloqueo pendiente: cada enemigo vivo que golpeó contra el escudo recibe el daño como
-   * golpe del jugador `key` (sin naturaleza). RunRoom la llama tras `onInputProcessed` y `step` y reparte
-   * con `impact(key, …)` los números de daño y las muertes (orbes).
+   * Ralentiza a los enemigos cercanos que golpearon a quien lleva `frostArmor`. RunRoom la llama tras
+   * `onInputProcessed` y `step`; no hace daño (devuelve listas vacías por si alguna vez lo hace).
    */
-  flushReflects(c: CombatState, enemies: EnemySystem, key: string): Pick<ImpactResult, "hits" | "kills"> {
-    const out: Pick<ImpactResult, "hits" | "kills"> = { hits: [], kills: [] };
-    const pending = c.pendingReflects.splice(0);
-    let dealt = 0;
-    for (const p of pending) {
-      const e = enemies.enemies.find((x) => x.id === p.sourceId);
-      if (!e || e.ai === "dead" || e.hp <= 0) continue;
-      const amount = Math.max(1, Math.round(p.amount));
-      const [r] = enemies.strike(e.id, amount, { key, nature: "none", affinity: 0 });
-      out.hits.push({ enemyId: r!.enemyId, amount: r!.amount, killed: r!.killed, x: e.x, z: e.z });
-      if (r!.killed) out.kills.push({ x: r!.x, z: r!.z, xp: r!.xp, drop: r!.drop, gear: r!.gear, relic: r!.relic });
-      dealt += r!.amount;
+  flushReflects(c: CombatState, enemies: EnemySystem, _key: string): Pick<ImpactResult, "hits" | "kills"> {
+    for (const chill of c.pendingChills.splice(0)) {
+      const e = enemies.enemies.find((x) => x.id === chill.id);
+      if (!e || Math.hypot(e.x - chill.x, e.z - chill.z) > MAGE_LEGENDARY.frostArmorRangeM) continue;
+      enemies.slow(e.id, MAGE_LEGENDARY.frostArmorSlow, MAGE_LEGENDARY.frostArmorS);
     }
-    this.heal(c, c.mods.lifeOnKill * out.kills.length);
-    this.vampireHeal(c, dealt);
-    return out;
+    return { hits: [], kills: [] };
   }
 
   /** Cura `amount` hasta la vida máxima; a los muertos no. */
@@ -475,16 +534,12 @@ export class CombatSystem {
     c.hp = Math.min(c.maxHp, c.hp + amount);
   }
 
-  /**
-   * Aplica (y quita de la lista) los golpes pendientes que cumplen `due`. Si bloquea, los que llegan
-   * desde ±BLOCK_HALF_ARC_DEG de hacia dónde mira (`k`) se reducen según el rango del Bloqueo.
-   */
+  /** Aplica (y quita de la lista) los golpes pendientes que cumplen `due`. */
   private applyDue(
     c: CombatState,
     k: KinematicState | undefined,
     due: (h: PendingHit) => boolean,
   ): { damage: number; died: boolean } {
-    const reduction = c.blocking && k ? (ABILITIES.block.ranks[abilityRank(c, "block") - 1]?.reduction ?? 0) : 0;
     let damage = 0;
     const keep: PendingHit[] = [];
     for (const h of c.pendingHits) {
@@ -492,17 +547,16 @@ export class CombatSystem {
         keep.push(h);
         continue;
       }
-      const front =
-        reduction > 0 &&
-        inArc({ x: k!.x, z: k!.z, facing: k!.facing }, { x: h.sourceX, z: h.sourceZ, radius: 0 }, Infinity, 2 * BLOCK_HALF_ARC_DEG);
-      // Resistencia al elemento del golpe; después el Bloqueo y la Última resistencia.
+      // Resistencia al elemento del golpe; después la Última resistencia.
       const resisted = h.damage * (h.element ? 1 - c.mods.resist[h.element] : 1);
-      const blocked = front ? resisted * (1 - reduction) : resisted;
-      if (front && h.sourceId && c.fx.legendaries.includes("blockReflect")) {
-        c.pendingReflects.push({ sourceId: h.sourceId, amount: (resisted - blocked) * BLOCK_REFLECT_FRAC });
-      }
-      const dealt = c.lastStandLeft > 0 ? blocked * LAST_STAND_DAMAGE_MULT : blocked;
+      const reduced = c.lastStandLeft > 0 ? resisted * LAST_STAND_DAMAGE_MULT : resisted;
+      // El escudo de la Sanación absorbe primero; lo que pase es el daño.
+      const absorbed = Math.min(c.shield, reduced);
+      c.shield -= absorbed;
+      const dealt = reduced - absorbed;
       damage += dealt;
+      // `frostArmor`: quien lo golpea queda ralentizado si está cerca (lo comprueba `flushReflects`, que ve a los enemigos).
+      if (reduced > 0 && h.sourceId && k && c.fx.legendaries.includes("frostArmor")) c.pendingChills.push({ id: h.sourceId, x: k.x, z: k.z });
       // El estado de un élite solo queda si el golpe hizo daño (con Invulnerable o god no hay); la resistencia acorta su duración.
       if (dealt > 0 && h.nature && h.nature !== "none") {
         const durationMult = h.element ? 1 - c.mods.resist[h.element] : 1;
@@ -528,10 +582,10 @@ export class CombatSystem {
     c.pendingHits = [];
     cancelImpact(c);
     c.abilityAnim = null;
-    c.blocking = false;
     c.burnLeft = c.slowLeft = c.stunLeft = 0;
     c.lastStandLeft = 0;
-    c.pendingReflects = [];
+    c.pendingChills = [];
+    c.shield = c.shieldLeft = 0;
   }
 
   grantXp(states: Map<string, CombatState>, xp: number): number[] {

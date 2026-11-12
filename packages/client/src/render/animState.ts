@@ -1,4 +1,4 @@
-import { ABILITIES, casterTelegraphS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type EnemyKind, type WeaponId } from "@roguelike/shared";
+import { ABILITIES, abilityAnimS, casterTelegraphS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import { ENEMY_LOOKS, HERO_STRIDE_MPS } from "./looks";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
@@ -26,9 +26,7 @@ export interface HeroAnimInput {
   dead: boolean;
   hurtRecently: boolean;
   /** habilidad activa en curso y cuánto lleva (s) */
-  ability?: { id: AbilityId; elapsed: number };
-  /** mantiene el Bloqueo */
-  blocking: boolean;
+  ability?: { id: AbilityId; elapsed: number; rank?: number };
   /** velocidad de ataque (Furia): el golpe dura `duration / attackSpeedMult`; por defecto 1 */
   attackSpeedMult?: number;
 }
@@ -47,6 +45,8 @@ export interface EnemyAnimInput {
 }
 
 const MOVING_SPEED = 0.2; // m/s
+/** Velocidad del clip del Torbellino largo (rango 3), que se repite mientras gira. */
+const WHIRL_SPIN_SPEED = 1.3;
 const SPRINT_SPEED = 6; // m/s
 /** Aturdido: el clip de golpe recibido en bucle, a esta velocidad (tambaleo lento). */
 const STUN_ANIM_SPEED = 0.35;
@@ -54,13 +54,6 @@ const STUN_ANIM_SPEED = 0.35;
 /** Límites de la velocidad de reproducción al ajustar el paso: fuera de ellos el clip se ve mal. */
 const MIN_STRIDE_RATE = 0.6;
 const MAX_STRIDE_RATE = 2.2;
-
-/**
- * Sala de pruebas: clip que reemplaza al de correr hacia adelante de todos los héroes, para comparar
- * candidatos con el juego delante. Vacío, cada arma usa el suyo.
- */
-export const forwardClipOverride: { clip?: string } = {};
-export const FORWARD_CLIP_CANDIDATES: readonly string[] = ["ss_run_2", "gs_run_2", "gs_run"];
 
 type RunDir = "run" | "runBack" | "runLeft" | "runRight";
 
@@ -96,36 +89,38 @@ const looped = (clip: string, speed = 1): AnimChoice => ({ clip, loop: true, spe
 function abilityClip(a: HeroAnimInput): { clip: string; animS: number } | undefined {
   if (!a.ability) return undefined;
   const def = ABILITIES[a.ability.id];
-  if (!def.clip || def.animS <= 0 || a.ability.elapsed >= def.animS) return undefined;
-  return { clip: def.clip, animS: def.animS };
+  const animS = abilityAnimS(a.ability.id, a.ability.rank ?? 1);
+  if (!def.clip || animS <= 0 || a.ability.elapsed >= animS) return undefined;
+  return { clip: def.clip, animS };
 }
 
 /**
- * Clips del estilo del arma (las habilidades y el Bloqueo tienen los suyos). Reglas por prioridad:
- * muerte, habilidad, ataque, Bloqueo, aire, golpe recibido, correr, quieto.
+ * Clips del estilo del arma (las habilidades tienen los suyos). Reglas por prioridad:
+ * muerte, habilidad, ataque, aire, golpe recibido, correr, quieto.
  */
 export function chooseHeroAnim(a: HeroAnimInput, clipLengths?: ClipLengths): AnimChoice {
   const { locomotion, combo } = MOVESETS[WEAPONS[a.weaponId].movesetId];
   if (a.dead) return once(locomotion.death);
   const ability = abilityClip(a);
+  // El Torbellino de rango 3 gira varios segundos: su clip se repite en vez de estirarse.
+  if (ability && a.ability?.id === "whirlwind" && (a.ability.rank ?? 1) >= 3) return looped(ability.clip, WHIRL_SPIN_SPEED);
   if (ability) return once(ability.clip, fitTo(ability.clip, ability.animS, clipLengths));
   if (a.swingTimer > 0 && a.comboStep >= 1 && a.comboStep <= combo.length) {
     const strike = strikeOf(a.weaponId, a.comboStep, a.attackSpeedMult ?? 1);
     return once(strike.clip, fitTo(strike.clip, strike.duration, clipLengths));
   }
-  if (a.blocking) return looped(ABILITIES.block.clip!);
   if (a.airborne) return once(locomotion.jump);
   if (a.hurtRecently) return once(locomotion.hit);
   if (a.speed <= MOVING_SPEED) return looped(locomotion.idle);
   const { dir } = moveSector(a.moveAngle);
-  const clip = dir === "run" ? (forwardClipOverride.clip ?? (a.speed > SPRINT_SPEED ? locomotion.sprint : locomotion.run)) : locomotion[dir];
+  const clip = dir === "run" && a.speed > SPRINT_SPEED ? locomotion.sprint : locomotion[dir];
   return looped(clip, strideRate(clip, a.speed));
 }
 
 /** Giro del cuerpo (rad) respecto de la mirada: solo al correr, para que el clip apunte a donde va. */
 export function heroBodyYaw(a: HeroAnimInput): number {
   const running =
-    !a.dead && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1) && !a.blocking && !abilityClip(a);
+    !a.dead && !a.airborne && !(a.swingTimer > 0 && a.comboStep >= 1) && !abilityClip(a);
   return running && a.speed > MOVING_SPEED ? moveSector(a.moveAngle).yaw : 0;
 }
 

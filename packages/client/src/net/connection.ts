@@ -26,6 +26,8 @@ import {
   type Nature,
   type PlayerInput,
   type RelicId,
+  type ClassId,
+  isClassId,
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
@@ -36,6 +38,8 @@ import { LagSimulator, type LagConfig } from "./LagSimulator";
 
 export type PlayerSnapshot = KinematicState & {
   name: string;
+  /** su rol */
+  cls: ClassId;
   lastSeq: number;
   hp: number;
   maxHp: number;
@@ -50,7 +54,9 @@ export type PlayerSnapshot = KinematicState & {
   burnLeft: number;
   slowLeft: number;
   stunLeft: number;
-  /** multiplicador de movimiento de los estados (0.7 ralentizado, 0 aturdido); sin el del Bloqueo */
+  /** vida que absorbe el escudo de la Sanación; 0 sin escudo */
+  shield: number;
+  /** multiplicador de movimiento de los estados (0.7 ralentizado, 0 aturdido) y lo que frenan sus habilidades en curso */
   statusSpeedMult: number;
   /** casillas en orden (la tecla i+1 usa la i-ésima), sin la pasiva; `cooldown` en s; `charges` ≥ 1 (1 si no tiene cargas) */
   abilities: (AbilitySlotView & { rank: number })[];
@@ -60,10 +66,9 @@ export type PlayerSnapshot = KinematicState & {
   relic: RelicId | null;
   /** rango de la Onda de corte; 0 si no la tiene */
   passiveRank: number;
-  blocking: boolean;
   /** el mayor Grito activo sobre él (0 si ninguno) */
   buffDamage: number;
-  /** multiplicador de movimiento de sus cartas (sin el del Bloqueo) */
+  /** multiplicador de movimiento de sus cartas */
   moveSpeedMult: number;
   attackSpeedMult: number;
   /** multiplicador de enfriamiento de habilidades (Celeridad) */
@@ -99,6 +104,12 @@ export interface EnemySnapshot {
   burning: boolean;
   slowed: boolean;
   frozen: boolean;
+  /** lleva la marca del Rayo arcano */
+  marked: boolean;
+  /** lleva la marca de las espadas del caballero */
+  bladeMarked: boolean;
+  /** reforzado por un hechicero aliado */
+  buffed: boolean;
   /** segundos que le quedan aturdido */
   stunned: number;
   /** tier del hechizo (0 si no es hechicero) */
@@ -149,9 +160,14 @@ export interface ZoneSnapshot {
   radius: number;
   left: number;
   total: number;
-  /** grietas del Golpe sísmico o Estandarte */
-  kind: "cracks" | "banner";
+  /** grietas del Golpe sísmico, Estandarte o las zonas de los hechizos del mago */
+  kind: ZoneKind;
+  /** naturaleza del bastón de quien la puso: el color con que se dibuja */
+  nature: Nature;
 }
+
+export type ZoneKind = "cracks" | "banner" | "frost" | "mine" | "meteors" | "meteor" | "meteorBig" | "trail" | "fire" | "ice" | "scar";
+const ZONE_KINDS: readonly ZoneKind[] = ["cracks", "banner", "frost", "mine", "meteors", "meteor", "meteorBig", "trail", "fire", "ice", "scar"];
 
 const ZONE_NUMBERS = ["x", "z", "radius", "left", "total"] as const;
 
@@ -162,7 +178,8 @@ export function parseZone(raw: unknown): ZoneSnapshot | null {
   for (const k of ZONE_NUMBERS) if (typeof z[k] !== "number" || !Number.isFinite(z[k])) return null;
   return {
     x: z.x as number, z: z.z as number, radius: z.radius as number, left: z.left as number, total: z.total as number,
-    kind: z.kind === "banner" ? "banner" : "cracks",
+    kind: (ZONE_KINDS as readonly unknown[]).includes(z.kind) ? (z.kind as ZoneKind) : "cracks",
+    nature: toNature(z.nature),
   };
 }
 
@@ -222,9 +239,14 @@ export interface PlayerShotSnapshot {
   radius: number;
   /** naturaleza del arma de quien la lanzó */
   nature: Nature;
-  /** Onda de corte o espada lanzada */
-  kind: "wave" | "sword";
+  /** Onda de corte, espada lanzada, proyectil del bastón, Remolino o Esfera */
+  kind: ShotKind;
+  /** clave de quien la lanzó ("" si no se sabe) */
+  owner: string;
 }
+
+export type ShotKind = "wave" | "sword" | "bolt" | "gust" | "orb";
+const SHOT_KINDS: readonly ShotKind[] = ["wave", "sword", "bolt", "gust", "orb"];
 
 /** Todo lo del estado que no son jugadores. */
 export interface WorldSnapshot {
@@ -283,7 +305,7 @@ const isRelicId = (id: unknown): id is RelicId => typeof id === "string" && Obje
 /** Valida un `GearItem` crudo (del mensaje o del JSON del estado): null si algo no encaja (las vistas indexan tablas con él). */
 export function parseGearItem(raw: unknown): GearItem | null {
   if (typeof raw !== "object" || raw === null) return null;
-  const g = raw as { slot?: unknown; tier?: unknown; stats?: unknown; legendary?: unknown };
+  const g = raw as { slot?: unknown; tier?: unknown; stats?: unknown; legendary?: unknown; cls?: unknown };
   if (!GEAR_SLOTS.includes(g.slot as GearSlot) || !isWeaponTier(g.tier) || !Array.isArray(g.stats)) return null;
   const stats: GearItem["stats"] = [];
   for (const e of g.stats as { stat?: unknown; value?: unknown }[]) {
@@ -296,7 +318,7 @@ export function parseGearItem(raw: unknown): GearItem | null {
     if (typeof g.legendary !== "string" || !Object.hasOwn(LEGENDARY_TEXT, g.legendary)) return null;
     legendary = g.legendary as GearItem["legendary"];
   }
-  return { slot: g.slot as GearSlot, tier: g.tier, stats, legendary };
+  return { slot: g.slot as GearSlot, tier: g.tier, stats, legendary, ...(g.cls === "mage" ? { cls: "mage" as const } : {}) };
 }
 
 /**
@@ -350,7 +372,20 @@ function isValidChain(points: unknown): boolean {
 export function isValidCombatEvent(event: unknown): event is CombatEvent {
   const e = event as { type?: unknown; id?: unknown } | null;
   if (!e || typeof e !== "object") return false;
-  if (e.type === "chain") return isValidChain((e as { points?: unknown }).points);
+  if (e.type === "chain" || e.type === "beam") return isValidChain((e as { points?: unknown }).points);
+  if (e.type === "blast") {
+    const b = e as { x?: unknown; z?: unknown; radius?: unknown };
+    return Number.isFinite(b.x) && Number.isFinite(b.z) && Number.isFinite(b.radius);
+  }
+  if (e.type === "heal") return Array.isArray((e as { keys?: unknown }).keys);
+  if (e.type === "enemyBuff") {
+    const b = e as { x?: unknown; z?: unknown; radius?: unknown; castS?: unknown };
+    return Number.isFinite(b.x) && Number.isFinite(b.z) && Number.isFinite(b.radius) && Number.isFinite(b.castS);
+  }
+  if (e.type === "enemyHeal") {
+    const h = e as { from?: unknown; to?: unknown };
+    return isValidChain([h.from, h.to]);
+  }
   return e.type !== "ability" || isAbilityId(e.id);
 }
 
@@ -450,7 +485,8 @@ function safeJson(text: unknown): unknown {
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
-  type RawPlayer = Omit<PlayerSnapshot, "weaponId" | "weaponTier" | "weaponNature" | "abilities" | "gear" | "relic"> & {
+  type RawPlayer = Omit<PlayerSnapshot, "cls" | "weaponId" | "weaponTier" | "weaponNature" | "abilities" | "gear" | "relic"> & {
+    cls?: string;
     weaponId: string;
     weaponTier: number;
     weaponNature: string;
@@ -471,6 +507,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
     });
     out.set(key, {
       name: p.name,
+      cls: isClassId(p.cls) ? p.cls : "warrior",
       x: p.x,
       z: p.z,
       facing: p.facing,
@@ -489,12 +526,12 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       burnLeft: finiteOr(p.burnLeft, 0),
       slowLeft: finiteOr(p.slowLeft, 0),
       stunLeft: finiteOr(p.stunLeft, 0),
+      shield: finiteOr(p.shield, 0),
       statusSpeedMult: finiteOr(p.statusSpeedMult, 1),
       abilities,
       gear,
       relic: isRelicId(p.relic) ? p.relic : null,
       passiveRank: p.passiveRank ?? 0,
-      blocking: p.blocking ?? false,
       buffDamage: p.buffDamage ?? 0,
       moveSpeedMult: p.moveSpeedMult || 1,
       attackSpeedMult: p.attackSpeedMult || 1,
@@ -533,6 +570,9 @@ function snapshotWorld(room: Room): WorldSnapshot {
       burning: e.burning ?? false,
       slowed: e.slowed ?? false,
       frozen: e.frozen ?? false,
+      marked: e.marked ?? false,
+      bladeMarked: e.bladeMarked ?? false,
+      buffed: e.buffed ?? false,
       stunned: e.stunned ?? 0,
       spellTier: e.spellTier ?? 0,
     });
@@ -546,8 +586,11 @@ function snapshotWorld(room: Room): WorldSnapshot {
     orbs.set(id, { x: o.x, z: o.z, value: o.value });
   });
   const playerShots = new Map<string, PlayerShotSnapshot>();
-  room.state.playerShots?.forEach((w: Omit<PlayerShotSnapshot, "nature" | "kind"> & { nature: string; kind?: string }, id: string) => {
-    playerShots.set(id, { x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius, nature: toNature(w.nature), kind: w.kind === "sword" ? "sword" : "wave" });
+  room.state.playerShots?.forEach((w: Omit<PlayerShotSnapshot, "nature" | "kind" | "owner"> & { nature: string; kind?: string; owner?: string }, id: string) => {
+    playerShots.set(id, {
+      x: w.x, z: w.z, dirX: w.dirX, dirZ: w.dirZ, radius: w.radius, nature: toNature(w.nature),
+      kind: (SHOT_KINDS as readonly unknown[]).includes(w.kind) ? (w.kind as ShotKind) : "wave", owner: w.owner ?? "",
+    });
   });
   const hazards = new Map<string, HazardSnapshot>();
   room.state.hazards?.forEach((raw: unknown, id: string) => {
@@ -607,12 +650,14 @@ export function parseSandbox(search: string): boolean {
 export async function connect(opts: {
   code?: string;
   name: string;
+  /** rol elegido en el lobby */
+  cls?: ClassId;
   lag: LagConfig;
   floorTimeStart?: number;
   sandbox?: boolean;
 }): Promise<GameConnection> {
   const client = new Client(serverUrl());
-  const joinOptions: JoinOptions = { name: opts.name, token: browserToken(), version: PROTOCOL_VERSION };
+  const joinOptions: JoinOptions = { name: opts.name, token: browserToken(), version: PROTOCOL_VERSION, ...(opts.cls ? { cls: opts.cls } : {}) };
   const code = opts.code?.trim().toUpperCase();
   const createOptions = {
     ...joinOptions,

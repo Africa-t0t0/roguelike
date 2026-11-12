@@ -11,6 +11,7 @@ import { boneKey, type AnimLibrary } from "./animLibrary";
 import type { AnimChoice } from "./animState";
 import type { AssetId, Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
+import { buildStaff, type StaffMesh } from "./staffMesh";
 import { attachNatureFx, type NatureFx } from "./natureLooks";
 import { applyTierGlow } from "./tierGlow";
 
@@ -54,7 +55,7 @@ export class CharacterView {
   private readonly groups = new Map<string, AnimationGroup | null>();
   private readonly fadingOut = new Set<AnimationGroup>();
   private current: { clip: string; group: AnimationGroup } | undefined;
-  private weapon: { id: WeaponId; tier: WeaponTier; nature: Nature; grip: TransformNode; fx?: NatureFx } | undefined;
+  private weapon: { id: WeaponId; tier: WeaponTier; nature: Nature; grip: TransformNode; glowRoot: TransformNode; staff?: StaffMesh; fx?: NatureFx } | undefined;
   private paused = false;
   private readonly observer: Observer<Scene>;
   private readonly skeletons: Skeleton[];
@@ -157,8 +158,11 @@ export class CharacterView {
     const nature = opts.nature ?? "none";
     if (this.weapon && this.weapon.id === weaponId) {
       if (this.weapon.tier !== tier || this.weapon.nature !== nature) {
-        applyTierGlow(this.weapon.grip, tier, nature);
-        if (this.weapon.nature !== nature) this.setNatureFx(this.weapon, nature);
+        applyTierGlow(this.weapon.glowRoot, tier, nature);
+        if (this.weapon.nature !== nature) {
+          this.setNatureFx(this.weapon, nature);
+          this.weapon.staff?.setNature(nature);
+        }
         this.weapon.tier = tier;
         this.weapon.nature = nature;
       }
@@ -181,17 +185,25 @@ export class CharacterView {
     node.position.set(grip.position[0] * k, grip.position[1] * k, grip.position[2] * k);
     node.rotation.set(grip.rotation[0], grip.rotation[1], grip.rotation[2]);
     node.scaling.setAll(grip.scale * k);
-    const model = this.assets.container(asset).instantiateModelsToScene((n) => n + this.suffix, false, {
-      doNotInstantiate: true,
-    });
-    // Los hijos del __root__ del arma ya están en el espacio glTF, igual que la mano: se cuelgan
-    // directamente (con el __root__ se aplicaría dos veces el cambio de mano).
-    for (const wroot of model.rootNodes) {
-      for (const child of wroot.getChildren()) child.parent = node;
-      wroot.dispose();
+    // Sin modelo (el bastón) se construye por código; su orbe lleva el color de la naturaleza y no se tiñe con el tier.
+    let staff: StaffMesh | undefined;
+    if (asset === null) {
+      staff = buildStaff(this.scene, this.suffix, nature);
+      staff.root.parent = node;
+    } else {
+      const model = this.assets.container(asset).instantiateModelsToScene((n) => n + this.suffix, false, {
+        doNotInstantiate: true,
+      });
+      // Los hijos del __root__ del arma ya están en el espacio glTF, igual que la mano: se cuelgan
+      // directamente (con el __root__ se aplicaría dos veces el cambio de mano).
+      for (const wroot of model.rootNodes) {
+        for (const child of wroot.getChildren()) child.parent = node;
+        wroot.dispose();
+      }
     }
-    if (tier !== 1 || nature !== "none") applyTierGlow(node, tier, nature);
-    this.weapon = { id: weaponId, tier, nature, grip: node };
+    const glowRoot = staff?.shaft ?? node;
+    if (tier !== 1 || nature !== "none") applyTierGlow(glowRoot, tier, nature);
+    this.weapon = { id: weaponId, tier, nature, grip: node, glowRoot, staff };
     this.setNatureFx(this.weapon, nature);
   }
 

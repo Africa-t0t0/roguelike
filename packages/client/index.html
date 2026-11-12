@@ -66,6 +66,9 @@
       .hud-xp { height: 1.15rem; width: 82%; }
       .hud-fill { position: absolute; inset: 0 auto 0 0; width: 0; transition: width 0.2s ease-out; }
       .hud-hp .hud-fill { background: linear-gradient(#c43a2f, #8c1f17 60%, #6d1610); box-shadow: inset 0 1px 0 rgba(255, 170, 150, 0.35); }
+      /* Escudo de la Sanación: plateado azulado sobre el final de la vida. */
+      .hud-hp .hud-shield { background: linear-gradient(rgba(215, 235, 255, 0.95), rgba(140, 175, 230, 0.9));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 0.5rem rgba(180, 215, 255, 0.8); transition: none; }
       .hud-xp .hud-fill { background: linear-gradient(#e2bf6a, #a97d2c); box-shadow: inset 0 1px 0 rgba(255, 240, 200, 0.4); }
       .hud-text { position: relative; padding: 0 0.6rem; font: 700 1.2rem/1.95rem var(--serif); color: #f6ead2;
         text-shadow: 0 1px 2px #000; display: flex; align-items: center; gap: 0.4rem; font-variant-numeric: tabular-nums; }
@@ -251,6 +254,15 @@
         border: 1px solid var(--gold-dim); background: #15110c; color: #e9dcc0; text-align: left; }
       .dev-panel button:hover { border-color: var(--gold); }
       .dev-panel button.on { background: #3a2c14; border-color: var(--gold); color: var(--gold-hi); }
+      #roles { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.2rem 0 0.4rem; }
+      #roles .role { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; padding: 0.7rem 0.5rem;
+        border: 1px solid var(--gold-dim); border-radius: 0.4rem; background: #15110c; color: #cfc2a4; cursor: pointer;
+        text-align: center; font-family: var(--serif); }
+      #roles .role:hover { border-color: var(--gold); }
+      #roles .role.on { background: #3a2c14; border-color: var(--gold); color: var(--gold-hi); box-shadow: 0 0 0 1px var(--gold) inset; }
+      #roles .role-glyph { font-size: 1.7rem; line-height: 1; }
+      #roles .role-name { font-weight: 700; font-size: 1.05rem; }
+      #roles .role-text { font-size: 0.75rem; opacity: 0.85; line-height: 1.25; }
     </style>
   </head>
   <body>
@@ -259,6 +271,18 @@
     <form id="lobby" class="panel" autocomplete="off">
       <h1>Roguelike co-op</h1>
       <label>Tu nombre <input id="name" maxlength="16" /></label>
+      <div id="roles" role="group" aria-label="Elige tu rol">
+        <button type="button" class="role" data-cls="warrior">
+          <span class="role-glyph">⚔</span>
+          <span class="role-name">Caballero</span>
+          <span class="role-text">Cuerpo a cuerpo. Aguanta y pega de cerca.</span>
+        </button>
+        <button type="button" class="role" data-cls="mage">
+          <span class="role-glyph">✦</span>
+          <span class="role-name">Mago</span>
+          <span class="role-text">A distancia. Frágil, con hechizos de área.</span>
+        </button>
+      </div>
       <button id="create" type="button">Crear sala</button>
       <div class="divider">o</div>
       <div class="row">

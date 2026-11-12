@@ -21,7 +21,6 @@ const hero = (over: Partial<HeroAnimInput> = {}): HeroAnimInput => ({
   swingTimer: 0,
   dead: false,
   hurtRecently: false,
-  blocking: false,
   ...over,
 });
 
@@ -114,14 +113,14 @@ describe("chooseHeroAnim", () => {
   });
 
   it("speed > 6 hacia adelante → sprint del estilo, con el paso ajustado", () => {
-    expect(chooseHeroAnim(hero({ speed: 8 }))).toEqual({ clip: "ss_run", loop: true, speed: 8 / 4.9 });
+    expect(chooseHeroAnim(hero({ speed: 8 }))).toEqual({ clip: "ss_run_2", loop: true, speed: 8 / 5.2 });
     expect(chooseHeroAnim(hero({ weaponId: "great-sword", speed: 8 })).clip).toBe("gs_run_2");
   });
 
   it("corre en la dirección del movimiento respecto de la mirada (clips que avanzan hacia ese lado)", () => {
     const at = (moveAngle: number, weaponId: HeroAnimInput["weaponId"] = "kingslayer-sword") =>
       chooseHeroAnim(hero({ speed: 5, moveAngle, weaponId })).clip;
-    expect([at(0), at(Math.PI), at(Math.PI / 2), at(-Math.PI / 2)]).toEqual(["ss_run", "ss_run_2", "ss_strafe_4", "ss_strafe_3"]);
+    expect([at(0), at(Math.PI), at(Math.PI / 2), at(-Math.PI / 2)]).toEqual(["ss_run_2", "ss_run_2", "ss_strafe_4", "ss_strafe_3"]);
     expect([at(0, "great-sword"), at(Math.PI, "great-sword"), at(Math.PI / 2, "great-sword"), at(-Math.PI / 2, "great-sword")]).toEqual([
       "gs_run_2",
       "gs_run",
@@ -129,12 +128,12 @@ describe("chooseHeroAnim", () => {
       "gs_strafe_3",
     ]);
     // las diagonales del teclado van con adelante o atrás
-    expect([at(Math.PI / 4), at(-Math.PI / 4), at((3 * Math.PI) / 4)]).toEqual(["ss_run", "ss_run", "ss_run_2"]);
+    expect([at(Math.PI / 4), at(-Math.PI / 4), at((3 * Math.PI) / 4)]).toEqual(["ss_run_2", "ss_run_2", "ss_run_2"]);
   });
 
   it("la velocidad del clip acompaña a la del movimiento, dentro de límites", () => {
-    expect(chooseHeroAnim(hero({ speed: 4.9 })).speed).toBeCloseTo(1);
-    expect(chooseHeroAnim(hero({ speed: 2.45 })).speed).toBeCloseTo(0.6);
+    expect(chooseHeroAnim(hero({ speed: 5.2 })).speed).toBeCloseTo(1);
+    expect(chooseHeroAnim(hero({ speed: 2.6 })).speed).toBeCloseTo(0.6);
     expect(chooseHeroAnim(hero({ speed: 0.5 })).speed).toBeCloseTo(0.6);
     expect(chooseHeroAnim(hero({ speed: 10, moveAngle: Math.PI / 2 })).speed).toBeCloseTo(2.2);
   });
@@ -142,7 +141,7 @@ describe("chooseHeroAnim", () => {
   it("habilidad: whirlwind → gs_high_spin_attack ajustado a 0,9 s, sin bucle, y gana al ataque", () => {
     const lengths = new Map([["gs_high_spin_attack", 2.4]]);
     const c = chooseHeroAnim(
-      hero({ ability: { id: "whirlwind", elapsed: 0.1 }, comboStep: 1, swingTimer: 0.2, airborne: true, blocking: true }),
+      hero({ ability: { id: "whirlwind", elapsed: 0.1 }, comboStep: 1, swingTimer: 0.2, airborne: true }),
       lengths,
     );
     expect(c.clip).toBe("gs_high_spin_attack");
@@ -151,23 +150,25 @@ describe("chooseHeroAnim", () => {
   });
 
   it("habilidad: cada activa usa su clip; la muerte gana a la habilidad", () => {
-    expect(chooseHeroAnim(hero({ ability: { id: "kick", elapsed: 0 } })).clip).toBe("ss_kick");
+    expect(chooseHeroAnim(hero({ ability: { id: "hook", elapsed: 0 } })).clip).toBe("ss_slash_3");
     expect(chooseHeroAnim(hero({ ability: { id: "warcry", elapsed: 0 } })).clip).toBe("ss_power_up");
     expect(chooseHeroAnim(hero({ ability: { id: "slam", elapsed: 0 } })).clip).toBe("gs_jump_attack");
     expect(chooseHeroAnim(hero({ ability: { id: "thrust", elapsed: 0 } })).clip).toBe("gs_slide_attack");
-    expect(chooseHeroAnim(hero({ dead: true, ability: { id: "kick", elapsed: 0 } })).clip).toBe("ss_death");
+    expect(chooseHeroAnim(hero({ dead: true, ability: { id: "hook", elapsed: 0 } })).clip).toBe("ss_death");
   });
 
   it("habilidad ya terminada (elapsed ≥ animS) no se muestra", () => {
-    expect(chooseHeroAnim(hero({ ability: { id: "kick", elapsed: 0.6 } })).clip).toBe("ss_idle");
+    expect(chooseHeroAnim(hero({ ability: { id: "hook", elapsed: 0.6 } })).clip).toBe("ss_idle");
   });
 
-  it("bloqueando → ss_block_idle en bucle, también al moverse o con el mandoble", () => {
-    expect(chooseHeroAnim(hero({ blocking: true }))).toEqual({ clip: "ss_block_idle", loop: true, speed: 1 });
-    expect(chooseHeroAnim(hero({ blocking: true, speed: 3 })).clip).toBe("ss_block_idle");
-    expect(chooseHeroAnim(hero({ blocking: true, weaponId: "great-sword" })).clip).toBe("ss_block_idle");
-    expect(chooseHeroAnim(hero({ blocking: true, dead: true })).clip).toBe("ss_death");
+  it("Torbellino de rango 3: su clip se repite mientras gira, sin estirarse a los 4 s", () => {
+    const lengths = new Map([["gs_high_spin_attack", 2.4]]);
+    const c = chooseHeroAnim(hero({ ability: { id: "whirlwind", elapsed: 1, rank: 3 } }), lengths);
+    expect(c.clip).toBe("gs_high_spin_attack");
+    expect(c.loop).toBe(true);
+    expect(chooseHeroAnim(hero({ ability: { id: "whirlwind", elapsed: 3.9, rank: 3 } }), lengths).clip).toBe("gs_high_spin_attack");
   });
+
 
   it("con attackSpeedMult el clip del golpe dura lo mismo que el swing acelerado", () => {
     const lengths = new Map([["ss_slash", 1.0]]);
@@ -198,8 +199,7 @@ describe("moveSector / heroBodyYaw", () => {
     expect(heroBodyYaw(hero({ ...diag, comboStep: 1, swingTimer: 0.1 }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, airborne: true }))).toBe(0);
     expect(heroBodyYaw(hero({ ...diag, dead: true }))).toBe(0);
-    expect(heroBodyYaw(hero({ ...diag, blocking: true }))).toBe(0);
-    expect(heroBodyYaw(hero({ ...diag, ability: { id: "kick", elapsed: 0.1 } }))).toBe(0);
+    expect(heroBodyYaw(hero({ ...diag, ability: { id: "hook", elapsed: 0.1 } }))).toBe(0);
   });
 });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCard, combinedMods, createRng, gearName, gearStatText, LEGENDARY_POOL, newProgress, playerMods, rollGear,
-  rollGearTier, RELICS, GEAR_SLOTS, LEGENDARY_TEXT, LEGENDARY_ABILITY, blockMoveMult, BLOCK_MOVE_MULT, type GearItem, type Progress,
+  rollGearTier, RELICS, GEAR_SLOTS, LEGENDARY_TEXT, LEGENDARY_ABILITY, type GearItem, type Progress,
 } from "../src";
 
 const prog = (stats: Progress["stats"] = {}): Progress => ({ stats, abilities: [] });
@@ -104,22 +104,17 @@ describe("cinturón", () => {
     }
   });
   it("legendarias del cinturón: reserva, textos y habilidad", () => {
-    expect(LEGENDARY_POOL.warrior.belt).toEqual(["warcryGuard", "blockFree"]);
+    expect(LEGENDARY_POOL.warrior.belt).toEqual(["warcryGuard", "throwCharges"]);
     for (let s = 0; s < 20; s++) expect(LEGENDARY_POOL.warrior.belt).toContain(rollGear(createRng(s), "belt", 4, "warrior").legendary);
     expect(LEGENDARY_TEXT.warcryGuard).toBe("Grito de guerra también reduce el daño recibido un 20 % mientras dura");
-    expect(LEGENDARY_TEXT.blockFree).toBe("Bloquear no te ralentiza");
+    expect(LEGENDARY_TEXT.throwCharges).toBe("Lanzar la espada tiene 2 cargas");
     expect(LEGENDARY_ABILITY.warcryGuard).toBe("warcry");
-    expect(LEGENDARY_ABILITY.blockFree).toBe("block");
+    expect(LEGENDARY_ABILITY.throwCharges).toBe("throw");
   });
   it("nombre", () => {
     expect(gearName({ slot: "belt", tier: 2, stats: [], legendary: null })).toBe("Cinturón templado");
     expect(gearName({ slot: "belt", tier: 3, stats: [], legendary: null })).toBe("Cinturón rúnico");
     expect(gearName({ slot: "belt", tier: 4, stats: [], legendary: null })).toBe("Cinturón legendario");
-  });
-  it("blockMoveMult: mitad salvo con blockFree", () => {
-    expect(blockMoveMult([])).toBe(BLOCK_MOVE_MULT);
-    expect(blockMoveMult(["warcryGuard"])).toBe(BLOCK_MOVE_MULT);
-    expect(blockMoveMult(["blockFree"])).toBe(1);
   });
 });
 

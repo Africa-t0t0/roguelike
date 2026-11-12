@@ -2,6 +2,9 @@ import {
   ARMED_CHANCE,
   ELEMENTS,
   ELITE,
+  ENEMY_BUFF,
+  ENEMY_HEAL,
+  type CombatEvent,
   ORB,
   SPELLS,
   ENEMY_DEFS,
@@ -11,7 +14,7 @@ import {
   PLAYER_RADIUS,
   TIERS,
   TILE_SIZE,
-  WEAPONS,
+  weaponsOf,
   casterKinds,
   casterTelegraphS,
   circlesOverlap,
@@ -77,6 +80,16 @@ export interface Enemy {
   burn: { left: number; dps: number; ownerKey: string } | null;
   /** ralentización (hielo): fracción de velocidad que pierde y segundos restantes */
   slow: { left: number; frac: number } | null;
+  /** segundos que le quedan a la marca del Rayo arcano (0: sin marca) */
+  marked: number;
+  /** segundos que le quedan a la marca de las espadas (Lanzar la espada de rango 3; 0: sin marca) */
+  bladeMark: number;
+  /** segundos que le quedan al refuerzo de un hechicero aliado: pega y corre más (`ENEMY_BUFF`) */
+  buffLeft: number;
+  /** hechicero arcano: segundos hasta que puede volver a reforzar a los suyos */
+  buffCd: number;
+  /** gesto de apoyo en curso durante la telegrafía (refuerzo del hechicero o cura del curandero); si no, ataca */
+  support: "buff" | "heal" | null;
   /** instantes (reloj del sistema) de los últimos golpes de hielo, para contar hasta congelar */
   iceHits: number[];
   /** multiplicador de daño de sus golpes y proyectiles, fijado al crearlo (escalado) */
@@ -138,6 +151,8 @@ export interface StrikeSource {
   key: string;
   nature: Nature;
   affinity: number;
+  /** bajo un Estandarte de rango 3: el golpe lleva fuego, hielo y rayo a la vez */
+  allNatures?: boolean;
 }
 
 /** Resultado de un golpe: el primero es el golpeado y los siguientes, los encadenados por el rayo. */
@@ -200,6 +215,7 @@ export class EnemySystem {
   private clock = 0;
   private statusDamage: { key: string; result: StrikeResult }[] = [];
   private chains: { points: [number, number][] }[] = [];
+  private events: CombatEvent[] = [];
 
   constructor(
     private readonly dungeon: Dungeon,
@@ -254,6 +270,11 @@ export class EnemySystem {
   /** Cada "mage" pedido se cambia por un hechicero de `casterKinds`; sin RNG si solo hay uno. */
   private casterFor(kind: EnemyKind): EnemyKind {
     if (kind !== "mage") return kind;
+    // Desde `ENEMY_HEAL.fromS`, y mientras no haya ya el tope de curanderos vivos, a veces sale uno en su lugar.
+    // Solo entonces consume RNG: las secuencias sembradas de antes no cambian.
+    if (this.floorTime >= ENEMY_HEAL.fromS && this.list.filter((e) => e.kind === "healer" && e.ai !== "dead").length < ENEMY_HEAL.maxAlive) {
+      if (this.rng.next() < ENEMY_HEAL.chance) return "healer";
+    }
     const options = casterKinds(this.floorTime);
     return options.length > 1 ? this.rng.pick(options) : options[0]!;
   }
@@ -300,7 +321,7 @@ export class EnemySystem {
     const e: Enemy = {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
-      loadout, spellTier, stunned: 0, frozen: 0, freezeImmune: 0, elite: isElite, nature, casts: 0, spell: kind, burn: null, slow: null, iceHits: [],
+      loadout, spellTier, stunned: 0, frozen: 0, freezeImmune: 0, elite: isElite, nature, casts: 0, spell: kind, burn: null, slow: null, marked: 0, bladeMark: 0, buffLeft: 0, buffCd: ENEMY_BUFF.everyS / 2, support: null, iceHits: [],
       damageMult,
     };
     this.list.push(e);
@@ -417,6 +438,10 @@ export class EnemySystem {
   /** Avanza la quemadura (daño por tick), la ralentización y la inmunidad al congelamiento. */
   private stepStatus(e: Enemy, dt: number): void {
     if (e.freezeImmune > 0) e.freezeImmune = Math.max(0, e.freezeImmune - dt);
+    if (e.marked > 0) e.marked = Math.max(0, e.marked - dt);
+    if (e.bladeMark > 0) e.bladeMark = Math.max(0, e.bladeMark - dt);
+    if (e.buffLeft > 0) e.buffLeft = Math.max(0, e.buffLeft - dt);
+    if (e.buffCd > 0) e.buffCd = Math.max(0, e.buffCd - dt);
     if (e.slow) {
       e.slow.left -= dt;
       if (e.slow.left <= STATUS_EPS) e.slow = null;
@@ -440,6 +465,71 @@ export class EnemySystem {
   private setAi(e: Enemy, ai: EnemyAi): void {
     e.ai = ai;
     e.aiTime = 0;
+    // Un gesto de apoyo solo vive dentro de su telegrafía: si la cortan (aturdido, congelado, muerto), se pierde.
+    e.support = null;
+  }
+
+  /** Eventos para los clientes (gestos de apoyo de los enemigos) desde la última llamada. */
+  takeEvents(): CombatEvent[] {
+    return this.events.splice(0);
+  }
+
+  /** Multiplicador de daño de sus golpes ahora: el suyo, más el refuerzo de un hechicero mientras dura. */
+  private damageOf(e: Enemy): number {
+    return e.damageMult * (e.buffLeft > 0 ? ENEMY_BUFF.damageMult : 1);
+  }
+
+  /** Los demás enemigos vivos a `radius` de `e`. */
+  private alliesNear(e: Enemy, radius: number): Enemy[] {
+    return this.list.filter((x) => x !== e && x.ai !== "dead" && x.hp > 0 && Math.hypot(x.x - e.x, x.z - e.z) <= radius);
+  }
+
+  /**
+   * Hechicero arcano listo para reforzar y con alguien cerca a quien hacerlo: empieza el gesto (con su aviso en
+   * el suelo) en vez de disparar. Devuelve si lo empezó.
+   */
+  private tryBuff(e: Enemy): boolean {
+    if (e.kind !== "mage" || e.buffCd > 0 || this.alliesNear(e, ENEMY_BUFF.radius).length === 0) return false;
+    this.setAi(e, "telegraph");
+    e.support = "buff";
+    e.buffCd = ENEMY_BUFF.retryS;
+    this.events.push({ type: "enemyBuff", x: e.x, z: e.z, radius: ENEMY_BUFF.radius, castS: ENEMY_BUFF.castS });
+    return true;
+  }
+
+  /** El aliado más herido (en proporción) que el curandero puede curar: a su alcance, vivo, ni él ni otro curandero. */
+  private healTarget(e: Enemy): Enemy | undefined {
+    return this.alliesNear(e, ENEMY_HEAL.range)
+      .filter((x) => x.kind !== "healer" && x.hp < x.maxHp)
+      .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+  }
+
+  /** Lo que hace un enemigo a distancia cuando le toca actuar: el curandero cura (si hay a quién), el hechicero arcano refuerza o dispara. */
+  private rangedAct(e: Enemy, target: SimPlayer): void {
+    if (e.kind === "healer") {
+      if (!this.healTarget(e)) return;
+      this.setAi(e, "telegraph");
+      e.support = "heal";
+      return;
+    }
+    if (!this.tryBuff(e)) this.startTelegraph(e, target);
+  }
+
+  /** Termina el gesto de apoyo: aplica el refuerzo o la cura y pasa a recuperarse. */
+  private finishSupport(e: Enemy): void {
+    if (e.support === "buff") {
+      for (const ally of [e, ...this.alliesNear(e, ENEMY_BUFF.radius)]) ally.buffLeft = ENEMY_BUFF.durationS;
+      e.buffCd = ENEMY_BUFF.everyS;
+    } else {
+      const ally = this.healTarget(e);
+      if (ally) {
+        const amount = Math.min(ally.maxHp - ally.hp, Math.round(ally.maxHp * ENEMY_HEAL.frac));
+        ally.hp += amount;
+        this.events.push({ type: "enemyHeal", from: [e.x, e.z], to: [ally.x, ally.z], amount, targetId: ally.id });
+      }
+    }
+    e.cooldown = ENEMY_DEFS[e.kind].cooldownS;
+    this.setAi(e, "recover");
   }
 
   /**
@@ -475,7 +565,7 @@ export class EnemySystem {
     // El hechicero élite alterna entre su hechizo y el siguiente; el daño y el tier son siempre los suyos.
     e.spell = e.elite && e.casts % 2 === 1 ? (NEXT_SPELL[e.kind] ?? e.kind) : e.kind;
     e.casts++;
-    const damage = Math.round(ENEMY_DEFS[e.kind].damage * e.damageMult);
+    const damage = Math.round(ENEMY_DEFS[e.kind].damage * this.damageOf(e));
     const tier = Math.max(1, e.spellTier) as CasterTier;
     const dx = target.x - e.x;
     const dz = target.z - e.z;
@@ -568,7 +658,7 @@ export class EnemySystem {
     if (e.ai === "idle") this.setAi(e, "chase");
 
     const def = ENEMY_DEFS[e.kind];
-    const speed = def.speed * (1 - (e.slow?.frac ?? 0));
+    const speed = def.speed * (1 - (e.slow?.frac ?? 0)) * (e.buffLeft > 0 ? ENEMY_BUFF.speedMult : 1);
     const atk = enemyAttack(e.kind, e.loadout);
     const dx = target.x - e.x;
     const dz = target.z - e.z;
@@ -581,6 +671,10 @@ export class EnemySystem {
     }
 
     if (e.ai === "telegraph") {
+      if (e.support) {
+        if (e.aiTime >= (e.support === "buff" ? ENEMY_BUFF.castS : def.telegraphS)) this.finishSupport(e);
+        return;
+      }
       if (e.aiTime < casterTelegraphS(e.spell, e.spellTier)) return;
       if (e.spell === "mage") {
         const dirX = d > 0 ? dx / d : Math.sin(e.facing);
@@ -592,7 +686,7 @@ export class EnemySystem {
           const [cos, sin] = [Math.cos(a), Math.sin(a)];
           this.shots.push({
             id: `p${this.nextShot++}`, x: e.x, z: e.z, dirX: dirX * cos + dirZ * sin, dirZ: dirZ * cos - dirX * sin,
-            speed: spell.speed, radius: ORB.radius, damage: Math.round(def.damage * e.damageMult),
+            speed: spell.speed, radius: ORB.radius, damage: Math.round(def.damage * this.damageOf(e)),
             life: ORB.lifetimeS, sourceId: e.id, ...(e.nature === "none" ? {} : { nature: e.nature, burnDps: ELITE.playerBurnDps * e.damageMult }),
           });
         }
@@ -602,7 +696,7 @@ export class EnemySystem {
       } else if (def.ranged) {
         // Pirómano: sus zonas se crearon al entrar en la telegrafía y explotan solas.
       } else if (d - PLAYER_RADIUS <= atk.attackRange + MELEE_TOLERANCE) {
-        hits.push(this.hitFrom(e, target.key, Math.round(atk.damage * e.damageMult), e.x, e.z));
+        hits.push(this.hitFrom(e, target.key, Math.round(atk.damage * this.damageOf(e)), e.x, e.z));
       }
       e.cooldown = def.cooldownS;
       this.setAi(e, "recover");
@@ -615,7 +709,7 @@ export class EnemySystem {
       const r = def.ranged.losRadius;
       const los = hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r);
       if (los && d >= def.ranged.preferredMin && d <= def.ranged.preferredMax) {
-        if (e.cooldown <= 0) this.startTelegraph(e, target);
+        if (e.cooldown <= 0) this.rangedAct(e, target);
         return;
       }
       if (!los) {
@@ -631,7 +725,7 @@ export class EnemySystem {
         if (!moved || !hasLineOfSight(this.dungeon, e.x, e.z, target.x, target.z, r)) {
           e.x = px;
           e.z = pz;
-          if (e.cooldown <= 0) this.startTelegraph(e, target);
+          if (e.cooldown <= 0) this.rangedAct(e, target);
         }
         return;
       }
@@ -748,6 +842,45 @@ export class EnemySystem {
     e.slow = { left: Math.max(s, e.slow?.left ?? 0), frac: Math.max(frac, e.slow?.frac ?? 0) };
   }
 
+  /** Marca del Rayo arcano: dura `s` segundos (se queda la mayor). */
+  mark(enemyId: string, s: number): void {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (e && e.ai !== "dead") e.marked = Math.max(e.marked, s);
+  }
+
+  /** Marca de las espadas: dura `s` segundos (se queda la mayor). */
+  bladeMarkOn(enemyId: string, s: number): void {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (e && e.ai !== "dead") e.bladeMark = Math.max(e.bladeMark, s);
+  }
+
+  /** Consume la marca de las espadas, si la tiene; devuelve si la tenía. */
+  takeBladeMark(enemyId: string): boolean {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (!e || e.ai === "dead" || e.bladeMark <= 0) return false;
+    e.bladeMark = 0;
+    return true;
+  }
+
+  /** Consume la marca del enemigo, si la tiene; devuelve si la tenía. */
+  takeMark(enemyId: string): boolean {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (!e || e.ai === "dead" || e.marked <= 0) return false;
+    e.marked = 0;
+    return true;
+  }
+
+  /**
+   * Congela `s` segundos por un hechizo (Escarcha), si no es inmune (recién descongelado, élite o `stunImmune`).
+   * Devuelve si quedó congelado.
+   */
+  freezeFor(enemyId: string, s: number): boolean {
+    const e = this.list.find((x) => x.id === enemyId);
+    if (!e || e.ai === "dead" || e.freezeImmune > 0 || e.elite || ENEMY_DEFS[e.kind].stunImmune) return false;
+    this.freeze(e, s);
+    return true;
+  }
+
   /** Congela `s` segundos y cancela su telegrafía; no afecta a muertos, élites ni `stunImmune`. */
   private freeze(e: Enemy, s: number): void {
     if (e.ai === "dead" || e.elite || ENEMY_DEFS[e.kind].stunImmune) return;
@@ -764,7 +897,12 @@ export class EnemySystem {
    */
   strike(enemyId: string, amount: number, src: StrikeSource): StrikeResult[] {
     const e = this.list.find((x) => x.id === enemyId);
-    const fx = natureEffects(src.nature, src.affinity);
+    // Con las tres naturalezas, cada efecto es el de la suya (quema como fuego, frena como hielo, salta como rayo).
+    const fx = src.allNatures
+      ? ELEMENTS.map((n) => natureEffects(n, src.affinity)).reduce((a, b) => ({
+          burnFrac: Math.max(a.burnFrac, b.burnFrac), slowFrac: Math.max(a.slowFrac, b.slowFrac), chainChance: Math.max(a.chainChance, b.chainChance),
+        }))
+      : natureEffects(src.nature, src.affinity);
     // Se sortea antes del daño para que el orden de la RNG no dependa de si hay arma que soltar.
     const chain = fx.chainChance > 0 && this.rng.next() < fx.chainChance;
     const r = this.damage(enemyId, amount);
@@ -831,10 +969,13 @@ export class EnemySystem {
     if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null, gear: null, relic: false };
     this.setAi(e, "dead");
     e.burn = null;
+    e.buffLeft = 0;
     e.frozen = 0;
     e.slow = null;
     e.iceHits = [];
     e.freezeImmune = 0;
+    e.marked = 0;
+    e.bladeMark = 0;
     const loot = this.rollDrop(e);
     return { killed: true, xp: ENEMY_DEFS[e.kind].xp * (e.elite ? ELITE.xpMult : 1), x: e.x, z: e.z, ...loot };
   }
@@ -858,7 +999,7 @@ export class EnemySystem {
     if (this.rng.next() < ELITE.dropChance) {
       const tier = Math.min(4, (e.loadout?.tier ?? e.spellTier) + 1) as WeaponTier;
       if (this.rng.next() < ELITE_GEAR_SHARE) gear = tier;
-      else drop = { weaponId: e.loadout?.weaponId ?? this.rng.pick(Object.keys(WEAPONS) as WeaponId[]), tier, nature: e.nature };
+      else drop = { weaponId: e.loadout?.weaponId ?? this.rng.pick(weaponsOf("warrior")), tier, nature: e.nature };
     }
     return { drop, gear, relic: this.rng.next() < ELITE_RELIC_CHANCE };
   }

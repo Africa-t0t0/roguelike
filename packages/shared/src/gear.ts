@@ -1,4 +1,4 @@
-import { BLOCK_MOVE_MULT, MIN_COOLDOWN_MULT, MIN_DAMAGE_TAKEN_MULT, playerMods, type AbilityId, type PlayerMods, type Progress, type StatCardId } from "./cards";
+import { MIN_COOLDOWN_MULT, MIN_DAMAGE_TAKEN_MULT, playerMods, type AbilityId, type PlayerMods, type Progress, type StatCardId } from "./cards";
 import type { ClassId } from "./combat";
 import type { Rng } from "./rng";
 import { rollTier } from "./waves";
@@ -52,44 +52,90 @@ export const MIN_COOLDOWN_MULT_HOURGLASS = 0.4;
 const SECONDARY_BAG: readonly GearStat[] = ["regen", "damage", "reach", "magnet", "xp", "cooldown", "lifeOnKill", "resFire", "resIce", "resLightning"];
 
 export type LegendaryId =
-  | "warcryLong" | "warcryHeal" | "blockReflect" | "lastStand"
-  | "whirlCharges" | "kickStun" | "slamCracks" | "thrustDash" | "warcryGuard" | "blockFree";
+  | "warcryLong" | "warcryHeal" | "lastStand"
+  | "whirlCharges" | "hookStun" | "slamCracks" | "thrustScar" | "warcryGuard" | "throwCharges" | "bannerGuard"
+  // del mago
+  | "healShield" | "beamPierce" | "novaGuard" | "frostArmor" | "tripleShot" | "mineCharges" | "orbTwin" | "meteorBurn"
+  | "gustDash" | "frostTrail";
 
 export const LEGENDARY_POOL: Record<ClassId, Record<GearSlot, LegendaryId[]>> = {
   warrior: {
     helmet: ["warcryLong", "warcryHeal"],
-    chest: ["blockReflect", "lastStand"],
-    gloves: ["whirlCharges", "kickStun"],
-    belt: ["warcryGuard", "blockFree"],
-    boots: ["slamCracks", "thrustDash"],
+    chest: ["bannerGuard", "lastStand"],
+    gloves: ["whirlCharges", "hookStun"],
+    belt: ["warcryGuard", "throwCharges"],
+    boots: ["slamCracks", "thrustScar"],
+  },
+  mage: {
+    helmet: ["healShield", "beamPierce"],
+    chest: ["novaGuard", "frostArmor"],
+    gloves: ["tripleShot", "mineCharges"],
+    belt: ["orbTwin", "meteorBurn"],
+    boots: ["gustDash", "frostTrail"],
   },
 };
 
 export const LEGENDARY_TEXT: Record<LegendaryId, string> = {
   warcryLong: "Grito de guerra dura un 50 % más",
   warcryHeal: "Grito de guerra también cura un 15 % de la vida a los aliados",
-  blockReflect: "Bloqueo devuelve el 30 % del daño bloqueado",
+  bannerGuard: "Dentro de tu Estandarte el grupo recibe un 20 % menos de daño",
+  hookStun: "Gancho de cadena aturde 1 s más",
+  thrustScar: "El rastro del Tajo frontal dura el doble y daña un 50 % más",
+  throwCharges: "Lanzar la espada tiene 2 cargas",
   lastStand: "Al bajar del 30 % de vida, te escudas 3 s: −80 % de daño recibido (una vez cada 30 s)",
   whirlCharges: "Torbellino tiene 2 cargas",
-  kickStun: "Patada aturde el doble de tiempo",
   slamCracks: "Golpe sísmico deja el suelo agrietado 3 s: ralentiza un 40 %",
-  thrustDash: "Tajo frontal te impulsa 3 m hacia adelante",
   warcryGuard: "Grito de guerra también reduce el daño recibido un 20 % mientras dura",
-  blockFree: "Bloquear no te ralentiza",
+  healShield: "Sanación también da un escudo del 15 % de la vida durante 5 s",
+  beamPierce: "Rayo arcano atraviesa a todos los enemigos de la línea antes de rebotar",
+  novaGuard: "Mientras cargas la Nova recibes un 50 % menos de daño",
+  frostArmor: "Quien te golpea de cerca queda ralentizado 2 s",
+  tripleShot: "El tercer ataque del bastón dispara 3 proyectiles en abanico",
+  mineCharges: "Mina arcana tiene 2 cargas",
+  orbTwin: "Esfera lanza una segunda esfera hacia atrás",
+  meteorBurn: "Cada meteorito deja fuego en el suelo 3 s",
+  gustDash: "Remolino te impulsa 4 m hacia atrás",
+  frostTrail: "Al esprintar dejas un rastro de hielo que ralentiza",
 };
 
 /** Habilidad que hace falta para que el efecto sirva (en gris si falta). `lastStand` no depende de ninguna. */
 export const LEGENDARY_ABILITY: Partial<Record<LegendaryId, AbilityId>> = {
   warcryLong: "warcry",
   warcryHeal: "warcry",
-  blockReflect: "block",
   whirlCharges: "whirlwind",
-  kickStun: "kick",
   slamCracks: "slam",
-  thrustDash: "thrust",
+  bannerGuard: "banner",
+  hookStun: "hook",
+  thrustScar: "thrust",
+  throwCharges: "throw",
   warcryGuard: "warcry",
-  blockFree: "block",
+  healShield: "heal",
+  beamPierce: "beam",
+  novaGuard: "nova",
+  mineCharges: "mine",
+  orbTwin: "orb",
+  meteorBurn: "meteors",
+  gustDash: "gust",
 };
+
+/** Números de las legendarias del mago (el servidor los aplica; el cliente solo predice las cargas de la Mina). */
+export const MAGE_LEGENDARY = {
+  healShieldFrac: 0.15,
+  healShieldS: 5,
+  novaGuardMult: 0.5,
+  frostArmorRangeM: 3,
+  frostArmorSlow: 0.4,
+  frostArmorS: 2,
+  tripleShotSpreadRad: 0.26,
+  mineCharges: 2,
+  meteorBurnS: 3,
+  meteorBurnMult: 0.3,
+  gustDashM: 4,
+  frostTrailEveryS: 0.3,
+  frostTrailS: 2.5,
+  frostTrailRadius: 1.3,
+  frostTrailSlow: 0.4,
+} as const;
 
 /**
  * Una entrada de `stats`. La resistencia general de las legendarias va como UNA entrada aparte con la clave
@@ -103,15 +149,15 @@ export interface GearItem {
   /** `stats[0]` es la principal, luego las secundarias y, en tier 4, `allRes` al final */
   stats: { stat: GearStatKey; value: number }[];
   legendary: LegendaryId | null;
+  /** rol para el que salió (solo cambia su nombre: tela para el mago); sin él, caballero */
+  cls?: ClassId;
 }
 
 /** Fracción de daño recibido que deja `warcryGuard` mientras dura el Grito (×0,8). Va aparte, DESPUÉS del piso de `damageTakenMult`. */
 export const WARCRY_GUARD_MULT = 0.8;
+/** Lo mismo dentro del Estandarte de quien lleva `bannerGuard`. */
+export const BANNER_GUARD_MULT = 0.8;
 
-/** Multiplicador de velocidad al bloquear: la mitad, salvo con `blockFree`. Lo usan el servidor y la predicción del cliente. */
-export function blockMoveMult(legendaries: readonly LegendaryId[]): number {
-  return legendaries.includes("blockFree") ? 1 : BLOCK_MOVE_MULT;
-}
 
 /** Evita restos de coma flotante (0,05 × 1,5 = 0,07500000000000001). */
 const round = (v: number): number => Math.round(v * 10000) / 10000;
@@ -128,7 +174,8 @@ export function rollGear(rng: Rng, slot: GearSlot, tier: WeaponTier, cls: ClassI
   const mult = GEAR_TIER_MULT[tier];
   const main = GEAR_MAIN[slot];
   const stats: GearItem["stats"] = [{ stat: main, value: rollValue(main, GEAR_BASE[main], mult) }];
-  const bag = SECONDARY_BAG.filter((s) => s !== main);
+  // El Alcance es del arma cuerpo a cuerpo: a las piezas del mago no les sale.
+  const bag = SECONDARY_BAG.filter((s) => s !== main && !(cls === "mage" && s === "reach"));
   for (let i = 0; i < GEAR_SECONDARIES[tier]; i++) {
     const s = bag.splice(rng.int(0, bag.length - 1), 1)[0]!;
     stats.push({ stat: s, value: rollValue(s, GEAR_BASE[s], mult) });
@@ -136,9 +183,10 @@ export function rollGear(rng: Rng, slot: GearSlot, tier: WeaponTier, cls: ClassI
   let legendary: LegendaryId | null = null;
   if (tier === 4) {
     stats.push({ stat: "allRes", value: GEAR_LEGENDARY_ALL_RES });
-    legendary = rng.pick(LEGENDARY_POOL[cls][slot]);
+    const pool = LEGENDARY_POOL[cls][slot];
+    if (pool.length > 0) legendary = rng.pick(pool);
   }
-  return { slot, tier, stats, legendary };
+  return { slot, tier, stats, legendary, ...(cls === "warrior" ? {} : { cls }) };
 }
 
 const GEAR_NAMES: Record<GearSlot, { name: string; gender: "f" | "m"; plural: boolean }> = {
@@ -149,9 +197,20 @@ const GEAR_NAMES: Record<GearSlot, { name: string; gender: "f" | "m"; plural: bo
   boots: { name: "Botas", gender: "f", plural: true },
 };
 
+/** Las piezas del mago son de tela. */
+const MAGE_GEAR_NAMES: typeof GEAR_NAMES = {
+  helmet: { name: "Capucha", gender: "f", plural: false },
+  chest: { name: "Túnica", gender: "f", plural: false },
+  gloves: { name: "Guantes de seda", gender: "m", plural: true },
+  belt: { name: "Fajín", gender: "m", plural: false },
+  boots: { name: "Sandalias", gender: "f", plural: true },
+};
+
 export function gearName(item: GearItem): string {
-  const g = GEAR_NAMES[item.slot];
-  return `${g.name} ${TIERS[item.tier].suffix[g.gender]}${g.plural ? "s" : ""}`;
+  const g = (item.cls === "mage" ? MAGE_GEAR_NAMES : GEAR_NAMES)[item.slot];
+  // La tela no se oxida: la de calidad 1 está raída.
+  const suffix = item.cls === "mage" && item.tier === 1 ? { f: "raída", m: "raído" }[g.gender] : TIERS[item.tier].suffix[g.gender];
+  return `${g.name} ${suffix}${g.plural ? "s" : ""}`;
 }
 
 const STAT_TEXT: Record<GearStatKey, { kind: "flat" | "pct"; sign: "+" | "-"; label: string }> = {

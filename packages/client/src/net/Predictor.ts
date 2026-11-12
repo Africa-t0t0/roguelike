@@ -33,7 +33,7 @@ export class Predictor {
 
   /**
    * Los mismos modificadores de movimiento que usa el servidor (los informa el estado sincronizado, con el
-   * Bloqueo predicho). Valen para los próximos `applyLocal`; al reconciliar, cada input usa los suyos.
+   * freno de las habilidades en curso). Valen para los próximos `applyLocal`; al reconciliar, cada input usa los suyos.
    */
   setMoveMods(mods: MoveMods): void {
     this.mods = { ...mods };

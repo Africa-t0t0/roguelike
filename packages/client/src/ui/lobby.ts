@@ -1,5 +1,8 @@
+import { isClassId, type ClassId } from "@roguelike/shared";
+
 const NAME_KEY = "roguelike.name";
 const CODE_KEY = "roguelike.room";
+const CLASS_KEY = "roguelike.class";
 
 function el<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -8,8 +11,8 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 export interface LobbyHandlers {
-  onCreate(name: string): void;
-  onJoin(name: string, code: string): void;
+  onCreate(name: string, cls: ClassId): void;
+  onJoin(name: string, code: string, cls: ClassId): void;
 }
 
 /** Lobby, código de sala en el juego y aviso de desconexión. Solo DOM; la lógica vive en main.ts. */
@@ -24,13 +27,22 @@ export class Lobby {
   private readonly hudCode = el<HTMLElement>("hud-code");
   private readonly lost = el<HTMLDivElement>("lost");
   private readonly rejoin = el<HTMLButtonElement>("rejoin");
+  private readonly roles = [...document.querySelectorAll<HTMLButtonElement>("#roles .role")];
+  /** rol elegido: el último usado en este navegador o, si no hay, caballero */
+  private cls: ClassId = isClassId(readStored(CLASS_KEY)) ? (readStored(CLASS_KEY) as ClassId) : "warrior";
 
   constructor(handlers: LobbyHandlers, onRejoin: () => void) {
     this.name.value = readStored(NAME_KEY);
     this.code.value = initialCode();
+    for (const b of this.roles) {
+      b.addEventListener("click", () => {
+        if (isClassId(b.dataset.cls)) this.pickRole(b.dataset.cls);
+      });
+    }
+    this.pickRole(this.cls);
     this.createBtn.addEventListener("click", () => {
       this.begin();
-      handlers.onCreate(this.name.value);
+      handlers.onCreate(this.name.value, this.cls);
     });
     this.lobby.addEventListener("submit", (e) => {
       e.preventDefault(); // Enter o "Unirse"
@@ -39,7 +51,7 @@ export class Lobby {
         return;
       }
       this.begin();
-      handlers.onJoin(this.name.value, this.code.value);
+      handlers.onJoin(this.name.value, this.code.value, this.cls);
     });
     this.rejoin.addEventListener("click", () => {
       this.rejoin.disabled = true;
@@ -73,6 +85,16 @@ export class Lobby {
     this.rejoin.disabled = false;
     this.hud.hidden = true;
     this.lost.hidden = false;
+  }
+
+  private pickRole(cls: ClassId): void {
+    this.cls = cls;
+    writeStored(CLASS_KEY, cls);
+    for (const b of this.roles) {
+      const on = b.dataset.cls === cls;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    }
   }
 
   private begin(): void {

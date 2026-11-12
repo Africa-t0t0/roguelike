@@ -1,4 +1,4 @@
-import { applyCard, CHOICE_TIME_S, rollOffer, type CardOffer, type Nature, type Progress, type Rng } from "@roguelike/shared";
+import { applyCard, CHOICE_TIME_S, rollOffer, type CardOffer, type ClassId, type Nature, type Progress, type Rng } from "@roguelike/shared";
 
 /** Lo que el sistema necesita de un registro de jugador (PlayerRecord lo cumple). */
 export interface ChoiceRecord {
@@ -7,7 +7,7 @@ export interface ChoiceRecord {
   /** elecciones de carta que le faltan; se conservan al desconectarse */
   pendingChoices: number;
   /** Arma equipada: su naturaleza decide si la Afinidad entra en la oferta (PlayerRecord.combat la cumple). */
-  combat?: { weaponNature: Nature };
+  combat?: { weaponNature: Nature; cls?: ClassId };
 }
 
 export type ChoiceEvent =
@@ -151,7 +151,7 @@ export class LevelUpSystem {
   }
 
   private open(record: ChoiceRecord, solo: boolean, index: number, total: number): ChoiceEvent {
-    const cards = rollOffer(this.rng, record.progress, { natureWeapon: (record.combat?.weaponNature ?? "none") !== "none" });
+    const cards = rollOffer(this.rng, record.progress, { natureWeapon: (record.combat?.weaponNature ?? "none") !== "none", cls: record.combat?.cls });
     const offerId = this.nextOfferId++;
     this.offers.set(record.key, { offerId, record, cards, solo, left: CHOICE_TIME_S, index, total });
     return { type: "offer", key: record.key, offerId, cards, index, total, deadlineS: CHOICE_TIME_S };

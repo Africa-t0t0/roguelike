@@ -160,6 +160,7 @@ export class PlayerRegistry {
     // Tampoco sobreviven la animación de una habilidad ni el Bloqueo; los enfriamientos y el Grito sí.
     record.combat.abilityAnim = null;
     record.combat.heldMask = 0;
-    record.combat.blocking = false;
+    record.combat.queuedMask = 0;
+    record.combat.queuedLeft = 0;
   }
 }

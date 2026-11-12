@@ -31,8 +31,8 @@ describe("textos del panel de cartas", () => {
   });
 
   it("tipo de cada carta", () => {
-    expect(cardKindLabel({ kind: "ability", id: "kick", rank: 1 })).toBe("Habilidad nueva");
-    expect(cardKindLabel({ kind: "ability", id: "kick", rank: 2 })).toBe("Mejora de habilidad");
+    expect(cardKindLabel({ kind: "ability", id: "hook", rank: 1 })).toBe("Habilidad nueva");
+    expect(cardKindLabel({ kind: "ability", id: "hook", rank: 2 })).toBe("Mejora de habilidad");
     expect(cardKindLabel({ kind: "ability", id: "cleave", rank: 1 })).toBe("Pasiva");
     expect(cardKindLabel({ kind: "stat", id: "regen" })).toBe("Atributo");
   });

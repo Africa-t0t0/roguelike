@@ -14,7 +14,6 @@ import {
   BASE_REGEN,
   CHOICE_TIME_S,
   THRUST_WIDTH,
-  THRUST_IMPACT_FRAC,
   PROTOCOL_VERSION,
   type AbilityId,
   type CardOffer,
@@ -71,18 +70,17 @@ describe("Aprendizaje, Celeridad y Tajo frontal", () => {
   it("definición del Tajo y clips", () => {
     const t = ABILITIES.thrust;
     expect(t.kind).toBe("active");
-    expect(t.cooldownS).toBe(7);
-    expect(t.animS).toBe(0.7);
+    expect(t.cooldownS).toBe(8);
     expect(t.clip).toBe("gs_slide_attack");
-    expect(t.ranks.map((r) => r.range)).toEqual([4, 6, 8]);
-    expect(t.ranks.map((r) => r.damageMult)).toEqual([1.3, 1.6, 2.0]);
-    expect(THRUST_WIDTH).toBe(1.2);
-    expect(THRUST_IMPACT_FRAC).toBe(0.45);
+    expect(t.ranks.map((r) => r.range)).toEqual([10, 10, 10]);
+    expect(t.ranks[2]!.count).toBe(3);
+    expect(THRUST_WIDTH).toBe(1.4);
     expect(ABILITIES.slam.clip).toBe("gs_jump_attack");
-    expect(PROTOCOL_VERSION).toBe(14);
+    expect(PROTOCOL_VERSION).toBe(18);
   });
-  it("cardText del Tajo rango 2 menciona 6 m", () => {
-    expect(cardText({ kind: "ability", id: "thrust", rank: 2 })).toContain("6 m");
+  it("cardText del Tajo menciona 10 m y, en rango 3, sus cargas", () => {
+    expect(cardText({ kind: "ability", id: "thrust", rank: 2 })).toContain("10 m");
+    expect(cardText({ kind: "ability", id: "thrust", rank: 3 })).toContain("3 cargas");
   });
 });
 
@@ -105,7 +103,7 @@ describe("rollOffer", () => {
       stats: {},
       abilities: [
         { id: "whirlwind", rank: 3 },
-        { id: "kick", rank: 2 },
+        { id: "hook", rank: 2 },
         { id: "warcry", rank: 1 },
         { id: "slam", rank: 3 },
         { id: "cleave", rank: 3 },
@@ -116,12 +114,12 @@ describe("rollOffer", () => {
       const a = rollOffer(rng, p).find((c) => c.kind === "ability");
       expect(a).toBeDefined();
       if (a?.kind !== "ability") throw new Error();
-      expect(["kick", "warcry"]).toContain(a.id);
-      expect(a.rank).toBe(a.id === "kick" ? 3 : 2);
+      expect(["hook", "warcry"]).toContain(a.id);
+      expect(a.rank).toBe(a.id === "hook" ? 3 : 2);
     }
   });
   it("con todo al máximo da 3 de stat", () => {
-    const ids: AbilityId[] = ["whirlwind", "kick", "warcry", "slam", "cleave", "thrust"];
+    const ids: AbilityId[] = ["whirlwind", "warcry", "slam", "cleave", "thrust", "throw", "hook", "banner"];
     const p: Progress = { stats: {}, abilities: ids.map((id) => ({ id, rank: 3 })) };
     const o = rollOffer(createRng(1), p);
     expect(o).toHaveLength(3);
@@ -133,10 +131,10 @@ describe("rollOffer", () => {
 describe("applyCard", () => {
   it("agrega habilidad nueva en rango 1 y sube rangos", () => {
     const p = empty();
-    applyCard(p, { kind: "ability", id: "kick", rank: 1 });
-    expect(p.abilities).toEqual([{ id: "kick", rank: 1 }]);
-    applyCard(p, { kind: "ability", id: "kick", rank: 2 });
-    expect(p.abilities).toEqual([{ id: "kick", rank: 2 }]);
+    applyCard(p, { kind: "ability", id: "hook", rank: 1 });
+    expect(p.abilities).toEqual([{ id: "hook", rank: 1 }]);
+    applyCard(p, { kind: "ability", id: "hook", rank: 2 });
+    expect(p.abilities).toEqual([{ id: "hook", rank: 2 }]);
     applyCard(p, { kind: "stat", id: "magnet" });
     applyCard(p, { kind: "stat", id: "magnet" });
     expect(p.stats.magnet).toBe(2);
@@ -145,8 +143,8 @@ describe("applyCard", () => {
 
 describe("curva y velocidad de ataque", () => {
   it("xpToNext", () => {
-    expect(xpToNext(1)).toBe(100);
-    expect(xpToNext(5)).toBe(260);
+    expect(xpToNext(1)).toBe(65);
+    expect(xpToNext(5)).toBe(165);
   });
   it("strikeOf divide la duración", () => {
     expect(strikeOf("kingslayer-sword", 1, 1.25).duration).toBeCloseTo(0.35 / 1.25);

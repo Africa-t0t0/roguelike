@@ -6,17 +6,20 @@ import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ABILITIES, MOVESETS, WEAPONS, strikeOf, type AbilityId, type Strike, type GearSlot, type Nature, type RelicId, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { ABILITIES, MOVESETS, WEAPONS, abilityAnimS, strikeOf, type AbilityId, type ClassId, type Strike, type GearSlot, type Nature, type RelicId, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { EquippedGear } from "../net/connection";
 import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
 import { CharacterView } from "./characterView";
+import { applyBodyGlow } from "./casterLooks";
 import { SetAuraFx } from "./bodyAura";
 import { flameTexture } from "./fxTextures";
 import { GearFxShared, GearLooks } from "./gearLooks";
 import { GearTint } from "./gearTint";
-import { PLAYER_LOOK } from "./looks";
+import { PLAYER_LOOK, PLAYER_LOOKS } from "./looks";
+
+const MAGE_OVERLAY = { color: new Color3(0.42, 0.5, 1), alpha: 0.3 };
 
 const LABEL_W = 2;
 const LABEL_H = 0.5;
@@ -31,20 +34,21 @@ export interface HeroState {
   weaponId: WeaponId;
   weaponTier: WeaponTier;
   weaponNature: Nature;
-  blocking: boolean;
   /** velocidad de ataque (Furia): ajusta la duración de los golpes */
   attackSpeedMult: number;
   /**
    * Habilidad en curso y cuánto lleva (s), para el propio jugador (predicha). Sin ella, la que anuncie
    * el evento `ability` (los remotos).
    */
-  ability?: { id: AbilityId; elapsed: number } | null;
+  ability?: { id: AbilityId; elapsed: number; rank?: number } | null;
   /** equipo y reliquia puestos (brillo por parte del cuerpo y gema que orbita); sin ellos, nada */
   gear?: Partial<Record<GearSlot, EquippedGear>>;
   relic?: RelicId | null;
 }
 
 interface PlayerView {
+  /** rol con el que se creó: si cambia (sala de pruebas), la vista se rehace con el otro cuerpo */
+  cls: ClassId;
   character: CharacterView;
   gearLooks: GearLooks;
   /** tinte y contorno del color de cada pieza sobre su parte del cuerpo */
@@ -55,7 +59,7 @@ interface PlayerView {
   /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
   swing?: { step: number; startMs: number; restart: boolean };
   /** Habilidad anunciada por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
-  ability?: { id: AbilityId; startMs: number };
+  ability?: { id: AbilityId; startMs: number; rank: number };
   /** cuánto llevaba la habilidad dibujada en el cuadro anterior (para reiniciar el clip si empieza otra) */
   abilityElapsed?: number;
   /** golpe que se dibujaba en el cuadro anterior (para notar cuándo empieza otro) */
@@ -118,9 +122,13 @@ export class PlayerViews {
   }
 
   /** Crea las vistas de los que entraron y destruye las de los que salieron. */
-  sync(players: Map<string, { name: string }>): void {
+  sync(players: Map<string, { name: string; cls?: ClassId }>): void {
     for (const [key, p] of players) {
-      if (!this.views.has(key)) this.views.set(key, this.create(key, p.name));
+      const cls = p.cls ?? "warrior";
+      const old = this.views.get(key);
+      if (old && old.cls === cls) continue;
+      old?.dispose();
+      this.views.set(key, this.create(key, p.name, cls));
     }
     for (const [key, view] of this.views) {
       if (!players.has(key)) {
@@ -137,9 +145,9 @@ export class PlayerViews {
   }
 
   /** Otro jugador empezó una habilidad en `startMs` (mismo reloj que se pasa a `render`). */
-  ability(key: string, id: AbilityId, startMs: number): void {
+  ability(key: string, id: AbilityId, startMs: number, rank = 1): void {
     const view = this.views.get(key);
-    if (view) view.ability = { id, startMs };
+    if (view) view.ability = { id, startMs, rank };
   }
 
   /**
@@ -190,8 +198,8 @@ export class PlayerViews {
     const ev = view.ability;
     if (state.ability === undefined && ev) {
       const elapsed = (nowMs - ev.startMs) / 1000;
-      if (elapsed >= ABILITIES[ev.id].animS) view.ability = undefined;
-      else if (elapsed >= 0) ability = { id: ev.id, elapsed };
+      if (elapsed >= abilityAnimS(ev.id, ev.rank)) view.ability = undefined;
+      else if (elapsed >= 0) ability = { id: ev.id, elapsed, rank: ev.rank };
     }
     // Una habilidad nueva (o la misma otra vez) reinicia su clip aunque ya sonara (p. ej. el Torbellino
     // usa el clip del golpe 2 del mandoble).
@@ -210,7 +218,6 @@ export class PlayerViews {
       dead: state.dead,
       hurtRecently,
       ability,
-      blocking: state.blocking,
       attackSpeedMult: state.attackSpeedMult,
     };
     const choice = chooseHeroAnim(input, this.clipLengths);
@@ -243,8 +250,11 @@ export class PlayerViews {
     this.flame = undefined;
   }
 
-  private create(key: string, name: string): PlayerView {
-    const character = new CharacterView(this.scene, this.assets, this.anims, PLAYER_LOOK);
+  private create(key: string, name: string, cls: ClassId): PlayerView {
+    const character = new CharacterView(this.scene, this.assets, this.anims, PLAYER_LOOKS[cls]);
+    // El modelo del hechicero es muy oscuro: una capa azul violácea lo separa del suelo (y del hechicero enemigo,
+    // que va de verde). Antes del rótulo y el aro, que no la llevan.
+    if (cls === "mage") applyBodyGlow(character.root, { outline: null, overlay: MAGE_OVERLAY }, character.unitsPerMeter());
     const label = createLabel(this.scene, key, name, character.root);
     const marker = CreateTorus(`playerMarker-${key}`, { diameter: MARKER_RADIUS * 2, thickness: 0.05, tessellation: 40 }, this.scene);
     const markerMat = new StandardMaterial(`playerMarkerMat-${key}`, this.scene);
@@ -260,10 +270,11 @@ export class PlayerViews {
     marker.isPickable = false;
     const gearLooks = new GearLooks(this.scene, this.gearFx, character);
     // Mallas con esqueleto: el cuerpo (el arma cuelga de la mano sin esqueleto).
-    const gearTint = new GearTint(character.root.getChildMeshes(false).filter((m) => m.skeleton));
+    const gearTint = new GearTint(character.root.getChildMeshes(false).filter((m) => m.skeleton), cls === "mage");
     const setAura = new SetAuraFx(this.scene, () => (this.flame ??= flameTexture(this.scene, "player-flame")), character, PLAYER_LOOK.height);
     setAura.setPaused(this.paused);
     return {
+      cls,
       character,
       gearLooks,
       gearTint,

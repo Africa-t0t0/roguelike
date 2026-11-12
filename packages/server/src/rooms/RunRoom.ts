@@ -13,6 +13,12 @@ import {
   FLOOR_WEAPON_TTL_S,
   GEAR_SLOTS,
   generateDungeon,
+  isClassId,
+  STARTING_WEAPONS,
+  STAT_CARD_CLASS,
+  type StatCardId,
+  weaponForClass,
+  weaponsOf,
   isWalkableTile,
   JOIN_ERROR_STATUS,
   MAX_INPUTS_PER_TICK,
@@ -45,6 +51,7 @@ import {
   type CombatEvent,
   type DevCommand,
   type Dungeon,
+  type Nature,
   deadInput,
   type KinematicState,
   type PlayerInput,
@@ -169,7 +176,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.armEmptyTimer();
   }
 
-  onJoin(client: Client, options: { name?: unknown; token?: unknown; version?: unknown } = {}): void {
+  onJoin(client: Client, options: { name?: unknown; token?: unknown; version?: unknown; cls?: unknown } = {}): void {
     // Una pestaña con código viejo se rechaza antes de tocar el registro.
     if (options.version !== PROTOCOL_VERSION) {
       throw new ServerError(JOIN_ERROR_STATUS["version-mismatch"], "version-mismatch");
@@ -178,7 +185,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     const result = this.registry.join(
       { name: options.name, token: options.token, sessionId: client.sessionId },
       () => this.spawnFor(key),
-      () => newCombatState("warrior", this.combat.level),
+      // El rol solo cuenta la primera vez que ese nombre entra; sin él (o con uno desconocido), caballero.
+      () => newCombatState(isClassId(options.cls) ? options.cls : "warrior", this.combat.level),
       (equipped) => this.initialFloorWeapons(equipped),
     );
     if (!result.ok) throw new ServerError(JOIN_ERROR_STATUS[result.code], result.code);
@@ -316,6 +324,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         const p = record.progress;
         const newActive =
           card.kind === "ability" && ABILITIES[card.id].kind !== "passive" && !p.abilities.some((a) => a.id === card.id);
+        if (card.kind === "ability" && ABILITIES[card.id].cls !== c.cls) return;
         if (newActive && activeAbilityCount(p) >= MAX_ACTIVE_ABILITIES) return;
         applyCard(p, card);
         this.handleChoices([{ type: "applied", key: record.key, card }]);
@@ -327,7 +336,6 @@ export class RunRoom extends Room<{ state: RunState }> {
         record.progress.abilities.length = 0;
         c.abilityCd = {};
         c.abilityAnim = null;
-        c.blocking = false;
         this.refreshMods(record);
         break;
       case "god":
@@ -392,7 +400,28 @@ export class RunRoom extends Room<{ state: RunState }> {
         record.relic = cmd.id;
         this.refreshMods(record);
         break;
+      case "class":
+        if (c.cls === cmd.cls) break;
+        c.cls = cmd.cls;
+        c.weaponId = STARTING_WEAPONS[cmd.cls];
+        c.weaponTier = 1;
+        c.weaponNature = "none";
+        Object.assign(c, newComboTimers());
+        // En su sitio: el combate lee las habilidades del mismo arreglo. Las del otro rol no sirven.
+        record.progress.abilities.length = 0;
+        c.abilityCd = {};
+        c.abilityAnim = null;
+        // Lo que no es de su rol se va: las cartas de stat del otro rol y las armas del suelo, que pasan a ser del suyo.
+        for (const id of Object.keys(record.progress.stats) as StatCardId[]) {
+          if (STAT_CARD_CLASS[id] !== undefined && STAT_CARD_CLASS[id] !== cmd.cls) delete record.progress.stats[id];
+        }
+        this.convertFloorWeapons(record);
+        this.refreshMods(record);
+        c.hp = c.maxHp;
+        break;
       case "weapon":
+        // Solo armas de su rol.
+        if (WEAPONS[cmd.weaponId].cls !== c.cls) break;
         c.weaponId = cmd.weaponId;
         c.weaponTier = cmd.tier;
         c.weaponNature = cmd.nature;
@@ -432,14 +461,15 @@ export class RunRoom extends Room<{ state: RunState }> {
 
     // 1. Inputs (habilidades y ataques) de cada jugador conectado.
     const party = connected.map((r) => r.combat);
+    // Dónde está cada uno (al empezar el tick), para lo que alcanza a los cercanos (Grito de guerra).
+    const partyAt = new Map(connected.map((r) => [r.combat, r.kinematic] as const));
     for (const record of connected) {
       for (const raw of record.inputQueue.splice(0, MAX_INPUTS_PER_TICK)) {
         const c = record.combat;
         const input = c.dead ? deadInput(raw, record.kinematic) : raw;
-        // Bloqueando (según el input anterior) se mueve a la mitad.
-        // En el salto del Golpe sísmico no se camina: lo mueve la habilidad (más abajo), paso a paso hasta caer.
-        const leap = c.abilityAnim;
-        const leaping = leap?.id === "slam" && leap.impacts.length > 0 && (leap.leapSpeed ?? 0) > 0;
+        // En el salto del Golpe sísmico y la embestida del Tajo frontal no se camina: lo mueve la habilidad (más
+        // abajo), paso a paso mientras dura.
+        const leaping = (c.abilityAnim?.leapLeft ?? 0) > 0 && (c.abilityAnim?.leapSpeed ?? 0) > 0;
         const moving = leaping ? { ...input, moveX: 0, moveZ: 0, jump: false } : input;
         record.kinematic = stepPlayer(record.kinematic, moving, this.dungeon, SIM_DT, { speedMult: moveSpeedMult(c) });
         record.lastSeq = input.seq;
@@ -449,16 +479,22 @@ export class RunRoom extends Room<{ state: RunState }> {
           this.impact(record.key, res.impact);
           this.abilities.onComboImpact(c, record.kinematic, res.impact.step, record.key);
         }
+        if (res.shot) this.abilities.staffShot(c, record.kinematic, res.shot, record.key, input.facing);
         if (res.damage > 0) this.emitPlayerDamage(record.key, res.damage, record.kinematic);
         this.impact(record.key, this.combat.flushReflects(c, this.enemySystem, record.key));
         // Habilidades después del combo y antes del ataque (que no se puede durante su animación).
         const ab = this.abilities.onInput(
-          c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party, record.key,
+          c, record.kinematic, input, this.state.tick, this.enemySystem, this.history, party, record.key, partyAt,
         );
-        if (ab.started) this.emit({ type: "ability", key: record.key, id: ab.started, ...(ab.leapDist !== undefined ? { aimDist: ab.leapDist } : {}) });
-        // Impulso del Tajo frontal y salto del Golpe sísmico: el servidor mueve al jugador; el cliente se corrige con la reconciliación.
+        if (ab.started) {
+          const aimDist = ab.leapDist ?? ab.aimDist;
+          this.emit({ type: "ability", key: record.key, id: ab.started, rank: ab.rank ?? 1, ...(aimDist !== undefined ? { aimDist } : {}) });
+          if (ab.started === "heal") this.emit({ type: "heal", keys: connected.filter((r) => !r.combat.dead).map((r) => r.key) });
+        }
+        // Embestida del Tajo frontal, salto del Golpe sísmico y retroceso del Remolino: el servidor mueve al jugador; el cliente los predice.
         if (ab.dash) record.kinematic = { ...record.kinematic, x: ab.dash.x, z: ab.dash.z };
         this.impact(record.key, ab);
+        for (const e of this.abilities.takeEvents()) this.emit(e);
         // Antes del ataque de este input: con un swing o una habilidad en curso no se cambia de arma.
         if (input.interact && !c.dead && c.swingTimer === 0 && !c.abilityAnim) {
           if (!this.tryOpenChest(record)) this.tryPickup(record);
@@ -487,10 +523,12 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (connected.length > 0 && started && this.wavesOn) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
+    for (const e of this.enemySystem.takeEvents()) this.emit(e);
     this.burnTick();
     // Enfriamientos, Grito y ondas (por tick: se congelan en la pausa).
     const positions = new Map(connected.map((r) => [r.key, r.kinematic]));
     for (const r of this.abilities.step(states, this.enemySystem, SIM_DT, positions)) this.impact(r.key, r);
+    for (const e of this.abilities.takeEvents()) this.emit(e);
     // Orbes: los atraen y recogen los vivos; la xp es del grupo y sube la vida máxima de todos los registros.
     // Si se sube de nivel, la pausa empieza al final de este tick.
     const levels = this.combat.grantXp(allStates, this.orbs.step(alive, SIM_DT));
@@ -566,7 +604,7 @@ export class RunRoom extends Room<{ state: RunState }> {
   private spawnKills(kills: Pick<ImpactResult, "kills">["kills"]): void {
     for (const k of kills) {
       this.orbs.spawn(k.x, k.z, k.xp, this.state.tick);
-      if (k.drop) this.dropItem({ kind: "weapon", ...k.drop, x: k.x, z: k.z });
+      if (k.drop) this.dropWeapon(k.drop.weaponId, k.drop.tier, k.drop.nature, k.x, k.z);
       const rng = this.lootRng;
       // Cada jugador conectado recibe su propia pieza (ranura y stats) y su propia reliquia.
       for (const r of this.registry.connected()) {
@@ -631,9 +669,33 @@ export class RunRoom extends Room<{ state: RunState }> {
     return this.floorTime + FLOOR_WEAPON_TTL_S;
   }
 
-  /** Cada jugador conectado recibe su propia copia del objeto soltado y se le reenvía su lista. */
-  private dropItem(item: DistributiveOmit<FloorItem, "expiresAt">): void {
-    for (const r of this.registry.connected()) this.giveFloorItem(r, item);
+  /**
+   * Cada jugador conectado recibe su propia copia del arma soltada, convertida a su rol: de la misma caída el
+   * caballero ve la espada y el mago un bastón, con el mismo tier y naturaleza.
+   */
+  private dropWeapon(weaponId: WeaponId, tier: WeaponTier, nature: Nature, x: number, z: number): void {
+    for (const r of this.registry.connected()) {
+      this.giveFloorItem(r, { kind: "weapon", weaponId: weaponForClass(weaponId, r.combat.cls), tier, nature, x, z });
+    }
+  }
+
+  /**
+   * Tras cambiar de rol (sala de pruebas): las armas del suelo del otro rol pasan a ser del suyo, sin repetir la
+   * misma arma, tier y naturaleza (dos espadas distintas darían dos bastones iguales), y se le reenvía la lista.
+   */
+  private convertFloorWeapons(record: PlayerRecord): void {
+    const seen = new Set<string>();
+    record.floorWeapons = record.floorWeapons.filter((f) => {
+      if (f.kind !== "weapon") return true;
+      f.weaponId = weaponForClass(f.weaponId, record.combat.cls);
+      const key = `${f.weaponId}:${f.tier}:${f.nature}`;
+      const equipped = f.weaponId === record.combat.weaponId && f.tier === record.combat.weaponTier && f.nature === record.combat.weaponNature;
+      if (seen.has(key) || equipped) return false;
+      seen.add(key);
+      return true;
+    });
+    const client = this.clients.find((c) => c.sessionId === record.sessionId);
+    if (client) this.sendFloorWeapons(client, record);
   }
 
   /** Agrega un objeto a la lista del suelo de un jugador y se la reenvía si está conectado. */
@@ -682,7 +744,7 @@ export class RunRoom extends Room<{ state: RunState }> {
           this.giveFloorItem(r, { kind: "relic", id: rng.pick(RELIC_IDS), x: at.x, z: at.z });
           continue;
         }
-        const weaponId = loot === "weapon" ? rng.pick(Object.keys(WEAPONS) as WeaponId[]) : null;
+        const weaponId = loot === "weapon" ? weaponForClass(rng.pick(weaponsOf("warrior")), r.combat.cls) : null;
         const nature = loot === "weapon" ? rng.pick(ELEMENTS) : null;
         const base = rollTier(rng, this.floorTime, this.state.floor);
         const tier = Math.min(4, base + (rng.next() < CHEST_LOOT.tierBumpChance ? 1 : 0)) as WeaponTier;
@@ -698,7 +760,7 @@ export class RunRoom extends Room<{ state: RunState }> {
    * que siguen a los MAX_PLAYERS primeros (reservados para aparecer).
    */
   private initialFloorWeapons(equipped: WeaponId): FloorItem[] {
-    const ids = (Object.keys(WEAPONS) as WeaponId[]).filter((id) => id !== equipped);
+    const ids = weaponsOf(WEAPONS[equipped].cls).filter((id) => id !== equipped);
     const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + ids.length).slice(MAX_PLAYERS);
     if (points.length < ids.length) throw new Error("la sala inicial no tiene sitio para las armas del suelo");
     const expiresAt = this.floorWeaponExpiry();
@@ -730,6 +792,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     let best = -1;
     let bestD2 = Infinity;
     record.floorWeapons.forEach((f, i) => {
+      // Un arma de otro rol no se puede tomar (no debería haber ninguna en su lista).
+      if (f.kind === "weapon" && WEAPONS[f.weaponId].cls !== record.combat.cls) return;
       const d2 = (f.x - x) ** 2 + (f.z - z) ** 2;
       if (d2 <= PICKUP_RANGE ** 2 && d2 < bestD2) [best, bestD2] = [i, d2];
     });

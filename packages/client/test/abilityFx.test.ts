@@ -54,7 +54,7 @@ describe("efectos de habilidades", () => {
   it("todas las habilidades activas terminan sin mallas ni partículas huérfanas", () => {
     const { scene, fx } = setup();
     const before = scene.meshes.length;
-    for (const id of ["whirlwind", "kick", "warcry", "slam", "thrust"] as const) {
+    for (const id of ["whirlwind", "warcry", "slam", "thrust", "throw", "hook", "banner"] as const) {
       for (const rank of [1, 2, 3]) {
         fx.play(id, AT, rank, 0);
         for (let t = 0; t <= abilityFxDurationMs(id, rank); t += 50) fx.update(t);
@@ -102,21 +102,19 @@ describe("efectos de habilidades", () => {
     expect(impacts).toEqual([{ x: 3, z: 4 }]);
   });
 
-  it("la Patada y el Tajo salen hacia donde mira el jugador", () => {
+  it("el Tajo sale hacia donde mira el jugador", () => {
     const { scene, fx } = setup();
     const at = { x: 0, z: 0, facing: Math.PI / 2 }; // mira a +X
     fx.play("thrust", at, 3, 0);
-    fx.play("kick", at, 1, 0);
-    fx.update(350); // Patada: 0,24–0,39 s; Tajo: 0,315–0,615 s
-    for (const name of ["fx-thrust", "fx-kick"]) {
-      const mesh = scene.meshes.find((m) => m.name.startsWith(name) && m.isEnabled());
-      expect(mesh, name).toBeDefined();
-      mesh!.computeWorldMatrix(true);
-      const c = mesh!.getBoundingInfo().boundingBox.centerWorld;
-      expect(c.x, name).toBeGreaterThan(0.5);
-      expect(Math.abs(c.z), name).toBeLessThan(0.3);
-    }
+    fx.update(150); // la estela crece durante la embestida
+    const mesh = scene.meshes.find((m) => m.name.startsWith("fx-thrust") && m.isEnabled());
+    expect(mesh).toBeDefined();
+    mesh!.computeWorldMatrix(true);
+    const c = mesh!.getBoundingInfo().boundingBox.centerWorld;
+    expect(c.x).toBeGreaterThan(0.5);
+    expect(Math.abs(c.z)).toBeLessThan(0.3);
   });
+
 
   it("dispose() no deja mallas, partículas ni texturas", () => {
     const { scene, fx, meshes0, textures0 } = setup();
@@ -133,7 +131,6 @@ describe("efectos de habilidades", () => {
   it("las habilidades sin efecto no hacen nada", () => {
     const { scene, fx } = setup();
     const before = scene.meshes.length;
-    fx.play("block", AT, 1, 0);
     fx.play("cleave", AT, 1, 0);
     expect(scene.meshes.length).toBe(before);
   });
@@ -150,7 +147,7 @@ describe("efectos de habilidades", () => {
     expect(ring("none")!.asArray()).toEqual([1, 0.45, 0.1]);
   });
 
-  it("el Grito de guerra es siempre dorado, con cualquier naturaleza", () => {
+  it("el Grito de guerra es siempre dorado (rojo en rango 3), con cualquier naturaleza", () => {
     const ring = (n: "fire" | "ice" | "lightning" | "none") => {
       const step = abilityTimeline("warcry", 1, n).find((s) => s.kind === "ring");
       return step?.kind === "ring" ? step.color : undefined;
@@ -161,7 +158,7 @@ describe("efectos de habilidades", () => {
   it("todas las habilidades con naturaleza terminan sin mallas, partículas ni texturas huérfanas", () => {
     const { scene, fx, meshes0 } = setup();
     for (const nature of ["fire", "ice", "lightning"] as const) {
-      for (const id of ["whirlwind", "kick", "warcry", "slam", "thrust"] as const) {
+      for (const id of ["whirlwind", "warcry", "slam", "thrust", "throw", "hook", "banner"] as const) {
         fx.play(id, AT, 3, 0, nature);
         for (let t = 0; t <= abilityFxDurationMs(id, 3); t += 50) fx.update(t);
         fx.update(abilityFxDurationMs(id, 3) + 100);

@@ -5,7 +5,7 @@ describe("parseLevelChoice", () => {
   const ok = {
     offerId: 7,
     cards: [
-      { kind: "ability", id: "kick", rank: 2 },
+      { kind: "ability", id: "hook", rank: 2 },
       { kind: "stat", id: "regen" },
       { kind: "stat", id: "magnet" },
     ],
@@ -23,7 +23,7 @@ describe("parseLevelChoice", () => {
     expect(parseLevelChoice({ ...ok, offerId: "7" })).toBeUndefined();
     expect(parseLevelChoice({ ...ok, cards: [] })).toBeUndefined();
     expect(parseLevelChoice({ ...ok, cards: [{ kind: "stat", id: "nope" }] })).toBeUndefined();
-    expect(parseLevelChoice({ ...ok, cards: [{ kind: "ability", id: "kick", rank: 4 }] })).toBeUndefined();
+    expect(parseLevelChoice({ ...ok, cards: [{ kind: "ability", id: "hook", rank: 4 }] })).toBeUndefined();
     expect(parseLevelChoice({ ...ok, deadlineS: Number.NaN })).toBeUndefined();
   });
 });

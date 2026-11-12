@@ -33,6 +33,8 @@ export type GearState = SchemaType<typeof GearState>;
 export const PlayerState = schema(
   {
     name: t.string(),
+    /** ClassId: su rol */
+    cls: t.string(),
     x: t.number(),
     z: t.number(),
     facing: t.number(),
@@ -63,8 +65,6 @@ export const PlayerState = schema(
     abilities: t.array(AbilitySlotState),
     /** rango de la Onda de corte; 0 si no la tiene */
     passiveRank: t.number(),
-    /** mantiene el Bloqueo */
-    blocking: t.boolean(),
     /** el mayor Grito activo sobre él (0 si ninguno) */
     buffDamage: t.number(),
     /** efecto de sus estados en la velocidad (0,7 ralentizado, 0 aturdido; la predicción del cliente lo usa) */
@@ -73,6 +73,8 @@ export const PlayerState = schema(
     burnLeft: t.number(),
     slowLeft: t.number(),
     stunLeft: t.number(),
+    /** vida que absorbe el escudo de la Sanación (`healShield`); 0 sin escudo */
+    shield: t.number(),
     /** equipo puesto por ranura ("helmet", "chest", "gloves", "belt", "boots") */
     gear: t.map(GearState),
     /** RelicId de la reliquia puesta; "" si no tiene */
@@ -104,6 +106,12 @@ export const EnemyState = schema(
     burning: t.boolean(),
     slowed: t.boolean(),
     frozen: t.boolean(),
+    /** lleva la marca del Rayo arcano */
+    marked: t.boolean(),
+    /** lleva la marca de las espadas del caballero */
+    bladeMarked: t.boolean(),
+    /** reforzado por un hechicero aliado: pega y corre más */
+    buffed: t.boolean(),
     /** tier de sus hechizos (1..3); 0 si no es hechicero */
     spellTier: t.number(),
     /** élite, con su naturaleza ("none" si no lo es) */
@@ -119,7 +127,7 @@ export type ProjectileState = SchemaType<typeof ProjectileState>;
 
 /** Onda de corte de un jugador. */
 export const PlayerShotState = schema(
-  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number(), nature: t.string(), /** "wave" | "sword" */ kind: t.string() },
+  { x: t.number(), z: t.number(), dirX: t.number(), dirZ: t.number(), radius: t.number(), nature: t.string(), /** "wave" | "sword" | "bolt" | "gust" | "orb" */ kind: t.string(), /** clave de quien la lanzó */ owner: t.string() },
   "PlayerShotState",
 );
 export type PlayerShotState = SchemaType<typeof PlayerShotState>;
@@ -148,7 +156,7 @@ export type HazardState = SchemaType<typeof HazardState>;
 
 /** Zona del jugador (grietas del Golpe sísmico): círculo que dura `total` s; el visual lo dibuja el cliente. */
 export const PlayerZoneState = schema(
-  { x: t.number(), z: t.number(), radius: t.number(), left: t.number(), total: t.number(), /** "cracks" | "banner" */ kind: t.string() },
+  { x: t.number(), z: t.number(), radius: t.number(), left: t.number(), total: t.number(), /** el `kind` de `PlayerZone` */ kind: t.string(), /** naturaleza con que se dibuja */ nature: t.string() },
   "PlayerZoneState",
 );
 export type PlayerZoneState = SchemaType<typeof PlayerZoneState>;

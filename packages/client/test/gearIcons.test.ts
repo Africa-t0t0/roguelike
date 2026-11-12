@@ -4,7 +4,7 @@ import { gearIconSvg, gearTileBackground, tierGlowRgb } from "../src/ui/gearIcon
 describe("gearIcons", () => {
   it("cada ranura y la reliquia tienen un SVG propio y bien formado", () => {
     const slots = ["helmet", "chest", "gloves", "belt", "boots", "relic"] as const;
-    const all = slots.map(gearIconSvg);
+    const all = slots.map((s) => gearIconSvg(s));
     for (const s of all) {
       expect(s.startsWith("<svg")).toBe(true);
       expect(s.endsWith("</svg>")).toBe(true);
@@ -12,6 +12,15 @@ describe("gearIcons", () => {
       expect(s).not.toContain("http://www.w3.org/1999/xlink");
     }
     expect(new Set(all).size).toBe(6);
+  });
+
+  it("el mago tiene iconos de tela propios (la reliquia es la misma), sin ids repetidos", () => {
+    const slots = ["helmet", "chest", "gloves", "belt", "boots"] as const;
+    const clothIcons = slots.map((s) => gearIconSvg(s, true));
+    for (const [i, s] of slots.entries()) expect(clothIcons[i]).not.toBe(gearIconSvg(s));
+    expect(gearIconSvg("relic", true)).toBe(gearIconSvg("relic"));
+    const ids = [...slots.map((s) => gearIconSvg(s)), ...clothIcons].flatMap((svg) => [...svg.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("los ids de degradado no se repiten entre iconos", () => {

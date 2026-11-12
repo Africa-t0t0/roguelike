@@ -502,11 +502,14 @@ describe("hechiceros: tier y orbes del arcano", () => {
     const kinds = new Set<string>();
     for (let i = 0; i < 30; i++) {
       const [e] = sys.spawnWave(spot, ["mage"]);
+      // Desde los 180 s algún "mage" pedido sale curandero (como mucho 2 vivos), que no lanza hechizos.
+      if (e!.kind === "healer") continue;
       kinds.add(e!.kind);
       expect(e!.spellTier).toBeGreaterThanOrEqual(1);
       expect(e!.spellTier).toBeLessThanOrEqual(3);
     }
     expect([...kinds].sort()).toEqual(["mage", "pyromancer", "stormcaller"]);
+    expect(sys.enemies.filter((e) => e.kind === "healer").length).toBeLessThanOrEqual(2);
   });
 
   it("a 0 s un mago de oleada es arcano", () => {

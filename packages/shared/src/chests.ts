@@ -1,6 +1,7 @@
 import { MAX_PLAYERS } from "./constants";
 import { isWalkableTile, roomSpawnPoints, tileCenter, type Dungeon } from "./dungeon";
-import { WEAPONS } from "./weapons";
+import { CLASS_IDS } from "./combat";
+import { weaponsOf } from "./weapons";
 
 /** Reparto del botín de un cofre (arma, equipo, reliquia, orbes, curación; suman 1) y probabilidad de subir un tier el arma que da. */
 export const CHEST_LOOT = { weapon: 0.37, gear: 0.3, relic: 0.08, orbs: 0.15, heal: 0.1, orbXp: 30, tierBumpChance: 0.3 } as const;
@@ -13,7 +14,8 @@ export const CHEST_LOOT = { weapon: 0.37, gear: 0.3, relic: 0.08, orbs: 0.15, he
  * entre enemigos los aparta). Determinista.
  */
 export function chestSpots(d: Dungeon): { x: number; z: number }[] {
-  const reserved = Object.keys(WEAPONS).length - 1;
+  // Las armas iniciales del suelo: las del rol que más tiene, menos la equipada.
+  const reserved = Math.max(...CLASS_IDS.map((c) => weaponsOf(c).length)) - 1;
   const spots: { x: number; z: number }[] = [];
   const combat = d.rooms.filter((r) => r.kind === "combat");
   for (let i = 0; i < combat.length; i += 2) {

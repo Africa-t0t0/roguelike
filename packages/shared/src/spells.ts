@@ -51,3 +51,17 @@ export function casterTelegraphS(kind: EnemyKind, tier: number): number {
   const t = Math.min(3, Math.max(1, Math.round(tier))) as CasterTier;
   return SPELLS.stormcaller.tiers[t].telegraphS;
 }
+
+/**
+ * Refuerzo del hechicero arcano (`mage`): cada `everyS`, si tiene algún aliado a `radius`, deja de disparar y tras
+ * `castS` de gesto los enemigos de ese radio pegan y corren más durante `durationS`. No se acumula: se renueva.
+ * Si lo aturden o lo matan durante el gesto no hay refuerzo, y lo reintenta a los `retryS`.
+ */
+export const ENEMY_BUFF = { everyS: 14, retryS: 3, radius: 7, castS: 1, damageMult: 1.3, speedMult: 1.25, durationS: 6 } as const;
+
+/**
+ * Cura del curandero (`healer`): cada `ENEMY_DEFS.healer.cooldownS`, tras su gesto, devuelve `frac` de la vida
+ * máxima al aliado más herido a `range` (nunca a sí mismo ni a otro curandero). Aparece desde `fromS` de reloj
+ * del piso, con probabilidad `chance` en lugar de un hechicero, y como mucho `maxAlive` vivos a la vez.
+ */
+export const ENEMY_HEAL = { range: 9, frac: 0.25, fromS: 180, chance: 0.25, maxAlive: 2 } as const;

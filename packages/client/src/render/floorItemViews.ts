@@ -14,6 +14,8 @@ import { sparkTexture } from "./fxTextures";
 import { GOLD } from "./gearLooks";
 import { NATURE_COLORS } from "./natureLooks";
 
+/** Paño de las piezas del mago en el suelo. */
+const CLOTH = new Color3(0.32, 0.27, 0.62);
 const STEEL = new Color3(0.42, 0.44, 0.48);
 const BODY_GLOW = 0.3; // fracción del color del tier que va al emisivo del metal
 const RELIC_RED = new Color3(0.9, 0.12, 0.1);
@@ -53,14 +55,14 @@ export class FloorItemKit {
     this.beam = emissive("floor-relic-beam", new Color3(1, 0.9, 0.6), 0.1);
   }
 
-  /** Metal con el brillo del tier (o del elemento), un material por (tier, elemento). */
-  private body(tier: WeaponTier, nature: Nature): StandardMaterial {
-    const id = `${tier}-${nature}`;
+  /** Metal (o tela índigo mate, la del mago) con el brillo del tier o del elemento; un material por combinación. */
+  private body(tier: WeaponTier, nature: Nature, cloth = false): StandardMaterial {
+    const id = `${tier}-${nature}${cloth ? "-cloth" : ""}`;
     let m = this.bodies.get(id);
     if (m) return m;
     m = new StandardMaterial(`floor-gear-${id}`, this.scene);
-    m.diffuseColor = STEEL;
-    m.specularColor = new Color3(0.3, 0.3, 0.3);
+    m.diffuseColor = cloth ? CLOTH : STEEL;
+    m.specularColor = cloth ? Color3.Black() : new Color3(0.3, 0.3, 0.3);
     const glow = TIERS[tier].glow;
     const c = nature !== "none" ? NATURE_COLORS[nature] : glow ? new Color3(glow[0], glow[1], glow[2]) : Color3.Black();
     m.emissiveColor = c.scale(BODY_GLOW);
@@ -69,8 +71,8 @@ export class FloorItemKit {
   }
 
   /** Forma simple del equipo según la ranura, colgada de `parent` (que gira y oscila). */
-  gear(parent: TransformNode, slot: GearSlot, tier: WeaponTier, nature: Nature): void {
-    const mat = this.body(tier, nature);
+  gear(parent: TransformNode, slot: GearSlot, tier: WeaponTier, nature: Nature, cloth = false): void {
+    const mat = this.body(tier, nature, cloth);
     const part = (m: Mesh, x: number, y: number, z: number): Mesh => {
       m.material = mat;
       m.isPickable = false;

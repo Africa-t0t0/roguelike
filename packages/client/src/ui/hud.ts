@@ -1,4 +1,5 @@
 import {
+  type ClassId,
   ABILITIES,
   GEAR_SLOTS,
   LEGENDARY_ABILITY,
@@ -156,7 +157,22 @@ export function formatRespawn(respawnIn: number): string {
 }
 
 const LEVEL_BANNER_MS = 2000;
-const PORTRAIT_URL = "/assets/ui/portrait-kingslayer.webp";
+/** Retrato de cada rol (el del mago es su modelo de frente, renderizado a 256 × 256 como el del caballero). */
+const PORTRAIT_URLS: Record<ClassId, string> = {
+  warrior: "/assets/ui/portrait-kingslayer.webp",
+  mage: "/assets/ui/portrait-mage.webp",
+};
+
+/**
+ * Ancho (fracción de la barra) del escudo, que se dibuja pegado a la derecha de la vida y, si no cabe, la tapa
+ * desde el final: así se ve cuánto aguanta antes de que el daño toque la vida.
+ */
+export function shieldSpan(hp: number, shield: number, maxHp: number): { left: number; width: number } {
+  if (!(shield > 0) || !(maxHp > 0)) return { left: 0, width: 0 };
+  const width = clamp01(shield / maxHp);
+  const left = Math.min(clamp01(hp / maxHp), 1 - width);
+  return { left, width };
+}
 
 function div(className: string, parent: HTMLElement): HTMLDivElement {
   const el = document.createElement("div");
@@ -181,6 +197,10 @@ export class Hud {
   private readonly root = document.createElement("div");
   private readonly weapon: HTMLDivElement;
   private readonly hpFill: HTMLDivElement;
+  private readonly shieldFill: HTMLDivElement;
+  private readonly portrait: HTMLImageElement;
+  /** rol del jugador: elige el retrato y los iconos de equipo */
+  private cls: ClassId = "warrior";
   private readonly hpText: HTMLSpanElement;
   private readonly statusIcons: Record<StatusKind, HTMLDivElement>;
   private readonly xpFill: HTMLDivElement;
@@ -210,9 +230,10 @@ export class Hud {
     this.card = card;
     const frame = div("hud-portrait", card);
     const img = document.createElement("img");
-    img.src = PORTRAIT_URL;
+    img.src = PORTRAIT_URLS.warrior;
     img.alt = "";
     frame.append(img);
+    this.portrait = img;
     this.level = div("hud-level", frame);
     const bars = div("hud-bars", card);
     this.weapon = div("hud-weapon", bars);
@@ -222,6 +243,7 @@ export class Hud {
     this.statusIcons = { burn: div("hud-st hud-st-burn", status), slow: div("hud-st hud-st-slow", status), stun: div("hud-st hud-st-stun", status) };
     for (const icon of Object.values(this.statusIcons)) icon.hidden = true;
     this.hpFill = div("hud-fill", hp);
+    this.shieldFill = div("hud-fill hud-shield", hp);
     const hpLabel = div("hud-text", hp);
     const heart = document.createElement("span");
     heart.className = "hud-heart";
@@ -248,6 +270,8 @@ export class Hud {
   }
 
   setPlayer(p: {
+    cls?: ClassId;
+    shield?: number;
     hp: number;
     maxHp: number;
     dead: boolean;
@@ -271,12 +295,19 @@ export class Hud {
       this.weapon.style.color = tierColor(p.weaponTier);
     }
     const abilityIds = p.abilities.map((a) => a.id);
-    const key = JSON.stringify([GEAR_SLOTS.map((slot) => p.gear[slot]?.item ?? null), p.relic, abilityIds]);
+    this.cls = p.cls ?? "warrior";
+    const key = JSON.stringify([GEAR_SLOTS.map((slot) => p.gear[slot]?.item ?? null), p.relic, abilityIds, this.cls]);
     if (key !== this.equipKey) {
       this.equipKey = key;
       this.renderEquip(p.gear, p.relic, abilityIds);
     }
     this.hpFill.style.width = `${clamp01(p.hp / p.maxHp) * 100}%`;
+    const url = PORTRAIT_URLS[p.cls ?? "warrior"];
+    if (!this.portrait.src.endsWith(url)) this.portrait.src = url;
+    const shield = shieldSpan(p.hp, p.shield ?? 0, p.maxHp);
+    this.shieldFill.hidden = shield.width === 0;
+    this.shieldFill.style.left = `${shield.left * 100}%`;
+    this.shieldFill.style.width = `${shield.width * 100}%`;
     this.hpText.textContent = formatHp(p.hp, p.maxHp);
     const active = new Map(formatStatus(p).map((e) => [e.kind, e.left]));
     for (const kind of Object.keys(this.statusIcons) as StatusKind[]) {
@@ -301,7 +332,8 @@ export class Hud {
       icon.classList.toggle("hud-gear-empty", !item);
       icon.style.setProperty("--gear-bg", gearTileBackground(item ? item.tier : null));
       icon.style.setProperty("--gear-edge", item ? tierColor(item.tier) : "");
-      icon.append(this.gearSvg(gearIconSvg(slot)));
+      // El mago viste tela: sus iconos (también los vacíos) son los de tela.
+      icon.append(this.gearSvg(gearIconSvg(slot, this.cls === "mage")));
       if (!item) continue;
       const t = gearTooltip(item, abilities);
       const lines = [...t.stats.map((text) => ({ text, cls: "hud-tip-stat" })), ...(t.effect ? [{ text: t.effect.text, cls: t.effect.inactive ? "hud-tip-fx hud-tip-inactive" : "hud-tip-fx" }] : [])];

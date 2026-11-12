@@ -15,12 +15,13 @@ import type { Scene } from "@babylonjs/core/scene";
 import {
   ABILITIES,
   HOOK_IMPACT_AT,
-  HOOK_RANGE,
-  KICK_ARC_DEG,
-  KICK_IMPACT_AT,
+  THRUST_DASH_S,
+  WARCRY_RADIUS,
+  abilityAnimS,
+  slamImpactS,
+  SPELL_RELEASE_S,
   SLAM_IMPACT_S,
   THROW_RELEASE_AT,
-  THRUST_IMPACT_FRAC,
   THRUST_WIDTH,
   type AbilityId,
   type Nature,
@@ -41,6 +42,7 @@ import {
   telegraphTexture,
 } from "./fxTextures";
 import { natureTint } from "./natureLooks";
+import { spellColor } from "./staffMesh";
 
 /** Temblor de cámara del Golpe sísmico, si el jugador propio está a menos de `rangeM`. */
 export const SLAM_SHAKE = { durationS: 0.25, intensity: 0.08, rangeM: 8 } as const;
@@ -52,10 +54,15 @@ const TRAIL = new Color3(1, 0.8, 0.5);
 const STEEL = new Color3(0.7, 0.82, 1);
 const BANNER_GREEN = new Color3(0.45, 1, 0.55);
 const FRENZY_RED = new Color3(1, 0.22, 0.15);
+/** Hechizos del mago: hielo, viento, sanación y el blanco violáceo del centro de lo arcano. */
+const ICE = new Color3(0.55, 0.85, 1);
+const WIND = new Color3(0.72, 1, 0.9);
+const HEAL_GREEN = new Color3(0.4, 1, 0.6);
+/** Tipos de estallido que anuncia el servidor (evento `blast`). */
+export type BlastKind = "mine" | "meteor" | "meteorBig" | "mark" | "orb" | "blade";
 
 const RING_START_M = 0.5;
 const WHIRL_RING_Y = 1.0; // m: a la altura del giro del mandoble
-const WARCRY_RADIUS_M = 4;
 const WARCRY_GROW_S = 0.5;
 const WARCRY_RING_Y = 0.3;
 /** Golpe sísmico: destello del impacto, dos ondas, la marca del suelo y lo que tarda en enfriarse. */
@@ -79,8 +86,6 @@ const SLASH_COLOR = new Color3(1, 0.9, 0.72);
 /** Chispazo al conectar un golpe. */
 const HIT_SPARK_S = 0.4;
 const HIT_FLASH_S = 0.12;
-const KICK_FLASH_S = 0.15;
-const KICK_Y = 0.7;
 const TRAIL_FADE_S = 0.3;
 const TRAIL_Y = 0.9;
 const FLOOR_Y = 0.04; // m: sobre el suelo, sin pelear con él por la profundidad
@@ -95,7 +100,7 @@ export type FxStep =
   | { kind: "sparks"; startS: number; durS: number; emitS: number; radius: number; nature: Nature }
   | { kind: "telegraph"; startS: number; durS: number; radius: number; color: Color3 }
   /** `forward`: metros por delante de la pose (por defecto, en ella) */
-  | { kind: "burst"; startS: number; durS: number; radius: number; color: Color3; forward?: number }
+  | { kind: "burst"; startS: number; durS: number; radius: number; color: Color3; forward?: number; quiet?: boolean }
   | { kind: "zone"; startS: number; durS: number; radius: number; color: Color3 }
   /** aro que se cierra desde `radius` hasta el jugador (el tirón del Gancho) */
   | { kind: "implode"; startS: number; durS: number; radius: number; color: Color3 }
@@ -111,7 +116,6 @@ export type FxStep =
   | { kind: "debris"; startS: number; durS: number; radius: number }
   | { kind: "dust"; startS: number; durS: number; emitS: number; radius: number }
   | { kind: "embers"; startS: number; durS: number; emitS: number; radius: number; color: Color3 }
-  | { kind: "flash"; startS: number; durS: number; radius: number; color: Color3 }
   | { kind: "trail"; startS: number; durS: number; range: number; color: Color3 };
 
 /**
@@ -121,39 +125,48 @@ export type FxStep =
 export function abilityTimeline(id: AbilityId, rank: number, nature: Nature = "none"): FxStep[] {
   const def = ABILITIES[id];
   const r = def.ranks[Math.min(3, Math.max(1, rank)) - 1]!;
+  // Hechizos del mago: lo arcano toma el color de la naturaleza del bastón (con su núcleo claro).
+  const arcane = spellColor(nature);
+  const core = Color3.Lerp(arcane, Color3.White(), 0.6);
   switch (id) {
     case "whirlwind": {
       const color = natureTint(FIRE, nature);
+      const spin = abilityAnimS(id, rank);
+      const steps: FxStep[] = [
+        { kind: "zone", startS: 0, durS: spin, radius: r.radius!, color },
+        { kind: "ring", startS: 0, durS: Math.min(spin, 0.9), to: r.radius!, color, y: WHIRL_RING_Y },
+        { kind: "swirl", startS: 0, durS: spin, radius: r.radius!, color: Color3.Lerp(color, Color3.White(), 0.45), y: WHIRL_RING_Y },
+        { kind: "sparks", startS: 0, durS: spin + SPARK_LIFE_MAX_S, emitS: spin, radius: r.radius!, nature },
+      ];
+      // Girando largo (rango 3): un segundo remolino a otra altura, polvo levantado y brasas todo el rato.
+      if (rank >= 3) {
+        steps.push(
+          { kind: "swirl", startS: 0.1, durS: spin - 0.1, radius: r.radius! * 0.75, color, y: WHIRL_RING_Y * 0.45 },
+          { kind: "dust", startS: 0, durS: spin + DUST_LIFE_MAX_S, emitS: spin, radius: r.radius! },
+          { kind: "embers", startS: 0, durS: spin + EMBERS_LIFE_MAX_S, emitS: spin, radius: r.radius! * 0.8, color },
+        );
+      }
+      return steps;
+    }
+    case "warcry": {
+      // Rango 3: la onda dorada se tiñe del rojo de la furia (también da velocidad de ataque).
+      const color = r.speed ? FRENZY_RED : GOLD;
       return [
-        { kind: "zone", startS: 0, durS: def.animS, radius: r.radius!, color },
-        { kind: "ring", startS: 0, durS: def.animS, to: r.radius!, color, y: WHIRL_RING_Y },
-        { kind: "swirl", startS: 0, durS: def.animS, radius: r.radius!, color: Color3.Lerp(color, Color3.White(), 0.45), y: WHIRL_RING_Y },
-        { kind: "sparks", startS: 0, durS: def.animS + SPARK_LIFE_MAX_S, emitS: def.animS, radius: r.radius!, nature },
+        { kind: "burst", startS: 0, durS: 0.4, radius: WARCRY_RADIUS * 0.35, color },
+        { kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: WARCRY_RADIUS, color, y: WARCRY_RING_Y },
+        { kind: "shock", startS: 0.05, durS: WARCRY_GROW_S, radius: WARCRY_RADIUS, color, alpha: 0.8 },
+        { kind: "shock", startS: 0.15, durS: WARCRY_GROW_S + 0.2, radius: WARCRY_RADIUS * 0.7, color: GOLD, alpha: 0.5 },
+        { kind: "embers", startS: 0, durS: 0.6 + EMBERS_LIFE_MAX_S, emitS: 0.6, radius: WARCRY_RADIUS * 0.3, color },
       ];
     }
-    case "kick": {
-      const color = natureTint(WARM_WHITE, nature);
-      const hit = KICK_IMPACT_AT * def.animS;
-      return [
-        { kind: "flash", startS: hit, durS: KICK_FLASH_S, radius: r.radius!, color },
-        { kind: "wave", startS: hit, durS: 0.26, radius: r.radius! * 1.15, color, arcDeg: KICK_ARC_DEG, y: KICK_Y },
-        { kind: "burst", startS: hit, durS: 0.2, radius: 0.9, color, forward: 0.9 },
-      ];
-    }
-    case "warcry":
-      return [
-        { kind: "burst", startS: 0, durS: 0.4, radius: WARCRY_RADIUS_M * 0.6, color: GOLD },
-        { kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: WARCRY_RADIUS_M, color: GOLD, y: WARCRY_RING_Y },
-        { kind: "shock", startS: 0.05, durS: WARCRY_GROW_S, radius: WARCRY_RADIUS_M, color: GOLD, alpha: 0.8 },
-        { kind: "embers", startS: 0, durS: 0.6 + EMBERS_LIFE_MAX_S, emitS: 0.6, radius: WARCRY_RADIUS_M * 0.6, color: GOLD },
-      ];
     case "slam": {
-      // Tres tiempos: el aviso de la zona mientras salta, el estallido al caer y lo que queda enfriándose.
+      // Tres tiempos: el aviso de la zona mientras salta (y canaliza, en rango 3), el estallido al caer y lo que
+      // queda enfriándose.
       const color = natureTint(FIRE, nature);
       const hot = Color3.Lerp(color, Color3.White(), 0.55);
       const radius = r.radius!;
-      const hit = SLAM_IMPACT_S;
-      return [
+      const hit = slamImpactS(rank);
+      const steps: FxStep[] = [
         { kind: "telegraph", startS: 0, durS: hit, radius, color },
         { kind: "burst", startS: hit, durS: BURST_S, radius, color },
         { kind: "shock", startS: hit, durS: SHOCK_GROW_S, radius, color: hot, alpha: 1 },
@@ -165,41 +178,181 @@ export function abilityTimeline(id: AbilityId, rank: number, nature: Nature = "n
         { kind: "dust", startS: hit, durS: DUST_EMIT_S + DUST_LIFE_MAX_S, emitS: DUST_EMIT_S, radius },
         { kind: "embers", startS: hit + 0.1, durS: EMBERS_EMIT_S + EMBERS_LIFE_MAX_S, emitS: EMBERS_EMIT_S, radius, color },
       ];
+      if (hit > SLAM_IMPACT_S) {
+        // Canaliza tras aterrizar: la energía se junta en el punto (aros que se cierran y brasas que suben).
+        for (let t = SLAM_IMPACT_S; t < hit - 0.15; t += 0.22) steps.push({ kind: "implode", startS: t, durS: 0.3, radius: radius * 0.9, color: hot });
+        steps.push(
+          { kind: "embers", startS: SLAM_IMPACT_S, durS: hit - SLAM_IMPACT_S + EMBERS_LIFE_MAX_S, emitS: hit - SLAM_IMPACT_S, radius: radius * 0.4, color: hot },
+          { kind: "shock", startS: hit + 0.12, durS: SHOCK_ECHO_S + 0.2, radius: radius * 1.6, color, alpha: 0.35 },
+        );
+      }
+      return steps;
     }
     case "thrust": {
+      // La embestida: la estela crece con el caballero y al final un tajo en abanico.
       const color = natureTint(TRAIL, nature);
-      const hit = THRUST_IMPACT_FRAC * def.animS;
       return [
-        { kind: "trail", startS: hit, durS: TRAIL_FADE_S, range: r.range!, color },
-        { kind: "burst", startS: hit + 0.04, durS: 0.22, radius: 1.3, color, forward: r.range! },
+        { kind: "trail", startS: 0, durS: THRUST_DASH_S + TRAIL_FADE_S, range: r.range!, color },
+        { kind: "dust", startS: 0, durS: THRUST_DASH_S + DUST_LIFE_MAX_S, emitS: THRUST_DASH_S, radius: 1.2 },
+        { kind: "burst", startS: THRUST_DASH_S, durS: 0.24, radius: 1.6, color, forward: r.range! },
+        { kind: "wave", startS: THRUST_DASH_S, durS: 0.26, radius: 2.6, color, arcDeg: 140, y: TRAIL_Y },
       ];
     }
     case "throw": {
       const color = natureTint(WARM_WHITE, nature);
-      return [{ kind: "burst", startS: THROW_RELEASE_AT * def.animS, durS: 0.18, radius: 0.9, color, forward: 0.8 }];
+      const release = THROW_RELEASE_AT * def.animS;
+      // Rango 3: salen en todas las direcciones, con un anillo de acero.
+      return (r.count ?? 1) > 1
+        ? [
+            { kind: "burst", startS: release, durS: 0.25, radius: 1.6, color },
+            { kind: "shock", startS: release, durS: 0.35, radius: 3, color: STEEL, alpha: 0.9 },
+          ]
+        : [{ kind: "burst", startS: release, durS: 0.18, radius: 0.9, color, forward: 0.8 }];
     }
     case "hook": {
       const color = natureTint(STEEL, nature);
       const hit = HOOK_IMPACT_AT * def.animS;
-      return [
-        { kind: "implode", startS: hit - 0.12, durS: 0.3, radius: HOOK_RANGE, color },
-        { kind: "implode", startS: hit - 0.04, durS: 0.3, radius: HOOK_RANGE * 0.7, color },
+      const range = r.range!;
+      const steps: FxStep[] = [
+        { kind: "implode", startS: hit - 0.12, durS: 0.3, radius: range, color },
+        { kind: "implode", startS: hit - 0.04, durS: 0.3, radius: range * 0.7, color },
         { kind: "burst", startS: hit + 0.14, durS: 0.25, radius: 2.4, color },
       ];
+      // Rango 3: invulnerable 2 s, una cúpula de acero que se apaga.
+      if (r.durationS) steps.push({ kind: "zone", startS: hit, durS: r.durationS, radius: 1.3, color: WARM_WHITE });
+      return steps;
     }
-    case "banner":
-      return [
+    case "banner": {
+      const steps: FxStep[] = [
         { kind: "burst", startS: 0, durS: 0.4, radius: r.radius! * 0.7, color: BANNER_GREEN },
         { kind: "shock", startS: 0.05, durS: 0.45, radius: r.radius!, color: BANNER_GREEN, alpha: 0.8 },
       ];
-    case "frenzy":
+      // Rango 3: tres ondas, una por naturaleza.
+      if (r.mark) {
+        (["fire", "ice", "lightning"] as const).forEach((n, i) =>
+          steps.push({ kind: "shock", startS: 0.15 + i * 0.12, durS: 0.5, radius: r.radius! * (0.8 + i * 0.15), color: natureTint(WARM_WHITE, n), alpha: 0.8 }),
+        );
+      }
+      return steps;
+    }
+    // Hechizos del mago. Los que se colocan (Escarcha, Mina, Meteoros) se dibujan en el punto apuntado; lo que
+    // dejan en el mundo (zonas, proyectiles, haz, estallidos) lo dibujan sus vistas y los eventos del servidor.
+    case "frost":
       return [
-        { kind: "burst", startS: 0, durS: 0.35, radius: 2.4, color: FRENZY_RED },
-        { kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: 2.6, color: FRENZY_RED, y: WARCRY_RING_Y },
-        { kind: "embers", startS: 0, durS: 0.8 + EMBERS_LIFE_MAX_S, emitS: 0.8, radius: 1.4, color: FRENZY_RED },
+        { kind: "telegraph", startS: 0, durS: SPELL_RELEASE_S, radius: r.radius!, color: ICE },
+        { kind: "burst", startS: SPELL_RELEASE_S, durS: 0.4, radius: r.radius! * 0.9, color: ICE, quiet: true },
+        { kind: "shock", startS: SPELL_RELEASE_S, durS: 0.5, radius: r.radius!, color: ICE, alpha: 0.9 },
+        { kind: "embers", startS: SPELL_RELEASE_S, durS: 0.5 + EMBERS_LIFE_MAX_S, emitS: 0.5, radius: r.radius! * 0.8, color: ICE },
+      ];
+    case "nova": {
+      const charge = r.chargeS!;
+      const big = charge > 1;
+      const steps: FxStep[] = [
+        { kind: "telegraph", startS: 0, durS: charge, radius: r.radius!, color: arcane },
+        { kind: "implode", startS: Math.max(0, charge - 0.3), durS: 0.3, radius: r.radius!, color: arcane },
+        { kind: "burst", startS: charge, durS: BURST_S + 0.1, radius: r.radius!, color: core, quiet: !big },
+        { kind: "shock", startS: charge, durS: SHOCK_GROW_S, radius: r.radius!, color: arcane, alpha: 1 },
+        { kind: "shock", startS: charge + SHOCK_ECHO_DELAY_S, durS: SHOCK_ECHO_S, radius: r.radius! * 1.15, color: arcane, alpha: 0.5 },
+        { kind: "embers", startS: charge, durS: EMBERS_EMIT_S + EMBERS_LIFE_MAX_S, emitS: EMBERS_EMIT_S, radius: r.radius! * 0.7, color: arcane },
+      ];
+      if (big) {
+        // La carga larga se ve venir: aros que se cierran una y otra vez, y deja el suelo marcado.
+        for (let t = 0.1; t < charge - 0.3; t += 0.3) steps.push({ kind: "implode", startS: t, durS: 0.35, radius: r.radius! * 0.8, color: arcane });
+        steps.push(
+          { kind: "scorch", startS: charge, durS: SCORCH_S, radius: r.radius! * 0.8 },
+          { kind: "molten", startS: charge, durS: MOLTEN_S, radius: r.radius! * 0.8, color: arcane },
+          { kind: "dust", startS: charge, durS: DUST_EMIT_S + DUST_LIFE_MAX_S, emitS: DUST_EMIT_S, radius: r.radius! },
+        );
+      }
+      return steps;
+    }
+    case "beam":
+      return [
+        { kind: "implode", startS: 0, durS: SPELL_RELEASE_S, radius: 1.4, color: arcane },
+        { kind: "burst", startS: SPELL_RELEASE_S, durS: 0.2, radius: 1.1, color: core, forward: 0.9, quiet: true },
+      ];
+    case "mine":
+      return [
+        { kind: "telegraph", startS: 0, durS: SPELL_RELEASE_S, radius: 0.9, color: arcane },
+        { kind: "burst", startS: SPELL_RELEASE_S, durS: 0.25, radius: 0.9, color: arcane, quiet: true },
+      ];
+    case "gust":
+      return [
+        { kind: "burst", startS: SPELL_RELEASE_S, durS: 0.22, radius: r.radius! * 1.1, color: natureTint(WIND, nature), forward: 0.8, quiet: true },
+        { kind: "dust", startS: SPELL_RELEASE_S, durS: DUST_EMIT_S + DUST_LIFE_MAX_S, emitS: DUST_EMIT_S, radius: r.radius! },
+      ];
+    case "orb":
+      return [
+        { kind: "implode", startS: 0, durS: SPELL_RELEASE_S, radius: 1.6, color: arcane },
+        { kind: "burst", startS: SPELL_RELEASE_S, durS: 0.25, radius: 1.2, color: arcane, forward: 0.8, quiet: true },
+      ];
+    case "heal":
+      return [
+        { kind: "burst", startS: 0, durS: 0.45, radius: 2.2, color: HEAL_GREEN, quiet: true },
+        { kind: "ring", startS: 0, durS: WARCRY_GROW_S, to: 3, color: HEAL_GREEN, y: WARCRY_RING_Y },
+        { kind: "embers", startS: 0, durS: 0.7 + EMBERS_LIFE_MAX_S, emitS: 0.7, radius: 1.2, color: HEAL_GREEN },
+      ];
+    case "meteors":
+      return [
+        { kind: "telegraph", startS: 0, durS: SPELL_RELEASE_S + 0.3, radius: r.radius!, color: natureTint(FIRE, nature) },
+        { kind: "shock", startS: SPELL_RELEASE_S, durS: 0.5, radius: r.radius!, color: natureTint(FIRE, nature), alpha: 0.7 },
       ];
     default:
       return [];
+  }
+}
+
+/** Pasos del estallido de cada tipo, con su radio. */
+export function blastTimeline(kind: BlastKind, radius: number, nature: Nature = "none"): FxStep[] {
+  const arcane = spellColor(nature);
+  const core = Color3.Lerp(arcane, Color3.White(), 0.6);
+  const fire = natureTint(FIRE, nature);
+  switch (kind) {
+    case "mine":
+      return [
+        { kind: "burst", startS: 0, durS: BURST_S, radius, color: core },
+        { kind: "shock", startS: 0, durS: SHOCK_GROW_S, radius, color: arcane, alpha: 1 },
+        { kind: "scorch", startS: 0, durS: SCORCH_S, radius: radius * 0.7 },
+        { kind: "debris", startS: 0, durS: DEBRIS_S, radius: radius * 0.6 },
+        { kind: "embers", startS: 0, durS: 0.5 + EMBERS_LIFE_MAX_S, emitS: 0.5, radius: radius * 0.6, color: arcane },
+      ];
+    case "meteor":
+    case "meteorBig": {
+      const big = kind === "meteorBig";
+      const steps: FxStep[] = [
+        { kind: "burst", startS: 0, durS: big ? 0.45 : BURST_S, radius: radius * (big ? 1 : 1.2), color: WARM_WHITE, quiet: !big },
+        { kind: "shock", startS: 0, durS: SHOCK_GROW_S, radius: radius * 1.1, color: fire, alpha: 1 },
+        { kind: "scorch", startS: 0, durS: SCORCH_S, radius: radius * (big ? 0.8 : 1) },
+        { kind: "molten", startS: 0, durS: MOLTEN_S, radius: radius * (big ? 0.8 : 1), color: fire },
+        { kind: "debris", startS: 0, durS: DEBRIS_S, radius: radius * 0.6 },
+        { kind: "embers", startS: 0, durS: EMBERS_EMIT_S + EMBERS_LIFE_MAX_S, emitS: EMBERS_EMIT_S, radius: radius * 0.7, color: fire },
+      ];
+      if (big) {
+        steps.push(
+          { kind: "shock", startS: SHOCK_ECHO_DELAY_S, durS: SHOCK_ECHO_S, radius: radius * 1.4, color: fire, alpha: 0.5 },
+          { kind: "shards", startS: 0, durS: SHARDS_S, radius, color: fire },
+          { kind: "dust", startS: 0, durS: DUST_EMIT_S + DUST_LIFE_MAX_S, emitS: DUST_EMIT_S, radius },
+        );
+      }
+      return steps;
+    }
+    case "mark":
+      return [
+        { kind: "burst", startS: 0, durS: 0.22, radius: radius * 0.9, color: core, quiet: true },
+        { kind: "shock", startS: 0, durS: 0.3, radius, color: arcane, alpha: 1 },
+      ];
+    case "orb":
+      return [{ kind: "shock", startS: 0, durS: 0.35, radius, color: arcane, alpha: 0.55 }];
+    case "blade": {
+      // Estalla la marca de las espadas: un tajo de acero en estrella sobre el marcado y su onda.
+      const steel = natureTint(STEEL, nature);
+      return [
+        { kind: "burst", startS: 0, durS: 0.3, radius: radius * 0.8, color: WARM_WHITE },
+        { kind: "shock", startS: 0, durS: 0.35, radius, color: steel, alpha: 1 },
+        { kind: "shards", startS: 0, durS: SHARDS_S, radius: radius * 0.8, color: steel },
+        { kind: "slash", startS: 0, durS: 0.22, radius: radius * 0.9, color: WARM_WHITE, arcDeg: 300, flip: false },
+      ];
+    }
   }
 }
 
@@ -335,6 +488,43 @@ export class AbilityFx {
     );
   }
 
+  /** Estallido que anuncia el servidor (mina, meteorito, marca del Rayo o pulso de la Esfera) en (x, z). */
+  blast(kind: BlastKind, x: number, z: number, radius: number, startMs: number, nature: Nature = "none"): void {
+    this.spawn(blastTimeline(kind, radius, nature), { x, z, facing: 0 }, startMs);
+  }
+
+  /** Destello en la punta del bastón al soltar un proyectil: sale en el impacto del golpe, con el color de su naturaleza. */
+  staffCast(at: Pose, strike: { duration: number; impactAt: number }, startMs: number, nature: Nature = "none"): void {
+    const color = spellColor(nature);
+    this.spawn([{ kind: "hitFlash", startS: strike.impactAt * strike.duration, durS: 0.14, y: 1.25, weight: 0.5, color }], { x: at.x + Math.sin(at.facing) * 0.7, z: at.z + Math.cos(at.facing) * 0.7, facing: at.facing }, startMs);
+  }
+
+  /** Gesto de refuerzo de un hechicero enemigo en (x, z): aviso del radio durante `castS` y onda al soltarlo. */
+  enemyBuff(x: number, z: number, radius: number, castS: number, color: Color3, startMs: number): void {
+    this.spawn(
+      [
+        { kind: "telegraph", startS: 0, durS: castS, radius, color },
+        { kind: "implode", startS: Math.max(0, castS - 0.35), durS: 0.35, radius, color },
+        { kind: "shock", startS: castS, durS: 0.45, radius, color, alpha: 0.85 },
+        { kind: "embers", startS: castS, durS: 0.5 + EMBERS_LIFE_MAX_S, emitS: 0.5, radius: radius * 0.6, color },
+      ],
+      { x, z, facing: 0 },
+      startMs,
+    );
+  }
+
+  /** Sanación recibida por un jugador en (x, z). */
+  healed(x: number, z: number, startMs: number): void {
+    this.spawn(
+      [
+        { kind: "burst", startS: 0, durS: 0.4, radius: 1.3, color: HEAL_GREEN, quiet: true },
+        { kind: "embers", startS: 0, durS: 0.6 + EMBERS_LIFE_MAX_S, emitS: 0.6, radius: 0.8, color: HEAL_GREEN },
+      ],
+      { x, z, facing: 0 },
+      startMs,
+    );
+  }
+
   private spawn(steps: FxStep[], at: Pose, startMs: number): void {
     for (const step of steps) {
       const piece = this.build(step, at);
@@ -342,7 +532,8 @@ export class AbilityFx {
       piece.endMs = piece.startMs + step.durS * 1000;
       // Los sistemas de partículas dejan de emitir tras `emitS`; sus partículas viven hasta `endMs`.
       if ("emitS" in step) piece.emitEndMs = piece.startMs + step.emitS * 1000;
-      if (step.kind === "burst") piece.onStart = () => this.onSlamImpact?.(at.x, at.z);
+      // `quiet`: destello sin temblor ni estruendo (lo pequeño y lo que se repite mucho).
+      if (step.kind === "burst" && !step.quiet) piece.onStart = () => this.onSlamImpact?.(at.x, at.z);
       piece.mesh?.setEnabled(false);
       this.pieces.push(piece);
     }
@@ -636,21 +827,6 @@ export class AbilityFx {
           else Color3.LerpToRef(step.color, cold, (t - 0.2) / 0.8, mat.emissiveColor);
           mat.alpha = (1 - t) ** 1.4 * (0.86 + 0.14 * Math.sin(t * 46));
         };
-        Object.assign(piece, { mesh, mat });
-        break;
-      }
-      case "flash": {
-        // Cuña del cono de la Patada: el disco con arco va de +X local hacia +Y; tumbado (+Y → +Z), su
-        // centro mira a π/2 − arco/2 (medido como `facing`, desde +Z hacia +X) y se gira hasta `facing`.
-        const arc = KICK_ARC_DEG / 360;
-        const mesh = CreateDisc(`fx-kick-${n}`, { radius: step.radius, tessellation: 24, arc }, this.scene);
-        const mat = this.glow(`fx-kickMat-${n}`, step.color, this.spark);
-        mesh.material = mat;
-        mesh.rotation.x = Math.PI / 2;
-        mesh.rotation.y = at.facing - (Math.PI / 2 - (arc * Math.PI * 2) / 2);
-        mesh.position.set(at.x, KICK_Y, at.z);
-        mesh.isPickable = false;
-        piece.apply = (t) => (mat.alpha = 0.85 * (1 - t));
         Object.assign(piece, { mesh, mat });
         break;
       }

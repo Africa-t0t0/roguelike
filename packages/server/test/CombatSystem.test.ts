@@ -294,22 +294,22 @@ describe("impacto", () => {
     expect(impact!.hits[0]!.amount).toBe(14);
   });
 
-  it("dirección fijada: si el jugador gira entre el clic y el impacto, el arco usa la del clic", () => {
+  it("el arco usa la dirección del impacto: un enemigo delante del clic no recibe el golpe si el jugador gira antes", () => {
     const { sys, e } = world(0, 1.5, 100);
-    const cs = new CombatSystem();
-    const c = newCombatState("warrior", 1);
-    const { impact } = swingToImpact(cs, c, sys, new PositionHistory(), { facing: 0 }, { facing: Math.PI });
-    expect(impact!.hits.map((x) => x.enemyId)).toEqual([e.id]);
-    expect(c.swingFacing).toBe(0);
-  });
-
-  it("dirección fijada: un enemigo detrás de la dirección del clic no recibe el golpe aunque el jugador gire hacia él", () => {
-    const { sys, e } = world(0, -1.5, 100);
     const cs = new CombatSystem();
     const c = newCombatState("warrior", 1);
     const { impact } = swingToImpact(cs, c, sys, new PositionHistory(), { facing: 0 }, { facing: Math.PI });
     expect(impact!.hits).toEqual([]);
     expect(e.hp).toBe(100);
+    expect(c.swingFacing).toBe(Math.PI);
+  });
+
+  it("el arco usa la dirección del impacto: girar hacia un enemigo que estaba detrás del clic lo golpea", () => {
+    const { sys, e } = world(0, -1.5, 100);
+    const cs = new CombatSystem();
+    const c = newCombatState("warrior", 1);
+    const { impact } = swingToImpact(cs, c, sys, new PositionHistory(), { facing: 0 }, { facing: Math.PI });
+    expect(impact!.hits.map((x) => x.enemyId)).toEqual([e.id]);
   });
 
   it("mandoble: el paso 2 a nivel 3 hace 35 y alcanza a un enemigo a 3,1 m dentro de 220°", () => {
@@ -857,50 +857,6 @@ describe("resistencias, Última resistencia, reflejo y vampiro", () => {
     cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 90 })], 10);
     cs.step(new Map([["a", c]]), 40, SIM_DT, new Map([["a", kin()]]));
     expect(c.lastStandLeft).toBe(0);
-  });
-
-  it("blockReflect: bloqueando un golpe frontal de 20 con Bloqueo 1, el enemigo pierde el 30 % de lo evitado", () => {
-    const { sys, e } = world(0, 5, 100);
-    const cs = new CombatSystem();
-    const c = withFx(["blockReflect"]);
-    c.abilities = [{ id: "block", rank: 1 }];
-    c.blocking = true;
-    const states = new Map([["a", c]]);
-    cs.queueEnemyHits(states, [hit({ damage: 20, sourceId: e.id, sourceZ: 5 })], 100);
-    const r = cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 }), 101, sys, new PositionHistory());
-    expect(r.damage).toBeCloseTo(6, 9);
-    const out = cs.flushReflects(c, sys, "a");
-    // evitado 14 × 0,3 = 4,2 → 4
-    expect(out.hits).toEqual([expect.objectContaining({ enemyId: e.id, amount: 4, killed: false })]);
-    expect(e.hp).toBe(96);
-    expect(cs.flushReflects(c, sys, "a").hits).toEqual([]);
-  });
-
-  it("blockReflect: si el reflejo mata, hay muerte con botín; sin bloquear de frente o sin la legendaria, nada", () => {
-    const { sys, e } = world(0, 5, 3);
-    const cs = new CombatSystem();
-    const c = withFx(["blockReflect"]);
-    c.abilities = [{ id: "block", rank: 1 }];
-    c.blocking = true;
-    cs.queueEnemyHits(new Map([["a", c]]), [hit({ damage: 20, sourceId: e.id, sourceZ: 5 })], 100);
-    cs.onInputProcessed(c, kin(), input({ attack: false, viewTick: 100 }), 101, sys, new PositionHistory());
-    expect(cs.flushReflects(c, sys, "a").kills).toHaveLength(1);
-
-    // Por la espalda
-    const w = world(0, -5, 100);
-    const c2 = withFx(["blockReflect"]);
-    c2.abilities = [{ id: "block", rank: 1 }];
-    c2.blocking = true;
-    cs.queueEnemyHits(new Map([["a", c2]]), [hit({ damage: 20, sourceId: w.e.id, sourceZ: -5 })], 100);
-    cs.onInputProcessed(c2, kin(), input({ attack: false, viewTick: 100 }), 101, w.sys, new PositionHistory());
-    expect(c2.pendingReflects).toEqual([]);
-    // Sin legendaria
-    const c3 = withFx();
-    c3.abilities = [{ id: "block", rank: 1 }];
-    c3.blocking = true;
-    cs.queueEnemyHits(new Map([["a", c3]]), [hit({ damage: 20, sourceId: w.e.id, sourceZ: 5 })], 100);
-    cs.onInputProcessed(c3, kin(), input({ attack: false, viewTick: 100 }), 101, w.sys, new PositionHistory());
-    expect(c3.pendingReflects).toEqual([]);
   });
 
   it("vampiro: un golpe de 20 cura 1 (golpe del combo); sin vampiro no cura", () => {

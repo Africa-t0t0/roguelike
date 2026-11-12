@@ -1,11 +1,15 @@
 import type { AbilityId } from "./cards";
+import type { ClassId } from "./combat";
+import type { Nature } from "./natures";
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 18;
 
 export interface JoinOptions {
   name: string;
+  /** rol elegido en el lobby; solo cuenta la primera vez que ese nombre entra a la sala */
+  cls?: ClassId;
   token: string;
   version: number;
 }
@@ -58,6 +62,16 @@ export type CombatEvent =
   | { type: "swing"; key: string; step: number }
   | { type: "levelUp"; level: number }
   /** un jugador empezó una habilidad activa; los demás clientes reproducen su animación */
-  | { type: "ability"; key: string; id: AbilityId; aimDist?: number }
+  | { type: "ability"; key: string; id: AbilityId; aimDist?: number; rank?: number }
+  /** Rayo arcano: puntos [x, z] del haz, del mago al primer golpeado y a cada rebote */
+  | { type: "beam"; key: string; points: [number, number][]; nature?: Nature }
+  /** algo estalló en (x, z) con ese radio: una mina, un meteorito, la marca del Rayo o el pulso de la Esfera */
+  | { type: "blast"; kind: "mine" | "meteor" | "meteorBig" | "mark" | "orb" | "blade"; x: number; z: number; radius: number; nature?: Nature }
+  /** un enemigo empieza un gesto de apoyo: el refuerzo en área del hechicero (aviso en el suelo de ese radio) */
+  | { type: "enemyBuff"; x: number; z: number; radius: number; castS: number }
+  /** un curandero curó a un aliado: de dónde a dónde va el haz */
+  | { type: "enemyHeal"; from: [number, number]; to: [number, number]; amount: number; targetId: string }
+  /** Sanación: a quiénes curó */
+  | { type: "heal"; keys: string[] }
   /** salto del rayo: puntos [x, z] de la cadena, del golpeado a los siguientes blancos */
   | { type: "chain"; points: [number, number][] };
