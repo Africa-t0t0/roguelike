@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  abilitySlotsOf,
+  activeAbilityCount,
+  canFuse,
+  fusionLead,
   ABILITIES,
   STAT_CARDS,
   applyCard,
@@ -76,7 +80,7 @@ describe("Aprendizaje, Celeridad y Tajo frontal", () => {
     expect(t.ranks[2]!.count).toBe(3);
     expect(THRUST_WIDTH).toBe(1.4);
     expect(ABILITIES.slam.clip).toBe("gs_jump_attack");
-    expect(PROTOCOL_VERSION).toBe(19);
+    expect(PROTOCOL_VERSION).toBe(20);
   });
   it("cardText del Tajo menciona 10 m y, en rango 3, sus cargas", () => {
     expect(cardText({ kind: "ability", id: "thrust", rank: 2 })).toContain("10 m");
@@ -161,5 +165,44 @@ describe("textos", () => {
       expect(cardTitle(c).length).toBeGreaterThan(0);
       expect(cardText(c).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("fusión", () => {
+  const abilities = [
+    { id: "slam" as const, rank: 2 },
+    { id: "cleave" as const, rank: 1 },
+    { id: "warcry" as const, rank: 1 },
+    { id: "thrust" as const, rank: 3 },
+    { id: "hook" as const, rank: 1 },
+  ];
+  it("ocupa la casilla de la primera aprendida de las suyas; lleva la animación la que mueve", () => {
+    const slots = abilitySlotsOf(abilities, ["warcry", "thrust"]);
+    expect(slots.map((s) => [s.id, s.partners?.map((p) => p.id)])).toEqual([["slam", undefined], ["thrust", ["warcry"]], ["hook", undefined]]);
+    expect(slots[1]).toEqual({ id: "thrust", rank: 3, partners: [{ id: "warcry", rank: 1 }] });
+    expect(fusionLead(["heal", "meteors", "frost"])).toBe("meteors");
+  });
+  it("crece: con tres juntas, una casilla lanza las tres", () => {
+    const slots = abilitySlotsOf(abilities, ["warcry", "thrust", "hook"]);
+    expect(slots.map((s) => s.id)).toEqual(["slam", "thrust"]);
+    expect(slots[1]!.partners!.map((p) => p.id)).toEqual(["warcry", "hook"]);
+  });
+  it("cada habilidad que entra libera una casilla", () => {
+    const p: Progress = { stats: {}, abilities: [...abilities, { id: "whirlwind", rank: 1 }], fusion: ["warcry", "thrust"] };
+    expect(activeAbilityCount(p)).toBe(4);
+    p.fusion!.push("hook");
+    expect(activeAbilityCount(p)).toBe(3);
+  });
+  it("sin fusión se eligen dos; con ella, una que no esté dentro", () => {
+    const p: Progress = { stats: {}, abilities, fusion: [] };
+    expect(canFuse(p, ["slam", "hook"])).toBe(true);
+    expect(canFuse(p, ["slam"])).toBe(false);
+    expect(canFuse(p, ["slam", "slam"])).toBe(false);
+    expect(canFuse(p, ["slam", "cleave"])).toBe(false);
+    p.fusion = ["slam", "hook"];
+    expect(canFuse(p, ["warcry"])).toBe(true);
+    expect(canFuse(p, ["slam"])).toBe(false);
+    expect(canFuse(p, ["warcry", "thrust"])).toBe(false);
+    expect(canFuse(p, ["banner"])).toBe(false);
   });
 });

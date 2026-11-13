@@ -10,6 +10,8 @@ export const AbilitySlotState = schema(
     cooldown: t.number(),
     /** cargas disponibles (el Torbellino con `whirlCharges` tiene hasta 2; 1 si la habilidad no tiene cargas) */
     charges: t.number(),
+    /** la fusión: las compañeras que salen con esta, como "id:rango" separadas por comas ("throw:1,hook:3"); "" si no lo es */
+    partners: t.string(),
   },
   "AbilitySlotState",
 );
@@ -79,6 +81,8 @@ export const PlayerState = schema(
     gear: t.map(GearState),
     /** RelicId de la reliquia puesta; "" si no tiene */
     relic: t.string(),
+    /** fusiones ganadas sin gastar */
+    fusionTokens: t.number(),
   },
   "PlayerState",
 );

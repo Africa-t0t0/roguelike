@@ -36,6 +36,7 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `weapon`: equipa el arma con su tier y naturaleza (`"none"` si no se indica).
  * - `boss`: invoca al dragón delante del jugador (como si activara el tótem: el tótem pasa a pelea).
  * - `nextFloor`: baja al piso siguiente sin pelear.
+ * - `fusion`: le da una fusión para gastar (como si hubiera matado al jefe).
  */
 export type DevCommand =
   | { cmd: "levelUp"; count: number; choose: boolean }
@@ -57,7 +58,8 @@ export type DevCommand =
   | { cmd: "relic"; id: RelicId }
   | { cmd: "class"; cls: ClassId }
   | { cmd: "boss" }
-  | { cmd: "nextFloor" };
+  | { cmd: "nextFloor" }
+  | { cmd: "fusion" };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -97,6 +99,7 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
     case "chest":
     case "boss":
     case "nextFloor":
+    case "fusion":
       return { cmd: m.cmd };
     case "spawn": {
       // El dragón no se crea suelto: tiene su comando (`boss`).

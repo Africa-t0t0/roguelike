@@ -1996,7 +1996,7 @@ describe("RunRoom: sandbox", () => {
 
     dev(ana.client, { cmd: "clearCards" });
     await settle();
-    expect(record("ana").progress).toEqual({ stats: {}, abilities: [] });
+    expect(record("ana").progress).toEqual({ stats: {}, abilities: [], fusion: [] });
     expect(record("ana").combat.abilities).toHaveLength(0);
     expect(player("ana").cooldownMult).toBe(1);
   });
@@ -2171,6 +2171,8 @@ describe("RunRoom: tótem, jefe y pisos", () => {
     room["enemySystem"].damage(boss.id, boss.hp);
     await ticksUntil(() => room.state.totemPhase === "open", 5);
     expect(room.state.chests.size).toBe(chests + 1);
+    // Matar al jefe da una fusión a cada uno.
+    expect(record("ana").fusionTokens).toBe(1);
     await ticksUntil(() => events.some((e) => e.type === "boss" && e.phase === "down"), 10);
     room["floorTime"] = 200;
     ana.client.send(MSG.input, press(2));
@@ -2197,5 +2199,34 @@ describe("RunRoom: tótem, jefe y pisos", () => {
     for (let i = 0; i < 5; i++) await room.waitForNextTimestep();
     expect(room["enemySystem"].enemies.filter((e) => e.kind === "dragon")).toHaveLength(1);
     expect(room.state.floor).toBe(1);
+  });
+
+  it("la fusión empieza con dos y cada fusión ganada le suma una; sin fusión o con una inválida, nada", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const r = record("ana");
+    r.progress.abilities.push({ id: "slam", rank: 1 }, { id: "hook", rank: 1 }, { id: "cleave", rank: 1 }, { id: "warcry", rank: 1 });
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) await room.waitForNextTimestep();
+    };
+    ana.client.send(MSG.fuse, { ids: ["slam", "hook"] });
+    await settle();
+    expect(r.progress.fusion).toEqual([]);
+    r.fusionTokens = 2;
+    ana.client.send(MSG.fuse, { ids: ["slam", "cleave"] });
+    await settle();
+    expect(r.fusionTokens).toBe(2);
+    ana.client.send(MSG.fuse, { ids: ["slam", "hook"] });
+    await ticksUntil(() => r.fusionTokens === 1, 10);
+    expect(r.combat.fusion).toEqual(["slam", "hook"]);
+    // Con fusión ya hecha se suma de a una.
+    ana.client.send(MSG.fuse, { ids: ["warcry", "slam"] });
+    await settle();
+    expect(r.fusionTokens).toBe(1);
+    ana.client.send(MSG.fuse, { ids: ["warcry"] });
+    await ticksUntil(() => r.fusionTokens === 0, 10);
+    expect(r.combat.fusion).toEqual(["slam", "hook", "warcry"]);
+    await ticksUntil(() => player("ana").abilities.length === 1, 5);
+    expect(player("ana").abilities[0]).toMatchObject({ id: "slam", partners: "hook:1,warcry:1" });
   });
 });

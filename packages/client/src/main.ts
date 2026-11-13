@@ -87,6 +87,7 @@ import { joinErrorMessage } from "./ui/errors";
 import { Compass } from "./ui/compass";
 import { DevPanel } from "./ui/devPanel";
 import { Hud } from "./ui/hud";
+import { FusionPanel } from "./ui/fusionPanel";
 import { Minimap } from "./ui/minimap";
 import { Lobby } from "./ui/lobby";
 
@@ -250,6 +251,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const hud = new Hud();
   if (dungeon.floor > 1) hud.announce(`Piso ${dungeon.floor}`, BOSS_BANNER_MS);
   const abilityBar = new AbilityBar();
+  const fusionPanel = new FusionPanel((ids) => conn.fuse(ids));
   const compass = new Compass();
   const minimap = new Minimap(dungeon);
   const allies: { x: number; z: number }[] = [];
@@ -296,16 +298,21 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   // ajena por evento), con la pose dibujada. Lo que ya lleve se descuenta del inicio: así el efecto queda
   // alineado con el clip también para los remotos, dibujados INTERP_DELAY_MS tarde.
   views.onAbilityStart = (key, id, pose, elapsedS) => {
-    const rank = lastPlayers.get(key)?.abilities.find((a) => a.id === id)?.rank ?? 1;
-    // El Golpe sísmico se dibuja donde va a caer el salto, no donde arranca.
+    const slot = lastPlayers.get(key)?.abilities.find((a) => a.id === id);
     const aimed = leapDists.get(key) ?? 0;
-    const at =
-      id === "slam" ? { ...pose, ...leapLanding(dungeon, pose.x, pose.z, pose.facing, aimed) }
-      : AIMED_SPELLS.includes(id) ? { ...pose, x: pose.x + Math.sin(pose.facing) * aimed, z: pose.z + Math.cos(pose.facing) * aimed }
-      : pose;
-    // El Torbellino gira mientras el jugador camina: su efecto va con él.
-    const follow = id === "whirlwind" ? () => drawnPoses.get(key) : undefined;
-    abilityFx.play(id, at, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none", follow);
+    const play = (fxId: AbilityId, rank: number, lead: boolean) => {
+      // El Golpe sísmico que salta se dibuja donde va a caer, no donde arranca (el de una fusión, que no salta, en el sitio).
+      const at =
+        fxId === "slam" && lead ? { ...pose, ...leapLanding(dungeon, pose.x, pose.z, pose.facing, aimed) }
+        : AIMED_SPELLS.includes(fxId) ? { ...pose, x: pose.x + Math.sin(pose.facing) * aimed, z: pose.z + Math.cos(pose.facing) * aimed }
+        : pose;
+      // El Torbellino gira mientras el jugador camina: su efecto va con él.
+      const follow = fxId === "whirlwind" ? () => drawnPoses.get(key) : undefined;
+      abilityFx.play(fxId, at, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none", follow);
+    };
+    play(id, slot?.rank ?? 1, true);
+    // La fusión: las compañeras salen a la vez, cada una con su efecto.
+    for (const p of slot?.partners ?? []) play(p.id, p.rank, false);
     if (key === conn.myKey) sfx.cast();
   };
   // El golpe pega hacia donde se apunta en su impacto, no hacia donde empezó: su efecto (el tajo, el destello del
@@ -376,7 +383,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       }
       mine = p;
       myGear = Object.fromEntries(Object.entries(p.gear).map(([slot, g]) => [slot, g.item]));
-      myAbilityIds = p.abilities.map((a) => a.id);
+      myAbilityIds = p.abilities.flatMap((a) => [a.id, ...(a.partners ?? []).map((x) => x.id)]);
+      fusionPanel.update(p.fusionTokens, p.abilities);
       hud.setPlayer(p);
       myLegendaries = Object.values(p.gear).flatMap((g) => (g.item.legendary ? [g.item.legendary] : []));
       ability.setLegendaries(myLegendaries);
@@ -505,6 +513,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       for (const key of event.keys) {
         const p = key === conn.myKey ? predictor?.current : lastPlayers.get(key);
         if (p) abilityFx.healed(p.x, p.z, now);
+      }
+    } else if (event.type === "fused") {
+      if (event.key === conn.myKey) {
+        hud.announce(`¡Fusión! ${event.ids.map((id) => ABILITIES[id].name).join(" + ")}`, BOSS_BANNER_MS);
+        sfx.levelUp();
       }
     } else if (event.type === "boss") {
       if (event.phase === "awake") {
@@ -689,6 +702,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     devPanel?.dispose();
     hud.dispose();
     abilityBar.dispose();
+    fusionPanel.dispose();
     compass.dispose();
     minimap.dispose();
     damageNumbers.dispose();

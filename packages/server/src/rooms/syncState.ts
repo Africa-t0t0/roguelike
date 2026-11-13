@@ -1,5 +1,5 @@
 import { GEAR_SLOTS, xpToNext, type GearItem } from "@roguelike/shared";
-import { abilityCharges, abilityMaxCharges, abilitySlots, type PlayerShot, type PlayerZone } from "../sim/AbilitySystem";
+import { abilityCharges, abilityMaxCharges, abilitySlots, slotChargeHolder, type PlayerShot, type PlayerZone } from "../sim/AbilitySystem";
 import { abilityRank, attackSpeedOf, channelSpeedMult, statusSpeedMult, type CombatSystem } from "../sim/CombatSystem";
 import type { Enemy, Projectile } from "../sim/EnemySystem";
 import type { Hazard } from "../sim/hazards";
@@ -40,6 +40,7 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
   ps.y = k.y;
   ps.vy = k.vy;
   ps.lastSeq = record.lastSeq;
+  ps.fusionTokens = record.fusionTokens;
   const c = record.combat;
   ps.cls = c.cls;
   ps.hp = c.hp;
@@ -94,7 +95,11 @@ export function syncPlayer(ps: PlayerState, record: PlayerRecord, choosing: bool
     s.id = slot.id;
     s.rank = slot.rank;
     s.cooldown = c.abilityCd[slot.id] ?? 0;
-    s.charges = abilityMaxCharges(c, slot.id) > 1 ? abilityCharges(c, slot.id) : 1;
+    // Las cargas y el enfriamiento de la casilla son los de la que las lleva (en la fusión, la de más cargas).
+    const holder = slotChargeHolder(c, slot);
+    s.cooldown = c.abilityCd[holder] ?? 0;
+    s.charges = abilityMaxCharges(c, holder) > 1 ? abilityCharges(c, holder) : 1;
+    s.partners = (slot.partners ?? []).map((p) => `${p.id}:${p.rank}`).join(",");
   });
 }
 

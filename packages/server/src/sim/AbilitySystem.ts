@@ -1,6 +1,9 @@
 import {
   ABILITIES,
   ABILITY_BUFFER_S,
+  abilitySlotsOf,
+  FUSION_DAMAGE_MULT,
+  type AbilitySlotDef,
   BEAM_BOUNCE_FRAC,
   BLADE_BLAST_MULT,
   BLADE_MARK_S,
@@ -92,6 +95,8 @@ export interface AbilityResult {
   aimDist?: number;
   /** rango con el que empezó */
   rank?: number;
+  /** casilla fusionada: las compañeras que salieron a la vez */
+  partners?: AbilityId[];
   hits: ImpactResult["hits"];
   kills: ImpactResult["kills"];
 }
@@ -230,9 +235,24 @@ export function inLine(
   return (along - ca) ** 2 + (side - cs) ** 2 <= target.radius ** 2;
 }
 
-/** Casillas de habilidad (activas y mantenidas) en orden de aprendizaje: la tecla i+1 usa la i-ésima. */
-export function abilitySlots(c: CombatState): { id: AbilityId; rank: number }[] {
-  return c.abilities.filter((a) => ABILITIES[a.id].kind !== "passive").slice(0, MAX_ACTIVE_ABILITIES);
+/**
+ * La habilidad que lleva las cargas de una casilla: la suya o, en la fusión, la que más cargas tiene (el Tajo
+ * frontal de rango 3 le da 3 a toda la fusión). Las demás de la fusión no gastan nada al lanzarse.
+ */
+export function slotChargeHolder(c: CombatState, slot: AbilitySlotDef): AbilityId {
+  const ids = [slot.id, ...(slot.partners ?? []).map((p) => p.id)];
+  return ids.reduce((best, id) => (abilityMaxCharges(c, id) > abilityMaxCharges(c, best) ? id : best));
+}
+
+/** Segundos de un ciclo de recarga de `id` (con Celeridad); en la fusión, el de la más lenta de todas. */
+export function abilityCycleS(c: CombatState, id: AbilityId): number {
+  const ids = c.fusion.length >= 2 && c.fusion.includes(id) ? c.fusion : [id];
+  return Math.max(...ids.map((x) => abilityCooldownS(x, Math.max(1, abilityRank(c, x))))) * c.mods.cooldownMult;
+}
+
+/** Casillas de habilidad en orden de aprendizaje (la tecla i+1 usa la i-ésima); una fusión ocupa una sola. */
+export function abilitySlots(c: CombatState): AbilitySlotDef[] {
+  return abilitySlotsOf(c.abilities, c.fusion);
 }
 
 /**
@@ -296,6 +316,8 @@ export class AbilitySystem {
   private nextShot = 1;
   private zoneList: PlayerZone[] = [];
   private nextZone = 1;
+  /** resolviendo el impacto de una fusión: el daño que se crea lleva `FUSION_DAMAGE_MULT` */
+  private fusing = false;
   /** eventos para los clientes (haz del Rayo, estallidos) desde la última `takeEvents` */
   private events: CombatEvent[] = [];
   /** segundos hasta el próximo tramo del rastro de hielo (`frostTrail`), por jugador */
@@ -376,66 +398,42 @@ export class AbilitySystem {
       anim.impacts = keep;
       if (anim.left === 0 && keep.length === 0) c.abilityAnim = null;
     }
+    // Las compañeras de la fusión: sus impactos a su tiempo, donde esté el jugador (la mueve la que lleva la animación).
+    for (const partner of c.partnerAnims) {
+      partner.left = countDown(partner.left, SIM_DT);
+      const keep: number[] = [];
+      for (const t of partner.impacts) {
+        const left = countDown(t, SIM_DT);
+        if (left > 0) keep.push(left);
+        else this.resolveImpact(c, k, partner, input, nowTick, enemies, history, res, key);
+      }
+      partner.impacts = keep;
+    }
+    c.partnerAnims = c.partnerAnims.filter((p) => p.left > 0 || p.impacts.length > 0);
 
     const slots = abilitySlots(c);
     for (let i = 0; i < slots.length; i++) {
       if ((c.queuedMask & (1 << i)) === 0) continue;
       const { id, rank } = slots[i]!;
-      const def = ABILITIES[id];
+      const mates = slots[i]!.partners ?? [];
+      // Las cargas las lleva una sola (en la fusión, la que más tiene): de ella depende si sale.
+      const holder = slotChargeHolder(c, slots[i]!);
       // Sin cargas o aturdido no espera: se descarta. Con un golpe u otra habilidad en curso, sigue en la cola.
-      if (def.kind !== "active" || abilityCharges(c, id) < 1 || c.stunLeft > 0) {
+      if (ABILITIES[id].kind !== "active" || abilityCharges(c, holder) < 1 || c.stunLeft > 0) {
         c.queuedMask &= ~(1 << i);
         continue;
       }
-      if (c.swingTimer > 0 || c.abilityAnim) continue;
+      if (c.swingTimer > 0 || c.abilityAnim || c.partnerAnims.length > 0) continue;
       c.queuedMask = 0;
-      // Celeridad: el enfriamiento se fija al lanzarla. Gasta 1 carga; si el enfriamiento no corría, empieza a recargar.
-      if ((c.abilityCd[id] ?? 0) > 0) c.abilityCharges[id] = abilityCharges(c, id) - 1;
-      else {
-        c.abilityCharges[id] = abilityMaxCharges(c, id) - 1;
-        c.abilityCd[id] = abilityCooldownS(id, rank) * c.mods.cooldownMult;
-      }
+      // Celeridad: el enfriamiento se fija al lanzarla; la fusión usa el de la más lenta.
+      this.spend(c, holder, abilityCycleS(c, holder));
       // Reloj de arena roto: cada habilidad cuesta vida, sin bajar de 1 (ni curar a quien ya tiene menos).
       if (c.fx.abilityHpCost > 0) c.hp = Math.min(c.hp, Math.max(1, c.hp - c.fx.abilityHpCost));
-      c.abilityAnim = {
-        id, rank, left: abilityAnimS(id, rank), impacts: impactTimes(id, rank), facing: input.facing, originX: k.x, originZ: k.z,
-      };
-      const r = def.ranks[rank - 1]!;
+      const fused = mates.length > 0;
+      c.abilityAnim = this.begin(c, k, input, id, rank, party, partyAt, res, { lead: true, fused });
+      c.partnerAnims = mates.map((m) => this.begin(c, k, input, m.id, m.rank, party, partyAt, res, { lead: false, fused: true }));
+      if (fused) res.partners = mates.map((m) => m.id);
       res.rank = rank;
-      if (def.cls === "mage") {
-        const aim = this.aimPoint(k, input.facing, input.aimDist);
-        c.abilityAnim.aimX = aim.x;
-        c.abilityAnim.aimZ = aim.z;
-        res.aimDist = Math.hypot(aim.x - k.x, aim.z - k.z);
-      }
-      if (id === "heal") {
-        for (const p of new Set([c, ...party])) {
-          if (p.dead) continue;
-          this.combat.heal(p, p.maxHp * r.healFrac!);
-          if (c.fx.legendaries.includes("healShield")) {
-            p.shield = Math.max(p.shield, p.maxHp * MAGE_LEGENDARY.healShieldFrac);
-            p.shieldLeft = MAGE_LEGENDARY.healShieldS;
-          }
-        }
-      }
-      if (id === "slam") {
-        c.abilityAnim.leapSpeed = leapSpeed(input.aimDist);
-        c.abilityAnim.leapLeft = SLAM_IMPACT_S;
-        res.leapDist = Math.min(SLAM_LEAP_MAX_M, Math.max(0, input.aimDist ?? 0));
-        // Invulnerable toda la animación (también lo que canaliza en rango 3).
-        c.invulnFor = Math.max(c.invulnFor, abilityAnimS(id, rank));
-      }
-      if (id === "thrust") {
-        c.abilityAnim.leapSpeed = r.range! / THRUST_DASH_S;
-        c.abilityAnim.leapLeft = THRUST_DASH_S;
-      }
-      if (id === "warcry") this.warcry(c, k, party, partyAt, r);
-      if (id === "banner") {
-        this.zoneList.push({
-          id: `z${this.nextZone++}`, kind: "banner", heal: r.healFrac!, buff: r.buff!, allNatures: r.mark === true,
-          guard: c.fx.legendaries.includes("bannerGuard"), x: k.x, z: k.z, radius: r.radius!, left: BANNER_DURATION_S, total: BANNER_DURATION_S,
-        });
-      }
       res.started = id;
       break;
     }
@@ -454,6 +452,75 @@ export class AbilitySystem {
     }
 
     return res;
+  }
+
+  /** Gasta 1 carga de `id`; si su enfriamiento no corría, empieza a recargar con `cycle` s. */
+  private spend(c: CombatState, id: AbilityId, cycle: number): void {
+    if ((c.abilityCd[id] ?? 0) > 0) c.abilityCharges[id] = abilityCharges(c, id) - 1;
+    else {
+      c.abilityCharges[id] = abilityMaxCharges(c, id) - 1;
+      c.abilityCd[id] = cycle;
+    }
+  }
+
+  /**
+   * Empieza `id`: su animación (impactos, punto apuntado) y lo que hace al lanzarse (curar, gritar, plantar el
+   * Estandarte). Solo la que lleva (`lead`) salta o embiste: la compañera de una fusión va donde la lleve la otra.
+   */
+  private begin(
+    c: CombatState,
+    k: KinematicState,
+    input: PlayerInput,
+    id: AbilityId,
+    rank: number,
+    party: CombatState[],
+    partyAt: ReadonlyMap<CombatState, { x: number; z: number }>,
+    res: AbilityResult,
+    opts: { lead: boolean; fused: boolean },
+  ): AbilityAnim {
+    const def = ABILITIES[id];
+    const anim: AbilityAnim = {
+      id, rank, left: abilityAnimS(id, rank), impacts: impactTimes(id, rank), facing: input.facing, originX: k.x, originZ: k.z,
+      ...(opts.fused ? { fused: true } : {}),
+    };
+    const r = def.ranks[rank - 1]!;
+    if (def.cls === "mage") {
+      const aim = this.aimPoint(k, input.facing, input.aimDist);
+      anim.aimX = aim.x;
+      anim.aimZ = aim.z;
+      if (opts.lead || res.aimDist === undefined) res.aimDist = Math.hypot(aim.x - k.x, aim.z - k.z);
+    }
+    if (id === "heal") {
+      for (const p of new Set([c, ...party])) {
+        if (p.dead) continue;
+        this.combat.heal(p, p.maxHp * r.healFrac!);
+        if (c.fx.legendaries.includes("healShield")) {
+          p.shield = Math.max(p.shield, p.maxHp * MAGE_LEGENDARY.healShieldFrac);
+          p.shieldLeft = MAGE_LEGENDARY.healShieldS;
+        }
+      }
+    }
+    if (id === "slam") {
+      if (opts.lead) {
+        anim.leapSpeed = leapSpeed(input.aimDist);
+        anim.leapLeft = SLAM_IMPACT_S;
+        res.leapDist = Math.min(SLAM_LEAP_MAX_M, Math.max(0, input.aimDist ?? 0));
+      }
+      // Invulnerable toda la animación (también lo que canaliza en rango 3).
+      c.invulnFor = Math.max(c.invulnFor, abilityAnimS(id, rank));
+    }
+    if (id === "thrust" && opts.lead) {
+      anim.leapSpeed = r.range! / THRUST_DASH_S;
+      anim.leapLeft = THRUST_DASH_S;
+    }
+    if (id === "warcry") this.warcry(c, k, party, partyAt, r);
+    if (id === "banner") {
+      this.zoneList.push({
+        id: `z${this.nextZone++}`, kind: "banner", heal: r.healFrac!, buff: r.buff! * (opts.fused ? FUSION_DAMAGE_MULT : 1), allNatures: r.mark === true,
+        guard: c.fx.legendaries.includes("bannerGuard"), x: k.x, z: k.z, radius: r.radius!, left: BANNER_DURATION_S, total: BANNER_DURATION_S,
+      });
+    }
+    return anim;
   }
 
   /** Al resolver el impacto de un golpe del combo: si fue el último y tiene la pasiva, lanza la onda. */
@@ -498,7 +565,7 @@ export class AbilitySystem {
         // Terminó un ciclo: vuelve 1 carga y, si faltan más, empieza otro ciclo.
         const charges = Math.min(abilityMaxCharges(c, id), (c.abilityCharges[id] ?? 0) + 1);
         c.abilityCharges[id] = charges;
-        if (charges < abilityMaxCharges(c, id)) c.abilityCd[id] = abilityCooldownS(id, abilityRank(c, id)) * c.mods.cooldownMult;
+        if (charges < abilityMaxCharges(c, id)) c.abilityCd[id] = abilityCycleS(c, id);
       }
       if (c.buffLeft > 0) {
         c.buffLeft = countDown(c.buffLeft, dt);
@@ -855,7 +922,7 @@ export class AbilitySystem {
   /** Daño de habilidad: el del primer golpe del arma × mult × Fuerza, Grito y Estandarte. */
   private abilityDamage(c: CombatState, mult: number): number {
     const base = strikeDamage(c.weaponId, c.cls, this.combat.level, 1, c.weaponTier);
-    return Math.round(base * mult * damageMultOf(c));
+    return Math.round(base * mult * damageMultOf(c) * (this.fusing ? FUSION_DAMAGE_MULT : 1));
   }
 
   /**
@@ -1045,7 +1112,27 @@ export class AbilitySystem {
     this.events.push({ type: "beam", key, points, nature: c.weaponNature });
   }
 
+  /** Impacto de una habilidad; si es parte de una fusión, todo el daño que crea lleva `FUSION_DAMAGE_MULT`. */
   private resolveImpact(
+    c: CombatState,
+    k: KinematicState,
+    anim: AbilityAnim,
+    input: PlayerInput,
+    nowTick: number,
+    enemies: EnemySystem,
+    history: PositionHistory,
+    res: AbilityResult,
+    key: string,
+  ): void {
+    this.fusing = anim.fused === true;
+    try {
+      this.impactOf(c, k, anim, input, nowTick, enemies, history, res, key);
+    } finally {
+      this.fusing = false;
+    }
+  }
+
+  private impactOf(
     c: CombatState,
     k: KinematicState,
     anim: AbilityAnim,

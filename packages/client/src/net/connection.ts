@@ -78,6 +78,8 @@ export type PlayerSnapshot = KinematicState & {
   cooldownMult: number;
   /** tiene una elección de carta abierta */
   choosing: boolean;
+  /** fusiones ganadas (matando al jefe) sin gastar */
+  fusionTokens: number;
 };
 export interface EquippedGear {
   tier: WeaponTier;
@@ -458,6 +460,8 @@ export interface GameConnection {
   chooseCard(index: number): void;
   /** Comando del panel de pruebas (solo hace algo en una sala sandbox). */
   sendDev(cmd: DevCommand): void;
+  /** Gasta una fusión ganada: las dos primeras de la fusión o la que se le suma (el servidor lo ignora si no puede). */
+  fuse(ids: AbilityId[]): void;
   onDisconnect(cb: (reason: DisconnectReason) => void): void;
   /** Suelta los manejadores de la sesión de juego (al rehacerla tras bajar de piso); el de desconexión queda. */
   detach(): void;
@@ -500,6 +504,16 @@ function safeJson(text: unknown): unknown {
   }
 }
 
+/** Las compañeras de la fusión, de "id:rango,id:rango"; descarta lo que no encaje. */
+export function parsePartners(raw: unknown): { id: AbilityId; rank: number }[] {
+  if (typeof raw !== "string" || raw === "") return [];
+  return raw.split(",").flatMap((part) => {
+    const [id, rank] = part.split(":");
+    const r = Number(rank);
+    return isAbilityId(id) && Number.isInteger(r) && r >= 1 && r <= 3 ? [{ id: id as AbilityId, rank: r }] : [];
+  });
+}
+
 /** Copia el estado: el SDK lo muta en el sitio, y con lag simulado se entrega más tarde. */
 function snapshotPlayers(room: Room): PlayerSnapshots {
   const out: PlayerSnapshots = new Map();
@@ -508,7 +522,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
     weaponId: string;
     weaponTier: number;
     weaponNature: string;
-    abilities: { forEach(cb: (s: { id: string; rank: number; cooldown: number; charges?: number }) => void): void };
+    abilities: { forEach(cb: (s: { id: string; rank: number; cooldown: number; charges?: number; partners?: string }) => void): void };
     gear?: { forEach(cb: (g: { tier: number; legendary: boolean; glow: string; data: string }, slot: string) => void): void };
     relic?: string;
   };
@@ -516,7 +530,11 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
     const abilities: PlayerSnapshot["abilities"] = [];
     // Con la misma PROTOCOL_VERSION toda id es conocida; una que no lo sea (no debería pasar) se descarta.
     p.abilities?.forEach((s) => {
-      if (isAbilityId(s.id)) abilities.push({ id: s.id as AbilityId, rank: s.rank, cooldown: s.cooldown, charges: finiteOr(s.charges, 1) });
+      if (!isAbilityId(s.id)) return;
+      const slot: PlayerSnapshot["abilities"][number] = { id: s.id as AbilityId, rank: s.rank, cooldown: s.cooldown, charges: finiteOr(s.charges, 1) };
+      const partners = parsePartners(s.partners);
+      if (partners.length > 0) slot.partners = partners;
+      abilities.push(slot);
     });
     const gear: PlayerSnapshot["gear"] = {};
     p.gear?.forEach((g) => {
@@ -555,6 +573,7 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
       attackSpeedMult: p.attackSpeedMult || 1,
       cooldownMult: Number.isFinite(p.cooldownMult) && p.cooldownMult > 0 ? p.cooldownMult : 1,
       choosing: p.choosing ?? false,
+      fusionTokens: finiteOr(p.fusionTokens, 0),
     });
   });
   return out;
@@ -811,6 +830,11 @@ export async function connect(opts: {
     sendDev(cmd) {
       lag.outbound(() => {
         if (!closed) room.send(MSG.dev, cmd);
+      });
+    },
+    fuse(ids) {
+      lag.outbound(() => {
+        if (!closed) room.send(MSG.fuse, { ids });
       });
     },
     onDisconnect(cb) {

@@ -21,6 +21,8 @@ export interface AbilitySlotView {
   charges?: number;
   /** rango (1..3): algunos hechizos cambian de enfriamiento y de duración con él; sin dato, 1 */
   rank?: number;
+  /** la fusión: las compañeras que salen a la vez, con su rango */
+  partners?: { id: AbilityId; rank: number }[];
 }
 
 /** Estado de una habilidad con cargas: cargas disponibles y segundos que le quedan al ciclo de recarga (0 con el máximo). */
@@ -77,6 +79,8 @@ export class LocalAbility {
   private queuedLeft = 0;
   /** animación en curso según los inputs (lo que bloquea otras habilidades y el ataque) */
   private anim: { id: AbilityId; left: number } | null = null;
+  /** lo que le queda a la compañera de una fusión: mientras corre no empieza otra habilidad (sí se puede atacar) */
+  private partnerLeft = 0;
   /** animación a dibujar (`startMs` en el reloj de `tick`) */
   private shown: { id: AbilityId; startMs: number } | null = null;
   /** multiplicador de enfriamiento (Celeridad), el sincronizado del servidor */
@@ -99,12 +103,35 @@ export class LocalAbility {
     return id === "whirlwind" && this.legendaries.includes("whirlCharges") ? WHIRL_CHARGES : 1;
   }
 
-  private rankOf(id: AbilityId): number {
-    return this.slots.find((s) => s.id === id)?.rank ?? 1;
+  /** Las habilidades de una casilla con su rango: la suya y, si es la fusión, sus compañeras. */
+  private members(slot: AbilitySlotView): { id: AbilityId; rank: number }[] {
+    return [{ id: slot.id, rank: slot.rank ?? 1 }, ...(slot.partners ?? [])];
   }
 
+  private slotOf(id: AbilityId): AbilitySlotView | undefined {
+    return this.slots.find((s) => s.id === id || s.partners?.some((p) => p.id === id));
+  }
+
+  private rankOf(id: AbilityId): number {
+    const slot = this.slotOf(id);
+    return (slot && this.members(slot).find((m) => m.id === id)?.rank) ?? 1;
+  }
+
+  /** Ciclo de recarga de `id`; si está en la fusión, el de la más lenta de todas (como el servidor). */
   private cycle(id: AbilityId): number {
-    return abilityCooldownS(id, this.rankOf(id)) * this.cooldownMult;
+    const slot = this.slotOf(id);
+    const all = slot ? this.members(slot) : [{ id, rank: 1 }];
+    return Math.max(...all.map((m) => abilityCooldownS(m.id, m.rank))) * this.cooldownMult;
+  }
+
+  /** La que lleva las cargas de la casilla: la suya o, en la fusión, la que más tiene (como el servidor). */
+  private holderOf(slot: AbilitySlotView): AbilityId {
+    return this.members(slot).reduce((best, m) => (this.maxCharges(m.id) > this.maxCharges(best.id) ? m : best)).id;
+  }
+
+  /** Las compañeras de `id` si es la casilla de la fusión. */
+  partnersOf(id: AbilityId): { id: AbilityId; rank: number }[] {
+    return this.slots.find((s) => s.id === id)?.partners ?? [];
   }
 
   /** Panel de pruebas: el servidor puso los enfriamientos a cero; aquí se olvidan los predichos. */
@@ -118,8 +145,10 @@ export class LocalAbility {
   setServer(slots: AbilitySlotView[], nowMs: number): void {
     this.slots = slots.map((s) => ({ ...s }));
     for (const s of slots) {
-      this.server.set(s.id, { cd: s.cooldown, atMs: nowMs });
-      this.serverCharges.set(s.id, { charges: s.charges ?? 1, cd: s.cooldown, atMs: nowMs });
+      for (const { id } of this.members(s)) {
+        this.server.set(id, { cd: s.cooldown, atMs: nowMs });
+        this.serverCharges.set(id, { charges: s.charges ?? 1, cd: s.cooldown, atMs: nowMs });
+      }
     }
   }
 
@@ -136,6 +165,7 @@ export class LocalAbility {
     this.heldMask = mask;
     if (ctx.dead) {
       this.anim = null;
+      this.partnerLeft = 0;
       this.shown = null;
       this.queuedMask = 0;
       return undefined;
@@ -150,20 +180,26 @@ export class LocalAbility {
       this.anim.left = countDown(this.anim.left, SIM_DT);
       if (this.anim.left === 0) this.anim = null;
     }
+    this.partnerLeft = countDown(this.partnerLeft, SIM_DT);
 
     let started: AbilityId | undefined;
     for (let i = 0; i < this.slots.length; i++) {
       if ((this.queuedMask & (1 << i)) === 0) continue;
       const { id } = this.slots[i]!;
+      const partners = this.slots[i]!.partners ?? [];
+      const holder = this.holderOf(this.slots[i]!);
       const def = ABILITIES[id];
-      if (def.kind !== "active" || ctx.stunned || !this.ready(id, nowMs)) {
+      if (def.kind !== "active" || ctx.stunned || !this.ready(holder, nowMs)) {
         this.queuedMask &= ~(1 << i);
         continue;
       }
-      if (ctx.swingTimer > 0 || this.anim) continue;
+      if (ctx.swingTimer > 0 || this.anim || this.partnerLeft > 0) continue;
       this.queuedMask = 0;
-      this.spend(id, nowMs);
+      // Solo gasta la que lleva las cargas; las demás de la fusión salen gratis.
+      this.spend(holder, nowMs);
+      this.lastCastMs.set(holder, nowMs);
       this.lastCastMs.set(id, nowMs);
+      for (const p of partners) this.partnerLeft = Math.max(this.partnerLeft, abilityAnimS(p.id, p.rank));
       this.anim = { id, left: abilityAnimS(id, this.rankOf(id)) };
       this.shown = { id, startMs: nowMs };
       started = id;

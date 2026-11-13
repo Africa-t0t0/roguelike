@@ -475,15 +475,90 @@ export interface Progress {
   stats: Partial<Record<StatCardId, number>>;
   /** en orden de aprendizaje; incluye la pasiva si la tiene */
   abilities: { id: AbilityId; rank: number }[];
+  /**
+   * La fusión: las habilidades unidas en una sola casilla, que se lanzan juntas. Empieza con dos (el primer jefe) y
+   * cada jefe siguiente le suma una más. Vacía sin fusión.
+   */
+  fusion?: AbilityId[];
 }
 
 export function newProgress(): Progress {
-  return { stats: {}, abilities: [] };
+  return { stats: {}, abilities: [], fusion: [] };
 }
 
-/** Casillas ocupadas: las activas; la pasiva no cuenta. */
+export function isAbilityId(v: unknown): v is AbilityId {
+  return typeof v === "string" && Object.hasOwn(ABILITIES, v);
+}
+
+/** La fusión pega más que sus habilidades por separado. */
+export const FUSION_DAMAGE_MULT = 1.25;
+
+/**
+ * Qué habilidad de la fusión pone la animación (y el movimiento): primero las que mueven al jugador, luego las
+ * que canalizan y al final las instantáneas. Las demás van en paralelo, como eco, con sus impactos a su tiempo.
+ */
+const FUSION_LEAD: readonly AbilityId[] = [
+  "thrust", "slam", "gust", "whirlwind", "nova", "hook", "throw", "meteors", "beam", "frost", "mine", "orb", "warcry", "banner", "heal",
+];
+
+/** La que lleva la animación de la fusión (a igual prioridad, la primera de la lista). */
+export function fusionLead(ids: readonly AbilityId[]): AbilityId {
+  const prio = (id: AbilityId) => {
+    const i = FUSION_LEAD.indexOf(id);
+    return i === -1 ? Infinity : i;
+  };
+  return ids.reduce((best, id) => (prio(id) < prio(best) ? id : best));
+}
+
+/** Una casilla de habilidad: la habilidad (o la que lleva la fusión) y, si es la fusión, las que salen con ella. */
+export interface AbilitySlotDef {
+  id: AbilityId;
+  rank: number;
+  partners?: { id: AbilityId; rank: number }[];
+}
+
+/**
+ * Casillas en orden (la tecla i+1 usa la i-ésima): las activas en orden de aprendizaje; la fusión ocupa la casilla
+ * de la primera aprendida de las suyas. Como mucho MAX_ACTIVE_ABILITIES.
+ */
+export function abilitySlotsOf(abilities: readonly { id: AbilityId; rank: number }[], fusion: readonly AbilityId[] = []): AbilitySlotDef[] {
+  const actives = abilities.filter((a) => ABILITIES[a.id].kind !== "passive");
+  const members = actives.filter((a) => fusion.includes(a.id));
+  const out: AbilitySlotDef[] = [];
+  let fusedPlaced = false;
+  for (const a of actives) {
+    if (members.length < 2 || !fusion.includes(a.id)) {
+      out.push({ id: a.id, rank: a.rank });
+      continue;
+    }
+    if (fusedPlaced) continue;
+    fusedPlaced = true;
+    const lead = fusionLead(members.map((m) => m.id));
+    out.push({
+      id: lead,
+      rank: members.find((m) => m.id === lead)!.rank,
+      partners: members.filter((m) => m.id !== lead).map((m) => ({ id: m.id, rank: m.rank })),
+    });
+  }
+  return out.slice(0, MAX_ACTIVE_ABILITIES);
+}
+
+/** Casillas ocupadas: las activas, con toda la fusión en una sola; la pasiva no cuenta. */
 export function activeAbilityCount(p: Progress): number {
-  return p.abilities.filter((a) => ABILITIES[a.id].kind !== "passive").length;
+  const actives = p.abilities.filter((a) => ABILITIES[a.id].kind !== "passive").length;
+  const fused = p.fusion?.length ?? 0;
+  return fused >= 2 ? actives - (fused - 1) : actives;
+}
+
+/**
+ * Lo que se puede sumar a la fusión: sin fusión, dos activas distintas que tiene; con ella, una activa que tiene y
+ * que aún no está dentro.
+ */
+export function canFuse(p: Progress, ids: readonly AbilityId[]): boolean {
+  const fusion = p.fusion ?? [];
+  const need = fusion.length === 0 ? 2 : 1;
+  if (ids.length !== need || new Set(ids).size !== ids.length) return false;
+  return ids.every((id) => ABILITIES[id].kind === "active" && p.abilities.some((x) => x.id === id) && !fusion.includes(id));
 }
 
 /**

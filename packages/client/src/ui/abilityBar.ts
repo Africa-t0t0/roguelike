@@ -54,6 +54,8 @@ export type AbilitySlotModel =
       maxCharges: number;
       /** sin cargas para lanzarla: la casilla se atenúa */
       cooling: boolean;
+      /** casilla fusionada: lleva los dos glifos y un borde propio */
+      fused: boolean;
     };
 
 /**
@@ -62,7 +64,7 @@ export type AbilitySlotModel =
  * El barrido solo se dibuja mientras recarga (cargas < máximo); el número de segundos, solo sin cargas.
  */
 export function abilityBarModel(
-  slots: readonly { id: AbilityId; rank: number }[],
+  slots: readonly { id: AbilityId; rank: number; partners?: readonly { id: AbilityId; rank: number }[] }[],
   cooldownOf: (id: AbilityId) => number,
   cooldownMult = 1,
   chargesOf: (id: AbilityId) => { charges: number; max: number } = () => ({ charges: 1, max: 1 }),
@@ -76,9 +78,14 @@ export function abilityBarModel(
       continue;
     }
     const def = ABILITIES[s.id];
-    const cycle = abilityCooldownS(s.id, s.rank);
-    const cd = cycle > 0 ? Math.max(0, cooldownOf(s.id)) : 0;
-    const have = chargesOf(s.id);
+    // La fusión: lista cuando lo están todas; el ciclo es el de la más lenta.
+    const partners = s.partners ?? [];
+    const ids = [s.id, ...partners.map((p) => p.id)];
+    const cycle = Math.max(abilityCooldownS(s.id, s.rank), ...partners.map((p) => abilityCooldownS(p.id, p.rank)));
+    // Las cargas y el enfriamiento son los de la que las lleva: en la fusión, la de más cargas.
+    const holder = ids.reduce((best, id) => (chargesOf(id).max > chargesOf(best).max ? id : best));
+    const cd = cycle > 0 ? Math.max(0, cooldownOf(holder)) : 0;
+    const have = chargesOf(holder);
     const maxCharges = Math.max(1, have.max);
     // Sin cargas (máximo 1) manda el enfriamiento: lista cuando no queda nada por esperar.
     const charges = maxCharges > 1 ? Math.max(0, Math.min(maxCharges, have.charges)) : cd > 0 ? 0 : 1;
@@ -86,14 +93,15 @@ export function abilityBarModel(
       key,
       empty: false,
       id: s.id,
-      glyph: ABILITY_GLYPHS[s.id],
-      name: def.name,
+      glyph: ids.map((id) => ABILITY_GLYPHS[id]).join(""),
+      name: [def.name, ...partners.map((p) => ABILITIES[p.id].name)].join(" + "),
       pips: rankPips(s.rank),
       cooldownText: charges < 1 ? formatCooldown(cd) : "",
       sweep: cycle > 0 ? Math.min(1, cd / (cycle * cooldownMult)) : 0,
       charges,
       maxCharges,
       cooling: charges < 1,
+      fused: partners.length > 0,
     });
   }
   return out;
@@ -162,7 +170,7 @@ export class AbilityBar {
         setText(s.charges, "");
         setText(s.pips, "");
         s.root.title = "";
-        s.root.classList.remove("ab-cooling", "ab-active");
+        s.root.classList.remove("ab-cooling", "ab-active", "ab-fused");
         s.sweep.style.setProperty("--cd", "0");
         return;
       }
@@ -172,6 +180,7 @@ export class AbilityBar {
       setText(s.pips, m.pips);
       s.root.title = m.name;
       s.root.classList.toggle("ab-cooling", m.cooling);
+      s.root.classList.toggle("ab-fused", m.fused);
       s.sweep.style.setProperty("--cd", m.sweep.toFixed(3));
     });
     this.passive.hidden = passiveRank <= 0;

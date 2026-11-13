@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  abilityCooldownS,
+  FUSION_DAMAGE_MULT,
   BLADE_BLAST_MULT,
   BLADE_MARK_S,
   BLADE_SPLASH_MULT,
@@ -223,5 +225,58 @@ describe("Estandarte", () => {
     env.k = { ...env.k, x: 35, z: 35 };
     run(env, 0.1);
     expect(damageMultOf(env.c)).toBe(1);
+  });
+});
+
+describe("Fusión", () => {
+  it("la casilla fusionada lanza las dos a la vez, pega un 25 % más y recarga con el enfriamiento de la más lenta", () => {
+    const env = setup([{ id: "throw", rank: 1 }, { id: "whirlwind", rank: 1 }]);
+    env.c.fusion = ["throw", "whirlwind"];
+    spawn(env.sys, [{ x: 20, z: 22 }]);
+    // Una sola casilla: la tecla 1. El Torbellino lleva la animación; la espada sale a la vez.
+    const a = feed(env, { abilities: 1 });
+    expect(a.started).toBe("whirlwind");
+    expect(a.partners).toEqual(["throw"]);
+    expect(env.c.partnerAnims.map((p) => p.id)).toEqual(["throw"]);
+    run(env, 1);
+    expect(env.ab.playerShots.filter((s) => s.kind === "sword").length + env.hits.length).toBeGreaterThan(1);
+    const whirl = env.hits.find((h) => h.amount === Math.round(BASE * 1.2 * FUSION_DAMAGE_MULT));
+    expect(whirl).toBeDefined();
+    // Las cargas las lleva una sola (la que lleva la animación, a igual cargas): la otra no gasta nada.
+    const slow = Math.max(abilityCooldownS("throw", 1), abilityCooldownS("whirlwind", 1));
+    expect(env.c.abilityCd.whirlwind).toBeCloseTo(slow - 1, 0);
+    expect(env.c.abilityCd.throw ?? 0).toBe(0);
+  });
+
+  it("en enfriamiento, la casilla no sale", () => {
+    const env = setup([{ id: "throw", rank: 1 }, { id: "whirlwind", rank: 1 }]);
+    env.c.fusion = ["throw", "whirlwind"];
+    env.c.abilityCd.whirlwind = 3;
+    expect(feed(env, { abilities: 1 }).started).toBeUndefined();
+  });
+
+  it("el Tajo frontal de rango 3 le da sus 3 cargas a toda la fusión", () => {
+    const env = setup([{ id: "thrust", rank: 3 }, { id: "warcry", rank: 1 }]);
+    env.c.fusion = ["thrust", "warcry"];
+    let casts = 0;
+    for (let i = 0; i < 3; i++) {
+      if (feed(env, { abilities: 1 }).started === "thrust") casts++;
+      // Hasta que termine también el Grito (la compañera), que no deja lanzar otra.
+      run(env, 1);
+    }
+    expect(casts).toBe(3);
+    expect(abilityCharges(env.c, "thrust")).toBe(0);
+    expect(feed(env, { abilities: 1 }).started).toBeUndefined();
+    // Recarga una carga con el ciclo de la más lenta (el Grito).
+    expect(env.c.abilityCd.thrust).toBeGreaterThan(abilityCooldownS("thrust", 3));
+  });
+
+  it("la fusión crece: con tres, salen las tres a la vez", () => {
+    const env = setup([{ id: "throw", rank: 1 }, { id: "whirlwind", rank: 1 }, { id: "warcry", rank: 1 }]);
+    env.c.fusion = ["throw", "whirlwind", "warcry"];
+    const a = feed(env, { abilities: 1 });
+    expect(a.started).toBe("whirlwind");
+    expect(a.partners).toEqual(["throw", "warcry"]);
+    expect(env.c.buffDamage).toBeGreaterThan(0);
   });
 });

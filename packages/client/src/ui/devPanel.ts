@@ -177,6 +177,7 @@ export class DevPanel {
     const boss = this.section("Jefe");
     this.button(boss, "Invocar dragón", () => ({ cmd: "boss" }));
     this.button(boss, "Piso siguiente", () => ({ cmd: "nextFloor" }));
+    this.button(boss, "Dar fusión", () => ({ cmd: "fusion" }));
 
     const chest = this.section("Cofres");
     this.button(chest, "Cofre delante", () => ({ cmd: "chest" }));

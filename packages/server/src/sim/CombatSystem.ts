@@ -78,6 +78,8 @@ export interface AbilityAnim {
   /** hechizos apuntados del mago: el punto donde caen */
   aimX?: number;
   aimZ?: number;
+  /** lanzada como parte de una fusión: su daño lleva `FUSION_DAMAGE_MULT` */
+  fused?: boolean;
 }
 
 /** Efectos de equipo y reliquia que no son multiplicadores (`CombinedMods` sin `PlayerMods`); `setMods` los copia. */
@@ -114,11 +116,15 @@ export interface CombatState extends ComboTimers {
   lastStandCd: number;
   /** habilidades aprendidas con su rango, en orden de aprendizaje (copia de `progress.abilities`) */
   abilities: { id: AbilityId; rank: number }[];
+  /** la fusión: habilidades unidas en una casilla (el mismo arreglo que `progress.fusion`) */
+  fusion: AbilityId[];
   /** enfriamiento restante (s) de cada habilidad; cuenta por tick simulado */
   abilityCd: Partial<Record<AbilityId, number>>;
   /** cargas que le quedan a cada habilidad con cargas mientras su enfriamiento corre (con el enfriamiento en 0 están todas) */
   abilityCharges: Partial<Record<AbilityId, number>>;
   abilityAnim: AbilityAnim | null;
+  /** las compañeras de la fusión, que corren a la vez que `abilityAnim`: sus impactos, sin movimiento ni animación propia */
+  partnerAnims: AbilityAnim[];
   /** máscara de teclas de habilidad del último input procesado (para detectar flancos) */
   heldMask: number;
   /** teclas de habilidad apretadas a destiempo que siguen en espera y segundos que les quedan (`ABILITY_BUFFER_S`) */
@@ -258,9 +264,11 @@ export function newCombatState(
     lastStandLeft: 0,
     lastStandCd: 0,
     abilities: [],
+    fusion: [],
     abilityCd: {},
     abilityCharges: {},
     abilityAnim: null,
+    partnerAnims: [],
     heldMask: 0,
     queuedMask: 0,
     queuedLeft: 0,
@@ -583,6 +591,7 @@ export class CombatSystem {
     c.pendingHits = [];
     cancelImpact(c);
     c.abilityAnim = null;
+    c.partnerAnims = [];
     c.burnLeft = c.slowLeft = c.stunLeft = 0;
     c.lastStandLeft = 0;
     c.pendingChills = [];

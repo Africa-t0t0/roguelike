@@ -4,7 +4,7 @@ import type { Nature } from "./natures";
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 
 export interface JoinOptions {
   name: string;
@@ -26,7 +26,11 @@ export const JOIN_ERROR_STATUS: Record<JoinErrorCode, number> = {
 /** Código de cierre que recibe la conexión vieja cuando otra pestaña toma el control del jugador. */
 export const TAKEOVER_CLOSE_CODE = 4005;
 
-/** Mensajes cliente/servidor. `welcome` lleva `{ key: string; sandbox: boolean }`; `dev` lleva un `DevCommand`. */
+/**
+ * Mensajes cliente/servidor. `welcome` lleva `{ key: string; sandbox: boolean }`; `dev` lleva un `DevCommand`;
+ * `fuse` lleva `{ ids: AbilityId[] }`: las dos primeras de la fusión o la que se le suma (gasta una fusión ganada al
+ * matar al jefe).
+ */
 export const MSG = {
   input: "input",
   welcome: "welcome",
@@ -35,6 +39,7 @@ export const MSG = {
   levelChoice: "levelChoice",
   chooseCard: "chooseCard",
   dev: "dev",
+  fuse: "fuse",
 } as const;
 
 const NAME_CHARS = /^[\p{L}\p{N} _-]+$/u;
@@ -76,4 +81,6 @@ export type CombatEvent =
   /** salto del rayo: puntos [x, z] de la cadena, del golpeado a los siguientes blancos */
   | { type: "chain"; points: [number, number][] }
   /** el jefe aparece (`awake`), se enfurece (`enraged`) o cae (`down`) en (x, z) */
-  | { type: "boss"; phase: "awake" | "enraged" | "down"; x: number; z: number };
+  | { type: "boss"; phase: "awake" | "enraged" | "down"; x: number; z: number }
+  /** `key` sumó habilidades a su fusión: `ids` es la fusión entera tras sumarlas */
+  | { type: "fused"; key: string; ids: AbilityId[] };

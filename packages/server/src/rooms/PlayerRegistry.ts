@@ -62,6 +62,8 @@ export interface PlayerRecord {
   progress: Progress;
   /** Elecciones de carta que le faltan (también se suman estando desconectado). */
   pendingChoices: number;
+  /** Fusiones ganadas (una por jefe muerto) que aún no gastó. */
+  fusionTokens: number;
 }
 
 export type JoinResult =
@@ -117,6 +119,7 @@ export class PlayerRegistry {
       relic: null,
       progress: newProgress(),
       pendingChoices: 0,
+      fusionTokens: 0,
     };
     record.floorWeapons = makeFloorWeapons(record.combat.weaponId);
     this.records.set(record.key, record);

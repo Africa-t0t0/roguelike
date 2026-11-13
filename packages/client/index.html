@@ -138,6 +138,27 @@
       .ab-active { border-color: var(--gold-hi); box-shadow: 0 0 0 3px rgba(9, 8, 7, 0.85), 0 0 0 4px var(--gold-hi),
         0 0 1.2rem rgba(236, 208, 143, 0.65), 0 0.4rem 1.2rem rgba(0, 0, 0, 0.7); }
       .ab-active .ab-glyph { color: #fff3d0; }
+      /* Casilla fusionada: más ancha, con los dos glifos y un filete violeta. */
+      .ab-fused { width: 5.2rem; border-color: #b58cff; box-shadow: 0 0 0 3px rgba(9, 8, 7, 0.85), 0 0 0 4px #7a52c7,
+        0 0 1rem rgba(160, 110, 255, 0.55), 0 0.4rem 1.2rem rgba(0, 0, 0, 0.7); }
+      .ab-fused .ab-glyph { font-size: 1.7rem; letter-spacing: 0.05em; }
+      /* Panel de fusión: elegir dos habilidades para unirlas. */
+      .fusion-panel { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); min-width: 26rem; padding: 1.2rem 1.4rem;
+        background: linear-gradient(#1b1420, #0d0a10); border: 1px solid #b58cff; box-shadow: 0 0 0 3px rgba(9, 8, 7, 0.85),
+        0 0 0 4px #7a52c7, 0 0 2rem rgba(150, 100, 255, 0.4); font-family: var(--serif); color: #f1e6ff; text-align: center; pointer-events: auto; }
+      .fusion-title { font: 700 1.5rem var(--caps); letter-spacing: 0.08em; color: #d8c2ff; margin-bottom: 0.3rem; }
+      .fusion-hint { font-size: 0.95rem; color: #c9b8e6; margin-bottom: 0.9rem; }
+      .fusion-list { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: center; margin-bottom: 1rem; }
+      .fusion-option { width: 6.4rem; padding: 0.5rem 0.3rem; background: #120d16; border: 1px solid #5d4590; color: inherit;
+        font: 600 0.85rem var(--serif); cursor: pointer; display: grid; gap: 0.25rem; place-items: center; }
+      .fusion-option .fusion-glyph { font: 700 1.8rem/1 var(--serif); color: var(--gold-hi); }
+      .fusion-option.picked { border-color: #e0ccff; background: #2a1d3d; box-shadow: 0 0 0.8rem rgba(190, 150, 255, 0.7); }
+      .fusion-actions { display: flex; gap: 0.8rem; justify-content: center; }
+      .fusion-actions button { font: 700 0.95rem var(--caps); padding: 0.45rem 1.1rem; cursor: pointer; background: #241a30;
+        color: #f1e6ff; border: 1px solid #9c78e0; }
+      .fusion-actions button:disabled { opacity: 0.4; cursor: default; }
+      .fusion-badge { position: absolute; right: 1.6rem; bottom: 6.6rem; padding: 0.3rem 0.7rem; font: 700 0.9rem var(--caps);
+        color: #f1e6ff; background: #241a30; border: 1px solid #9c78e0; box-shadow: 0 0 0.8rem rgba(160, 110, 255, 0.6); pointer-events: none; }
       .ab-empty { opacity: 0.35; border-color: var(--gold-dim); background: rgba(9, 8, 7, 0.6); }
       .ab-empty .ab-key { border-color: var(--gold-dim); color: rgba(233, 220, 192, 0.6); }
       .ab-passive { position: relative; width: 2.7rem; height: 2.7rem; margin: 0 0.3rem 0.75rem 0; display: grid; place-items: center;

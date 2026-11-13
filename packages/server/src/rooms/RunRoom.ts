@@ -8,6 +8,8 @@ import {
   combinedMods,
   chestSpots,
   createRng,
+  canFuse,
+  isAbilityId,
   dragonDamageMult,
   dragonFloorScale,
   dragonHp,
@@ -187,6 +189,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.setTimestep(() => this.tick(), 1000 / SIM_HZ);
     this.onMessage(MSG.input, (client, raw) => this.enqueueInput(client, raw));
     this.onMessage(MSG.chooseCard, (client, raw) => this.chooseCard(client, raw));
+    this.onMessage(MSG.fuse, (client, raw) => this.fuse(client, raw));
     if (sandbox) this.onMessage(MSG.dev, (client, raw) => this.devCommand(client, raw));
     // Una sala creada a la que nadie llega a entrar (reserva vencida) no pasa por onLeave.
     this.armEmptyTimer();
@@ -216,6 +219,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     // El combate lee las habilidades (y sus rangos) del mismo arreglo que `progress`: applyCard lo cambia en
     // su sitio, así que nunca se desincronizan.
     record.combat.abilities = record.progress.abilities;
+    record.combat.fusion = record.progress.fusion ??= [];
     // Quien entra a mitad de run elige las cartas de los niveles que ya subió el grupo.
     if (result.kind === "new") record.pendingChoices = this.combat.level - 1;
     let ps = this.state.players.get(record.key);
@@ -263,6 +267,23 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (record.inputQueue.length > MAX_QUEUED_INPUTS) {
       record.inputQueue.splice(0, record.inputQueue.length - MAX_QUEUED_INPUTS);
     }
+  }
+
+  /**
+   * Gasta una fusión: sin fusión, une dos de sus habilidades activas en una casilla; con ella, le suma una más.
+   * Se ignora si no puede.
+   */
+  private fuse(client: Client, raw: unknown): void {
+    const record = this.registry.bySession(client.sessionId);
+    const ids = (raw as { ids?: unknown } | null)?.ids;
+    if (!record || record.fusionTokens < 1 || !Array.isArray(ids) || !ids.every(isAbilityId)) return;
+    if (!canFuse(record.progress, ids)) return;
+    // En su sitio: el combate lee la fusión del mismo arreglo.
+    const fusion = (record.progress.fusion ??= []);
+    fusion.push(...ids);
+    record.combat.fusion = fusion;
+    record.fusionTokens--;
+    this.emit({ type: "fused", key: record.key, ids: [...fusion] });
   }
 
   private chooseCard(client: Client, raw: unknown): void {
@@ -350,6 +371,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         record.progress.stats = {};
         // En su sitio: el combate lee las habilidades del mismo arreglo.
         record.progress.abilities.length = 0;
+        record.progress.fusion!.length = 0;
         c.abilityCd = {};
         c.abilityAnim = null;
         this.refreshMods(record);
@@ -425,6 +447,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         Object.assign(c, newComboTimers());
         // En su sitio: el combate lee las habilidades del mismo arreglo. Las del otro rol no sirven.
         record.progress.abilities.length = 0;
+        record.progress.fusion!.length = 0;
         c.abilityCd = {};
         c.abilityAnim = null;
         // Lo que no es de su rol se va: las cartas de stat del otro rol y las armas del suelo, que pasan a ser del suyo.
@@ -445,6 +468,9 @@ export class RunRoom extends Room<{ state: RunState }> {
       }
       case "nextFloor":
         this.descend = true;
+        break;
+      case "fusion":
+        record.fusionTokens++;
         break;
       case "weapon":
         // Solo armas de su rol.
@@ -564,6 +590,8 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (e) {
       this.addChest(e.x, e.z);
       this.emit({ type: "boss", phase: "down", x: e.x, z: e.z });
+      // Cada uno gana una fusión de dos de sus habilidades.
+      for (const r of this.registry.all()) r.fusionTokens++;
     }
     this.setTotem("open");
   }
@@ -640,6 +668,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         if (ab.started) {
           const aimDist = ab.leapDist ?? ab.aimDist;
           this.emit({ type: "ability", key: record.key, id: ab.started, rank: ab.rank ?? 1, ...(aimDist !== undefined ? { aimDist } : {}) });
+          if (ab.partners?.includes("heal")) this.emit({ type: "heal", keys: connected.filter((r) => !r.combat.dead).map((r) => r.key) });
           if (ab.started === "heal") this.emit({ type: "heal", keys: connected.filter((r) => !r.combat.dead).map((r) => r.key) });
         }
         // Embestida del Tajo frontal, salto del Golpe sísmico y retroceso del Remolino: el servidor mueve al jugador; el cliente los predice.
