@@ -98,6 +98,8 @@ interface EnemyView {
   weaponId: WeaponId | null;
   buffer: SnapshotBuffer<EnemySnapshot>;
   character: CharacterView;
+  /** duración de cada clip en su cuerpo (los esqueletos KayKit traen las suyas) */
+  clipLengths: ClipLengths;
   speed: SpeedMeter;
   bar: TransformNode;
   barFill: Mesh;
@@ -151,14 +153,12 @@ export class EnemyViews {
   private ember?: DynamicTexture;
   private flame?: DynamicTexture;
   private paused = false;
-  private readonly clipLengths: ClipLengths;
 
   constructor(
     private readonly scene: Scene,
     private readonly assets: Assets,
     private readonly anims: AnimLibrary,
   ) {
-    this.clipLengths = { get: (clip) => anims.length(clip) };
     this.mats = {
       barBack: flatMaterial(scene, "enemyBarBack", new Color3(0.1, 0.05, 0.05), 0.8),
       barFill: flatMaterial(scene, "enemyBarFill", new Color3(0.85, 0.12, 0.1)),
@@ -345,7 +345,7 @@ export class EnemyViews {
             stunned: e.stunned,
             spellTier: e.spellTier,
           },
-          this.clipLengths,
+          view.clipLengths,
         ),
       );
 
@@ -560,6 +560,7 @@ export class EnemyViews {
       chargePerMeter,
       buffer: new SnapshotBuffer(lerpEnemy),
       character,
+      clipLengths: { get: (clip) => character.clipLength(clip) },
       speed: new SpeedMeter(),
       bar,
       barFill,

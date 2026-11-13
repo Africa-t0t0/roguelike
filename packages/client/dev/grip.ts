@@ -1,5 +1,5 @@
 // Página de desarrollo (no entra al build): ajustar a ojo el agarre de cada arma en la mano del
-// Kingslayer (y su `gripScale` en los enemigos), ver el caballero KayKit y revisar los clips y el brillo por tier.
+// Kingslayer (y su `gripScale` en los enemigos), ver el caballero y los esqueletos KayKit y revisar los clips y el brillo por tier.
 // `npm run dev` → http://localhost:5173/dev/grip.html
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
@@ -46,6 +46,12 @@ const characters: Record<string, CharacterLook & { gripScale?: number }> = {
 };
 const assets = await loadAssets(scene, [
   "knight",
+  "skeletonWarrior",
+  "skeletonMinion",
+  "skeletonMage",
+  "skeletonAxe",
+  "skeletonBlade",
+  "skeletonStaff",
   "kingslayer",
   "brute",
   "minion",

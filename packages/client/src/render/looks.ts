@@ -31,10 +31,8 @@ export const WEAPON_LOOKS: Record<WeaponId, { asset: AssetId | null; grip: Weapo
   staff: { asset: null, grip: { position: [0.05, 0.05, 0.02], rotation: [...BLADE_OUT_OF_FIST], scale: 1 } },
 };
 
-export interface EnemyLook {
-  asset: AssetId;
-  /** m */
-  height: number;
+export interface EnemyLook extends CharacterLook {
+  /** con `ownClips`, nombres de las animaciones propias del modelo */
   clips: { idle: string; run: string; attack: string; hit: string; death: string };
   /** velocidad de reproducción del clip de correr */
   runSpeed?: number;
@@ -46,29 +44,54 @@ export interface EnemyLook {
   gripScale?: number;
 }
 
-const MAGE_LOOK: EnemyLook = {
-  asset: "mage",
-  height: 2.2,
-  clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
-};
+/**
+ * Animaciones propias de un modelo KayKit: cada una suena con su nombre, y los golpes de arma (el primer golpe de
+ * cada estilo, con que telegrafían los enemigos armados) con la que se le parece.
+ */
+function kaykitClips(names: readonly string[], strikes: Record<string, string>): Record<string, OwnClip> {
+  const out: Record<string, OwnClip> = {};
+  for (const n of names) out[n] = { clip: n };
+  for (const [game, own] of Object.entries(strikes)) out[game] = { clip: own };
+  return out;
+}
+
+/** Los tres esqueletos comparten animaciones; telegrafían con estos golpes cuando van armados. */
+const SKELETON_STRIKES = { ss_slash: "1H_Melee_Attack_Slice_Diagonal", gs_slash: "1H_Melee_Attack_Chop" };
+
+function skeletonLook(asset: AssetId, height: number, clips: EnemyLook["clips"], extra: Partial<EnemyLook> = {}): EnemyLook {
+  return { asset, height, clips, ownClips: kaykitClips(Object.values(clips), SKELETON_STRIKES), ...extra };
+}
+
+/**
+ * Esqueletos KayKit (como al principio del proyecto): el bruto es el guerrero, el esbirro el de capucha y los
+ * hechiceros el mago con su bastón. Armados llevan el hacha (con el mandoble) o la hoja (con la espada de guardia)
+ * de su pack en lugar del arma del juego.
+ */
+const MAGE_LOOK: EnemyLook = skeletonLook(
+  "skeletonMage",
+  2.2,
+  { idle: "Idle", run: "Walking_D_Skeletons", attack: "Spellcast_Shoot", hit: "Hit_A", death: "Death_C_Skeletons" },
+  { prop: "skeletonStaff" },
+);
 
 /** El dragón tiene su propia vista (`DragonViews`), con su modelo y sus animaciones. */
 export type LookKind = Exclude<EnemyKind, "dragon">;
 
+const SKELETON_WEAPONS: Partial<Record<WeaponId, AssetId>> = { "guard-sword": "skeletonBlade", "great-sword": "skeletonAxe", "kingslayer-sword": "skeletonBlade" };
+
 export const ENEMY_LOOKS: Record<LookKind, EnemyLook> = {
-  brute: {
-    asset: "brute",
-    height: 2.4,
-    clips: { idle: "cr_idle", run: "cr_run", attack: "cr_swiping", hit: "gs_impact", death: "cr_dying" },
-    gripScale: 1.2,
-  },
-  minion: {
-    asset: "minion",
-    height: 1.7,
-    clips: { idle: "cr_idle_2", run: "cr_run", attack: "cr_punch", hit: "gs_impact_4", death: "cr_dying" },
-    runSpeed: 1.3,
-    gripScale: 0.94,
-  },
+  brute: skeletonLook(
+    "skeletonWarrior",
+    2.4,
+    { idle: "Idle_Combat", run: "Running_A", attack: "Unarmed_Melee_Attack_Punch_B", hit: "Hit_A", death: "Death_C_Skeletons" },
+    { slotWeapons: SKELETON_WEAPONS },
+  ),
+  minion: skeletonLook(
+    "skeletonMinion",
+    1.7,
+    { idle: "Idle_B", run: "Running_C", attack: "Unarmed_Melee_Attack_Punch_A", hit: "Hit_B", death: "Death_C_Skeletons" },
+    { runSpeed: 1.2, slotWeapons: SKELETON_WEAPONS },
+  ),
   mage: MAGE_LOOK,
   // Sin modelos propios: los tres hechiceros comparten el del mago (se distinguen por tinte y aura).
   pyromancer: MAGE_LOOK,
@@ -111,6 +134,10 @@ export interface CharacterLook {
   /** mallas del modelo que no se ven nunca (o solo con su arma de `ownWeapons`) */
   hideMeshes?: readonly string[];
   ownWeapons?: Partial<Record<WeaponId, readonly [string, ...string[]]>>;
+  /** armas de otro archivo del mismo pack, que se cuelgan tal cual de `handslot.r` (KayKit), por arma del juego */
+  slotWeapons?: Partial<Record<WeaponId, AssetId>>;
+  /** objeto que lleva siempre en `handslot.r` (el bastón del esqueleto mago) */
+  prop?: AssetId;
 }
 
 /**
@@ -178,6 +205,7 @@ export function allClipIds(): string[] {
     for (const s of m.combo) ids.add(s.clip);
   }
   for (const def of Object.values(ABILITIES)) if (def.clip) ids.add(def.clip);
-  for (const look of Object.values(ENEMY_LOOKS)) for (const c of Object.values(look.clips)) ids.add(c);
+  // Los modelos con animaciones propias (los esqueletos) no piden clips de Mixamo.
+  for (const look of Object.values(ENEMY_LOOKS)) if (!look.ownClips) for (const c of Object.values(look.clips)) ids.add(c);
   return [...ids];
 }

@@ -1,12 +1,15 @@
 # Créditos
 
-## Mazmorra y caballero (`packages/client/public/assets/kaykit/`)
+## Mazmorra, héroes y esqueletos (`packages/client/public/assets/kaykit/`)
 
-KayKit: Dungeon Remastered y Adventurers Character Pack, de Kay Lousberg (www.kaylousberg.com), licencia CC0:
+KayKit: Dungeon Remastered, Adventurers Character Pack y Skeletons Character Pack, de Kay Lousberg
+(www.kaylousberg.com), licencia CC0:
 
 - <https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0>: muro, suelo y pilar.
 - <https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0>: el caballero, con sus animaciones,
   espadas y escudos.
+- <https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0>: los esqueletos guerrero, esbirro y
+  mago, con su hacha, hoja y bastón.
 
 Se obtienen con `node scripts/fetch-kaykit.mjs`. El retrato del caballero (`ui/portrait-knight.webp`) es una
 captura de ese modelo.

@@ -206,12 +206,12 @@ describe("moveSector / heroBodyYaw", () => {
 describe("chooseEnemyAnim", () => {
   it("quieto → idle del enemigo en bucle", () => {
     expect(chooseEnemyAnim(enemy({ ai: "idle" }))).toEqual({ clip: ENEMY_LOOKS.brute.clips.idle, loop: true, speed: 1 });
-    expect(chooseEnemyAnim(enemy({ kind: "mage", ai: "idle" })).clip).toBe("mg_idle");
+    expect(chooseEnemyAnim(enemy({ kind: "mage", ai: "idle" })).clip).toBe("Idle");
   });
 
-  it("muerto → death sin bucle, y gana a todo (mago: gs_death)", () => {
+  it("muerto → death sin bucle, y gana a todo (los esqueletos se desarman)", () => {
     expect(chooseEnemyAnim(enemy({ kind: "mage", ai: "dead", hurtRecently: true, speed: 5 }))).toEqual({
-      clip: "gs_death",
+      clip: "Death_C_Skeletons",
       loop: false,
       speed: 1,
     });
@@ -225,9 +225,9 @@ describe("chooseEnemyAnim", () => {
     }
   });
 
-  it("telegrafía del mago → mg_attack con speed = largo / 0,7", () => {
-    const c = chooseEnemyAnim(enemy({ kind: "mage", ai: "telegraph" }), new Map([["mg_attack", 2.1]]));
-    expect(c.clip).toBe("mg_attack");
+  it("telegrafía del mago → Spellcast_Shoot con speed = largo / 0,7", () => {
+    const c = chooseEnemyAnim(enemy({ kind: "mage", ai: "telegraph" }), new Map([["Spellcast_Shoot", 2.1]]));
+    expect(c.clip).toBe("Spellcast_Shoot");
     expect(c.speed).toBeCloseTo(2.1 / 0.7);
   });
 
@@ -250,10 +250,10 @@ describe("chooseEnemyAnim", () => {
   });
 
   it("speed > 0,2 → run del enemigo, a runSpeed (por defecto 1)", () => {
-    expect(chooseEnemyAnim(enemy({ kind: "brute", speed: 3 }))).toEqual({ clip: "cr_run", loop: true, speed: 1 });
-    expect(chooseEnemyAnim(enemy({ kind: "mage", speed: 3 }))).toEqual({ clip: "cr_walking", loop: true, speed: 1 });
+    expect(chooseEnemyAnim(enemy({ kind: "brute", speed: 3 }))).toEqual({ clip: "Running_A", loop: true, speed: 1 });
+    expect(chooseEnemyAnim(enemy({ kind: "mage", speed: 3 }))).toEqual({ clip: "Walking_D_Skeletons", loop: true, speed: 1 });
     expect(chooseEnemyAnim(enemy({ kind: "minion", speed: 5 }))).toEqual({
-      clip: "cr_run",
+      clip: "Running_C",
       loop: true,
       speed: ENEMY_LOOKS.minion.runSpeed,
     });
@@ -273,10 +273,10 @@ describe("chooseEnemyAnim", () => {
     expect(chooseEnemyAnim(enemy({ ai: "recover", speed: 0 })).clip).toBe(ENEMY_LOOKS.brute.clips.idle);
   });
 
-  it("bruto armado con mandoble: la telegrafía usa gs_slash ajustado a 0,6 s; desarmado, cr_swiping", () => {
+  it("bruto armado con mandoble: la telegrafía usa gs_slash ajustado a 0,6 s; desarmado, su puñetazo", () => {
     const lengths = new Map([
       ["gs_slash", 1.5],
-      ["cr_swiping", 1.2],
+      ["Unarmed_Melee_Attack_Punch_B", 1.2],
     ]);
     const armed = chooseEnemyAnim(enemy({ kind: "brute", ai: "telegraph", weaponId: "great-sword" }), lengths);
     expect(armed.clip).toBe("gs_slash");
@@ -285,7 +285,7 @@ describe("chooseEnemyAnim", () => {
     // sin el largo del clip, velocidad 1
     expect(chooseEnemyAnim(enemy({ kind: "brute", ai: "telegraph", weaponId: "great-sword" })).speed).toBe(1);
     const bare = chooseEnemyAnim(enemy({ kind: "brute", ai: "telegraph", weaponId: null }), lengths);
-    expect(bare.clip).toBe("cr_swiping");
+    expect(bare.clip).toBe("Unarmed_Melee_Attack_Punch_B");
     expect(bare.speed).toBeCloseTo(1.2 / 0.6);
   });
 

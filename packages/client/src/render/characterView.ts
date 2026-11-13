@@ -123,6 +123,10 @@ export class CharacterView {
       }
     }
     for (const name of look.hideMeshes ?? []) this.named.get(name)?.setEnabled(false);
+    if (look.prop) {
+      const slot = this.named.get("handslot.r");
+      if (slot) this.attachModel(look.prop, slot);
+    }
 
     // Unidades distintas por modelo: se mide el alto en reposo y se escala a `look.height`, con los
     // pies en y = 0.
@@ -208,6 +212,18 @@ export class CharacterView {
     const ownWeapon = this.look.ownWeapons?.[weaponId];
     if (ownWeapon) {
       this.setOwnWeapon(weaponId, ownWeapon, tier, nature);
+      return;
+    }
+    const slotAsset = this.look.slotWeapons?.[weaponId];
+    const slot = slotAsset && this.named.get("handslot.r");
+    if (slotAsset && slot) {
+      // Arma del pack: ya viene en el espacio de la ranura de la mano, sin agarre que ajustar.
+      const node = new TransformNode(`grip${this.suffix}`, this.scene);
+      node.parent = slot;
+      this.attachModel(slotAsset, node);
+      if (tier !== 1 || nature !== "none") applyTierGlow(node, tier, nature);
+      this.weapon = { id: weaponId, tier, nature, grip: node, glowRoot: node };
+      this.setNatureFx(this.weapon, nature);
       return;
     }
     const hand = this.nodes.get("righthand");

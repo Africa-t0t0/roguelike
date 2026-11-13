@@ -12,6 +12,9 @@ const ANIM_FILES = Object.keys(import.meta.glob("../public/assets/mixamo/anims/*
 function glbOf(asset: string): { clips: Set<string>; nodes: Set<string> } {
   const files: Record<string, string> = {
     knight: "characters/Knight.glb",
+    skeletonWarrior: "skeletons/Skeleton_Warrior.glb",
+    skeletonMinion: "skeletons/Skeleton_Minion.glb",
+    skeletonMage: "skeletons/Skeleton_Mage.glb",
   };
   // Sin los tipos de Node en el cliente: el módulo `fs` se pide en tiempo de ejecución (las pruebas corren en Node).
   type Fs = { readFileSync(path: URL): Uint8Array };
@@ -33,8 +36,10 @@ describe("looks", () => {
       for (const c of Object.values(m.locomotion)) expect(ids).toContain(c);
       for (const s of m.combo) expect(ids).toContain(s.clip);
     }
+    // Los esqueletos KayKit suenan sus propias animaciones: no piden clips de Mixamo.
     for (const look of Object.values(ENEMY_LOOKS)) {
-      for (const c of Object.values(look.clips)) expect(ids).toContain(c);
+      expect(look.ownClips).toBeDefined();
+      for (const c of Object.values(look.clips)) expect(ids).not.toContain(c);
     }
   });
 
@@ -55,12 +60,12 @@ describe("looks", () => {
   it("alturas y clips de los enemigos según el plan", () => {
     expect(PLAYER_LOOK).toMatchObject({ asset: "knight", height: 1.8 });
     const expected: Record<LookKind, [string, number, string[]]> = {
-      brute: ["brute", 2.4, ["cr_idle", "cr_run", "cr_swiping", "gs_impact", "cr_dying"]],
-      minion: ["minion", 1.7, ["cr_idle_2", "cr_run", "cr_punch", "gs_impact_4", "cr_dying"]],
-      mage: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
-      pyromancer: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
-      stormcaller: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
-      healer: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
+      brute: ["skeletonWarrior", 2.4, ["Idle_Combat", "Running_A", "Unarmed_Melee_Attack_Punch_B", "Hit_A", "Death_C_Skeletons"]],
+      minion: ["skeletonMinion", 1.7, ["Idle_B", "Running_C", "Unarmed_Melee_Attack_Punch_A", "Hit_B", "Death_C_Skeletons"]],
+      mage: ["skeletonMage", 2.2, ["Idle", "Walking_D_Skeletons", "Spellcast_Shoot", "Hit_A", "Death_C_Skeletons"]],
+      pyromancer: ["skeletonMage", 2.2, ["Idle", "Walking_D_Skeletons", "Spellcast_Shoot", "Hit_A", "Death_C_Skeletons"]],
+      stormcaller: ["skeletonMage", 2.2, ["Idle", "Walking_D_Skeletons", "Spellcast_Shoot", "Hit_A", "Death_C_Skeletons"]],
+      healer: ["skeletonMage", 2.2, ["Idle", "Walking_D_Skeletons", "Spellcast_Shoot", "Hit_A", "Death_C_Skeletons"]],
     };
     for (const [kind, [asset, height, clips]] of Object.entries(expected)) {
       const look = ENEMY_LOOKS[kind as LookKind];
@@ -71,8 +76,7 @@ describe("looks", () => {
     }
   });
 
-  it("todo clip que puede elegir chooseEnemyAnim, armado o no, está en allClipIds y en public/", () => {
-    const ids = allClipIds();
+  it("todo clip que puede elegir chooseEnemyAnim, armado o no, tiene su animación en el modelo del esqueleto", () => {
     const ais = ["idle", "chase", "telegraph", "recover", "dead"];
     for (const kind of Object.keys(ENEMY_LOOKS) as LookKind[]) {
       const weapons: (WeaponId | null)[] = [null];
@@ -83,8 +87,9 @@ describe("looks", () => {
           for (const speed of [0, 3]) {
             for (const hurtRecently of [false, true]) {
               const { clip } = chooseEnemyAnim({ kind, ai, speed, hurtRecently, weaponId });
-              expect(ids).toContain(clip);
-              expect(ANIM_FILES).toContain(clip);
+              const own = ENEMY_LOOKS[kind].ownClips?.[clip];
+              expect(own, `${kind}: ${clip}`).toBeDefined();
+              expect(glbOf(ENEMY_LOOKS[kind].asset).clips.has(own!.clip), `${kind}: ${clip} → ${own!.clip}`).toBe(true);
             }
           }
         }
@@ -92,8 +97,11 @@ describe("looks", () => {
     }
   });
 
-  it("brute y minion tienen gripScale (> 0) para su arma; el mago no la necesita", () => {
-    for (const kind of ["brute", "minion"] as const) expect(ENEMY_LOOKS[kind].gripScale).toBeGreaterThan(0);
+  it("brute y minion llevan un arma del pack por cada arma con que pueden nacer; el mago, su bastón", () => {
+    for (const kind of ["brute", "minion"] as const) {
+      expect(ENEMY_LOOKS[kind].slotWeapons?.[ARMED_CHANCE[kind]!.weaponId]).toBeDefined();
+    }
+    expect(ENEMY_LOOKS.mage.prop).toBe("skeletonStaff");
   });
 
   describe.each([
