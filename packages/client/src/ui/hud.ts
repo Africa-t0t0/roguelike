@@ -1,6 +1,7 @@
 import {
   type ClassId,
   ABILITIES,
+  GEAR_BASE,
   GEAR_SLOTS,
   LEGENDARY_ABILITY,
   LEGENDARY_TEXT,
@@ -76,17 +77,63 @@ function statDelta(stat: string, from: number, to: number): string {
   return FLAT_STATS.includes(stat as GearStat) ? `${sign}${num(Math.abs(d))}` : `${sign}${num(Math.abs(d) * 100)} %`;
 }
 
+/** Lo que vale un efecto legendario activo en `gearScore` (en puntos de stat de tier 1). */
+export const LEGENDARY_SCORE = 2;
+/** Diferencia de puntos desde la que una pieza es mejor o peor; dentro de ella, pareja. */
+export const VERDICT_MARGIN = 0.25;
+
 /**
- * Una línea por stat de `next` ("+7,5 % velocidad de movimiento") con la diferencia contra la misma stat de `current`
- * entre paréntesis ("(+2,5 %)"); sin pieza actual, o si ella no tiene esa stat, o si no cambia, sin diferencia.
+ * Cuánto vale una pieza: cada stat cuenta como su valor partido por el de tier 1 de esa stat (+15 de vida y +5 % de
+ * daño valen 1 punto cada uno); la resistencia general, como una resistencia; el legendario, `LEGENDARY_SCORE` si
+ * el jugador tiene la habilidad que lo hace servir.
  */
-export function gearCompare(current: GearItem | undefined, next: GearItem): string[] {
-  return next.stats.map((e) => {
+export function gearScore(item: GearItem, abilities: readonly AbilityId[]): number {
+  let score = 0;
+  for (const e of item.stats) score += e.value / GEAR_BASE[e.stat === "allRes" ? "resFire" : e.stat];
+  const effect = legendaryEffect(item, abilities);
+  if (effect && !effect.inactive) score += LEGENDARY_SCORE;
+  return score;
+}
+
+export type GearVerdict = "new" | "better" | "even" | "worse";
+
+/** Si la pieza del suelo le conviene frente a la que lleva en esa casilla (`new`: la casilla está vacía). */
+export function gearVerdict(current: GearItem | undefined, next: GearItem, abilities: readonly AbilityId[]): GearVerdict {
+  if (!current) return "new";
+  const d = gearScore(next, abilities) - gearScore(current, abilities);
+  return d > VERDICT_MARGIN ? "better" : d < -VERDICT_MARGIN ? "worse" : "even";
+}
+
+/** Marca del veredicto (sobre la pieza en el suelo y en el aviso). */
+export const VERDICT_GLYPH: Record<GearVerdict, string> = { new: "★", better: "▲", even: "≈", worse: "▼" };
+
+/** "▲ Mejor que tu T2" / "★ Casilla vacía". */
+export function verdictText(verdict: GearVerdict, current: GearItem | undefined): string {
+  const t = current ? `tu T${current.tier}` : "";
+  const word = { new: "Casilla vacía", better: `Mejor que ${t}`, even: `Pareja con ${t}`, worse: `Peor que ${t}` }[verdict];
+  return `${VERDICT_GLYPH[verdict]} ${word}`;
+}
+
+export type LineTone = "gain" | "loss";
+
+/**
+ * Las stats al cambiar de pieza, con su tono: las de `next` (verde si suben o son nuevas, rojo si bajan, sin tono si
+ * quedan igual o no hay pieza puesta) y luego las que tiene `current` y se perderían, en rojo.
+ */
+export function gearDiff(current: GearItem | undefined, next: GearItem): { text: string; tone?: LineTone }[] {
+  const out: { text: string; tone?: LineTone }[] = next.stats.map((e) => {
     const text = gearStatText(e.stat, e.value);
-    const cur = current?.stats.find((c) => c.stat === e.stat);
-    const delta = cur ? statDelta(e.stat, cur.value, e.value) : "";
-    return delta ? `${text} (${delta})` : text;
+    if (!current) return { text };
+    const cur = current.stats.find((c) => c.stat === e.stat);
+    if (!cur) return { text: `${text} (nueva)`, tone: "gain" };
+    const delta = statDelta(e.stat, cur.value, e.value);
+    if (!delta) return { text };
+    return { text: `${text} (${delta})`, tone: e.value > cur.value ? "gain" : "loss" };
   });
+  for (const c of current?.stats ?? []) {
+    if (!next.stats.some((e) => e.stat === c.stat)) out.push({ text: `${gearStatText(c.stat, c.value)} (la pierdes)`, tone: "loss" });
+  }
+  return out;
 }
 
 /** Efecto legendario con su marca de inactivo: falta la habilidad que lo hace servir (`LEGENDARY_ABILITY`). */
@@ -122,8 +169,10 @@ export interface PickupInfo {
   verb: "Recoger" | "Equipar" | "Tomar";
   name: string;
   color: string;
-  /** detalle bajo el nombre: stats con su comparación, texto de la reliquia o efecto legendario (`inactive`: en gris) */
-  lines: { text: string; inactive?: boolean }[];
+  /** detalle bajo el nombre: stats con su comparación (`tone`: gana o pierde), texto de la reliquia o efecto legendario (`inactive`: en gris) */
+  lines: { text: string; inactive?: boolean; tone?: LineTone }[];
+  /** equipo: si conviene frente a lo puesto, y su texto */
+  verdict?: { kind: GearVerdict; text: string };
 }
 
 /**
@@ -138,10 +187,18 @@ export function pickupInfo(item: FloorItem, gear: Partial<Record<GearSlot, GearI
     const r = relicTooltip(item.id);
     return { verb: "Tomar", name: r.name, color: r.color, lines: [{ text: r.text }] };
   }
-  const lines: PickupInfo["lines"] = gearCompare(gear[item.item.slot], item.item).map((text) => ({ text }));
+  const current = gear[item.item.slot];
+  const lines: PickupInfo["lines"] = gearDiff(current, item.item);
   const effect = legendaryEffect(item.item, abilities);
   if (effect) lines.push(effect);
-  return { verb: "Equipar", name: gearName(item.item), color: tierColor(item.item.tier), lines };
+  // La legendaria de la pieza puesta también se pierde al cambiarla.
+  const lost = current && current.legendary && current.legendary !== item.item.legendary ? LEGENDARY_TEXT[current.legendary] : undefined;
+  if (lost) lines.push({ text: `${lost} (la pierdes)`, tone: "loss" });
+  const kind = gearVerdict(current, item.item, abilities);
+  return {
+    verb: "Equipar", name: `${gearName(item.item)} (T${item.item.tier})`, color: tierColor(item.item.tier), lines,
+    verdict: { kind, text: verdictText(kind, current) },
+  };
 }
 
 /** Reloj del piso "mm:ss" (segundos enteros hacia abajo; los minutos siguen pasado 59: "61:00"). */

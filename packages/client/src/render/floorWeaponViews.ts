@@ -10,7 +10,7 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, TOTEM_RANGE, type AbilityId, type GearItem, type GearSlot, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { FloorItem, FloorWeapon } from "../net/connection";
-import { formatWeapon, pickupInfo, tierColor, type PickupInfo } from "../ui/hud";
+import { formatWeapon, gearVerdict, pickupInfo, tierColor, VERDICT_GLYPH, type PickupInfo } from "../ui/hud";
 import { buildStaff } from "./staffMesh";
 import type { Assets } from "./assets";
 import { WEAPON_LOOKS } from "./looks";
@@ -35,6 +35,8 @@ export const OPEN_CHEST_PROMPT = "Abrir cofre";
 export const WAKE_TOTEM_PROMPT = "Despertar al dragón";
 export const descendPrompt = (floor: number): string => `Bajar al piso ${floor + 1}`;
 const TOTEM_PROMPT_HEIGHT_M = 3.6;
+/** La marca de si conviene flota a esta altura sobre cada pieza de equipo. */
+const BADGE_HEIGHT_M = 1.1;
 
 /** Parpadeo de vencimiento: siempre visible con ttl > 5 s; con ttl ≤ 5 s alterna a 6 Hz según el reloj de juego. */
 export function floorWeaponBlink(ttl: number, nowS: number): boolean {
@@ -104,6 +106,10 @@ export class FloorWeaponViews {
   private readonly hintName = document.createElement("span");
   private readonly hintVerb = document.createElement("span");
   private readonly hintLines = document.createElement("div");
+  private readonly hintVerdict = document.createElement("div");
+  /** marca sobre cada pieza de equipo del suelo (▲ conviene, ▼ peor…), por índice de `items` */
+  private badges: (HTMLDivElement | undefined)[] = [];
+  private readonly parent: HTMLElement;
   private readonly world = new Vector3();
 
   constructor(
@@ -121,7 +127,9 @@ export class FloorWeaponViews {
     this.hintVerb.textContent = "Recoger";
     this.hintName.className = "pickup-name";
     this.hintLines.className = "pickup-lines";
-    this.hint.append(key, this.hintVerb, this.hintName, this.hintLines);
+    this.hintVerdict.className = "pickup-verdict";
+    this.hint.append(key, this.hintVerb, this.hintName, this.hintVerdict, this.hintLines);
+    this.parent = parent;
     parent.append(this.hint);
   }
 
@@ -133,6 +141,7 @@ export class FloorWeaponViews {
     this.items.forEach((f, i) => {
       this.nodes.push(this.build(f, i));
       this.ttls.push(f.ttl);
+      this.badges.push(f.kind === "gear" ? this.badge(f.item.tier) : undefined);
     });
   }
 
@@ -155,6 +164,8 @@ export class FloorWeaponViews {
       n.weapon.position.y = BOB_AMPLITUDE_M * Math.sin(2 * Math.PI * BOB_HZ * nowS + i);
       n.pivot.setEnabled(floorWeaponBlink(this.ttls[i]! - elapsedS, nowS));
     });
+    const near = me?.canPickUp ? nearestPickup(this.items, me.x, me.z) : undefined;
+    this.renderBadges(me, near);
     // Como el servidor: el tótem antes que los cofres, y los cofres antes que las armas.
     const atTotem = me?.canPickUp && totem?.prompt && Math.hypot(totem.x - me.x, totem.z - me.z) <= TOTEM_RANGE ? totem : undefined;
     const chest = me?.canPickUp && !atTotem ? nearestClosedChest(chests, me.x, me.z) : undefined;
@@ -165,13 +176,13 @@ export class FloorWeaponViews {
       if (!cat) return;
       this.hintVerb.textContent = fixed.text;
       this.hintName.textContent = "";
+      this.hintVerdict.textContent = "";
       this.hintLines.replaceChildren();
       this.shownKey = "";
       this.hint.setAttribute("aria-label", fixed.text);
       this.hint.style.transform = `translate(${cat.x}px, ${cat.y}px)`;
       return;
     }
-    const near = me?.canPickUp ? nearestPickup(this.items, me.x, me.z) : undefined;
     const at = near && this.project(near.x, near.z);
     this.hint.hidden = !at;
     if (!near || !at) return;
@@ -179,6 +190,44 @@ export class FloorWeaponViews {
     this.showInfo(info);
     // Anclado sobre el arma: la línea guía (CSS) baja desde la esquina inferior izquierda del aviso.
     this.hint.style.transform = `translate(${at.x}px, ${at.y}px)`;
+  }
+
+  /** Marca vacía de una pieza: el veredicto se escribe en `renderBadges` (cambia con lo que lleva puesto). */
+  private badge(tier: WeaponTier): HTMLDivElement {
+    const b = document.createElement("div");
+    b.className = "gear-badge";
+    const mark = document.createElement("span");
+    mark.className = "gear-badge-mark";
+    const t = document.createElement("span");
+    t.className = "gear-badge-tier";
+    t.textContent = `T${tier}`;
+    t.style.color = tierColor(tier);
+    b.append(mark, t);
+    this.parent.append(b);
+    return b;
+  }
+
+  /**
+   * Sobre cada pieza de equipo, si le conviene frente a lo que lleva (y su tier), visible desde lejos. La pieza que
+   * muestra el aviso no la lleva: el aviso ya dice lo mismo con detalle.
+   */
+  private renderBadges(
+    me: { gear?: Partial<Record<GearSlot, GearItem>>; abilities?: readonly AbilityId[] } | undefined,
+    near: FloorItem | undefined,
+  ): void {
+    this.items.forEach((f, i) => {
+      const b = this.badges[i];
+      if (!b || f.kind !== "gear") return;
+      const at = f !== near && this.nodes[i]!.pivot.isEnabled() ? this.project(f.x, f.z, BADGE_HEIGHT_M) : undefined;
+      b.hidden = !at;
+      if (!at) return;
+      const v = gearVerdict(me?.gear?.[f.item.slot], f.item, me?.abilities ?? []);
+      if (b.dataset.verdict !== v) {
+        b.dataset.verdict = v;
+        b.firstElementChild!.textContent = VERDICT_GLYPH[v];
+      }
+      b.style.transform = `translate(${at.x}px, ${at.y}px) translate(-50%, -100%)`;
+    });
   }
 
   /** Texto del aviso (solo se reescribe el DOM cuando cambia). */
@@ -190,10 +239,12 @@ export class FloorWeaponViews {
     this.hintName.textContent = info.name;
     this.hintName.style.color = info.color;
     this.hint.setAttribute("aria-label", `${info.verb} ${info.name}`);
+    this.hintVerdict.textContent = info.verdict?.text ?? "";
+    if (info.verdict) this.hintVerdict.dataset.verdict = info.verdict.kind;
     this.hintLines.replaceChildren(
       ...info.lines.map((l) => {
         const line = document.createElement("div");
-        line.className = l.inactive ? "pickup-line pickup-inactive" : "pickup-line";
+        line.className = ["pickup-line", l.inactive && "pickup-inactive", l.tone && `pickup-${l.tone}`].filter(Boolean).join(" ");
         line.textContent = l.text;
         return line;
       }),
@@ -234,6 +285,8 @@ export class FloorWeaponViews {
       n.fx?.dispose();
       n.pivot.dispose();
     }
+    for (const b of this.badges) b?.remove();
+    this.badges = [];
     this.nodes = [];
     this.ttls = [];
     this.items = [];

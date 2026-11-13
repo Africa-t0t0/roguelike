@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gearCompare, gearTooltip, pickupInfo, formatFloorTime, formatHp, formatRespawn, formatStatus, formatWeapon, formatXp, tierColor } from "../src/ui/hud";
+import { gearDiff, gearScore, gearTooltip, gearVerdict, pickupInfo, formatFloorTime, formatHp, formatRespawn, formatStatus, formatWeapon, formatXp, tierColor } from "../src/ui/hud";
 import type { GearItem } from "@roguelike/shared";
 
 describe("textos del HUD", () => {
@@ -63,24 +63,43 @@ describe("textos del HUD", () => {
 const boots = (tier: 1 | 2, value: number): GearItem => ({ slot: "boots", tier, stats: [{ stat: "moveSpeed", value }], legendary: null });
 
 describe("equipo en el HUD y el aviso", () => {
-  it("gearCompare: sin pieza actual, una línea por stat sin diferencia", () => {
-    expect(gearCompare(undefined, boots(2, 0.075))).toEqual(["+7,5 % velocidad de movimiento"]);
+  it("gearDiff: sin pieza actual, una línea por stat sin tono", () => {
+    expect(gearDiff(undefined, boots(2, 0.075))).toEqual([{ text: "+7,5 % velocidad de movimiento" }]);
   });
 
-  it("gearCompare: de tier 1 a tier 2 muestra la diferencia en la misma stat", () => {
-    expect(gearCompare(boots(1, 0.05), boots(2, 0.075))).toEqual(["+7,5 % velocidad de movimiento (+2,5 %)"]);
-    expect(gearCompare(boots(2, 0.075), boots(1, 0.05))).toEqual(["+5 % velocidad de movimiento (-2,5 %)"]);
+  it("gearDiff: la misma stat sube en verde y baja en rojo", () => {
+    expect(gearDiff(boots(1, 0.05), boots(2, 0.075))).toEqual([{ text: "+7,5 % velocidad de movimiento (+2,5 %)", tone: "gain" }]);
+    expect(gearDiff(boots(2, 0.075), boots(1, 0.05))).toEqual([{ text: "+5 % velocidad de movimiento (-2,5 %)", tone: "loss" }]);
   });
 
-  it("gearCompare: la stat que la pieza actual no tiene no lleva diferencia; planas sin %", () => {
+  it("gearDiff: la stat nueva en verde y la que se pierde al final en rojo; planas sin %", () => {
     const next: GearItem = { slot: "helmet", tier: 2, stats: [{ stat: "maxHp", value: 22.5 }, { stat: "regen", value: 1.5 }], legendary: null };
-    const cur: GearItem = { slot: "helmet", tier: 1, stats: [{ stat: "maxHp", value: 15 }], legendary: null };
-    expect(gearCompare(cur, next)).toEqual(["+22,5 vida máxima (+7,5)", "+1,5 de regeneración por segundo"]);
+    const cur: GearItem = { slot: "helmet", tier: 2, stats: [{ stat: "maxHp", value: 15 }, { stat: "damage", value: 0.09 }], legendary: null };
+    expect(gearDiff(cur, next)).toEqual([
+      { text: "+22,5 vida máxima (+7,5)", tone: "gain" },
+      { text: "+1,5 de regeneración por segundo (nueva)", tone: "gain" },
+      { text: "+9 % daño (la pierdes)", tone: "loss" },
+    ]);
+  });
+
+  it("gearScore y gearVerdict: puntos por stat de tier 1; casilla vacía, mejor, pareja o peor", () => {
+    expect(gearScore(boots(1, 0.05), [])).toBeCloseTo(1);
+    expect(gearScore(boots(2, 0.075), [])).toBeCloseTo(1.5);
+    expect(gearVerdict(undefined, boots(1, 0.05), [])).toBe("new");
+    expect(gearVerdict(boots(1, 0.05), boots(2, 0.075), [])).toBe("better");
+    expect(gearVerdict(boots(2, 0.075), boots(1, 0.05), [])).toBe("worse");
+    expect(gearVerdict(boots(1, 0.05), boots(1, 0.05), [])).toBe("even");
+    // El legendario solo suma si tiene su habilidad.
+    const leg: GearItem = { slot: "gloves", tier: 4, stats: [{ stat: "attackSpeed", value: 0.15 }], legendary: "whirlCharges" };
+    expect(gearScore(leg, ["whirlwind"]) - gearScore(leg, [])).toBe(2);
   });
 
   it("pickupInfo: verbo, nombre y líneas por tipo", () => {
     const eq = pickupInfo({ kind: "gear", item: boots(2, 0.075), x: 0, z: 0, ttl: 9 }, {}, []);
-    expect(eq).toMatchObject({ verb: "Equipar", name: "Botas templadas", lines: [{ text: "+7,5 % velocidad de movimiento" }] });
+    expect(eq).toMatchObject({
+      verb: "Equipar", name: "Botas templadas (T2)", lines: [{ text: "+7,5 % velocidad de movimiento" }], verdict: { kind: "new", text: "★ Casilla vacía" },
+    });
+    expect(pickupInfo({ kind: "gear", item: boots(2, 0.075), x: 0, z: 0, ttl: 9 }, { boots: boots(1, 0.05) }, []).verdict).toEqual({ kind: "better", text: "▲ Mejor que tu T1" });
     const relic = pickupInfo({ kind: "relic", id: "oakHeart", x: 0, z: 0, ttl: 9 }, {}, []);
     expect(relic).toMatchObject({ verb: "Tomar", name: "Corazón de roble", lines: [{ text: "+40 de vida máxima y +1 de regeneración por segundo" }] });
     const w = pickupInfo({ kind: "weapon", weaponId: "great-sword", tier: 2, nature: "none", x: 0, z: 0, ttl: 9 }, {}, []);
@@ -102,8 +121,8 @@ describe("equipo en el HUD y el aviso", () => {
     const belt: GearItem = { slot: "belt", tier: 4, stats: [{ stat: "regen", value: 2.5 }], legendary: "throwCharges" };
     expect(gearTooltip(belt, []).effect).toEqual({ text: "Lanzar la espada tiene 2 cargas", inactive: true });
     expect(gearTooltip(belt, ["throw"]).effect?.inactive).toBe(false);
-    expect(pickupInfo({ kind: "gear", item: belt, x: 0, z: 0, ttl: 9 }, {}, [])).toMatchObject({ name: "Cinturón legendario" });
-    expect(gearCompare(undefined, belt)).toEqual(["+2,5 de regeneración por segundo"]);
+    expect(pickupInfo({ kind: "gear", item: belt, x: 0, z: 0, ttl: 9 }, {}, [])).toMatchObject({ name: "Cinturón legendario (T4)" });
+    expect(gearDiff(undefined, belt)).toEqual([{ text: "+2,5 de regeneración por segundo" }]);
   });
 
   it("una legendaria sin habilidad requerida (lastStand) nunca está inactiva", () => {

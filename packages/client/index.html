@@ -203,7 +203,7 @@
       .minimap-e { left: 100%; top: 50%; } .minimap-w { left: 0; top: 50%; }
 
       /* Aviso de recoger, anclado al objeto con una línea guía. */
-      .pickup-hint { position: absolute; left: 0; top: 0; pointer-events: none; display: flex; align-items: center; gap: 0.5rem;
+      .pickup-hint { position: absolute; z-index: 1; left: 0; top: 0; pointer-events: none; display: flex; align-items: center; gap: 0.5rem;
         margin: -3.2rem 0 0 2.2rem; padding: 0.25rem 0.9rem 0.25rem 0.3rem; white-space: nowrap;
         background: linear-gradient(90deg, rgba(9, 8, 7, 0.88), rgba(9, 8, 7, 0.5)); border-bottom: 1px solid var(--gold-dim);
         font: 600 1.05rem var(--serif); color: #f3e6c8; text-shadow: 0 1px 2px #000; will-change: transform; }
@@ -212,10 +212,26 @@
       .pickup-key { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border: 1px solid var(--gold-hi);
         background: #120f0b; font: 700 0.95rem var(--caps); color: #f6ead2; }
       .pickup-name { font-weight: 700; }
-      .pickup-hint:has(.pickup-line) { flex-wrap: wrap; row-gap: 0.1rem; }
+      .pickup-hint:has(.pickup-line), .pickup-hint:has(.pickup-verdict:not(:empty)) { flex-wrap: wrap; row-gap: 0.1rem; }
       .pickup-lines { flex-basis: 100%; padding-left: 2.1rem; font: 500 0.85rem var(--serif); color: #d9cba8; }
       .pickup-lines:empty { display: none; }
       .pickup-inactive { color: #8a8478; font-style: italic; }
+      .pickup-gain { color: #8fe08a; }
+      .pickup-loss { color: #ef7a6a; }
+      .pickup-verdict { flex-basis: 100%; padding-left: 2.1rem; font: 700 0.9rem var(--serif); }
+      .pickup-verdict:empty { display: none; }
+      /* Veredicto del equipo: ★ casilla vacía, ▲ conviene, ≈ pareja, ▼ peor (en la marca del suelo y en el aviso). */
+      [data-verdict="new"] { --verdict: #f4d35e; }
+      [data-verdict="better"] { --verdict: #6fe06a; }
+      [data-verdict="even"] { --verdict: #e8c86a; }
+      [data-verdict="worse"] { --verdict: #ef6a5a; }
+      .pickup-verdict { color: var(--verdict); }
+      .gear-badge { position: absolute; left: 0; top: 0; pointer-events: none; display: flex; align-items: baseline; gap: 0.2rem;
+        padding: 0 0.35rem; background: rgba(9, 8, 7, 0.7); border: 1px solid var(--verdict, var(--gold-dim)); border-radius: 0.3rem;
+        text-shadow: 0 1px 2px #000; will-change: transform; }
+      .gear-badge-mark { font: 700 1.6rem/1.15 var(--serif); color: var(--verdict); }
+      .gear-badge-tier { font: 700 1.05rem var(--caps); }
+      .gear-badge[data-verdict="worse"] { opacity: 0.75; }
       /* Panel de cartas al subir de nivel: en la pausa, un velo que apaga la escena congelada. */
       .choice-veil { position: absolute; inset: 0; z-index: 4; backdrop-filter: saturate(0.35) brightness(0.8);
         background: radial-gradient(ellipse at center, rgba(9, 8, 7, 0.35), rgba(5, 4, 3, 0.85)); }
