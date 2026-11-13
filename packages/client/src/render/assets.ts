@@ -6,6 +6,7 @@ import "@babylonjs/loaders/glTF/2.0"; // registra el cargador de .glb/.gltf
 export type AssetId =
   | "kingslayer"
   | "knight"
+  | "mageHero"
   | "skeletonWarrior"
   | "skeletonMinion"
   | "skeletonMage"
@@ -31,6 +32,7 @@ export interface Assets {
 const PATHS: Record<AssetId, string> = {
   kingslayer: "mixamo/characters/kingslayer.glb",
   knight: "kaykit/characters/Knight.glb",
+  mageHero: "kaykit/characters/Mage.glb",
   skeletonWarrior: "kaykit/skeletons/Skeleton_Warrior.glb",
   skeletonMinion: "kaykit/skeletons/Skeleton_Minion.glb",
   skeletonMage: "kaykit/skeletons/Skeleton_Mage.glb",

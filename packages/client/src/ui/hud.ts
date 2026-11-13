@@ -217,7 +217,7 @@ const LEVEL_BANNER_MS = 2000;
 /** Retrato de cada rol (el del mago es su modelo de frente, renderizado a 256 × 256 como el del caballero). */
 const PORTRAIT_URLS: Record<ClassId, string> = {
   warrior: "/assets/ui/portrait-knight.webp",
-  mage: "/assets/ui/portrait-mage.webp",
+  mage: "/assets/ui/portrait-mage-kaykit.webp",
 };
 
 /**

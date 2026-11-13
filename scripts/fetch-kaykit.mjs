@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Descarga el caballero, los esqueletos y las piezas de mazmorra KayKit (CC0) desde commits fijos a packages/client/public/assets/kaykit/.
+// Descarga el caballero, el mago, los esqueletos y las piezas de mazmorra KayKit (CC0) desde commits fijos a packages/client/public/assets/kaykit/.
 // Uso: node scripts/fetch-kaykit.mjs   (Node >= 24, sin dependencias)
 // Los archivos descargados son solo datos: se escriben a disco y se parsea su JSON, nada se ejecuta.
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -17,7 +17,7 @@ const OUT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../packa
 const files = [];
 const add = (src, from, to) => files.push({ src, from: `${src.base}/${from}`, to });
 
-add(ADV, 'Characters/gltf/Knight.glb', 'characters/Knight.glb');
+for (const n of ['Knight', 'Mage']) add(ADV, `Characters/gltf/${n}.glb`, `characters/${n}.glb`);
 for (const n of ['Warrior', 'Minion', 'Mage']) add(SKE, `Characters/gltf/Skeleton_${n}.glb`, `skeletons/Skeleton_${n}.glb`);
 for (const n of ['Axe', 'Blade', 'Staff']) {
   add(SKE, `Assets/gltf/Skeleton_${n}.gltf`, `skeletons/weapons/Skeleton_${n}.gltf`);

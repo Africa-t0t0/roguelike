@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ABILITIES, ARMED_CHANCE, MOVESETS, WEAPONS, weaponsOf, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import { chooseEnemyAnim } from "../src/render/animState";
-import { allClipIds, ENEMY_LOOKS, KNIGHT_LOOK, PLAYER_LOOK, PLAYER_LOOKS, WEAPON_LOOKS, type LookKind } from "../src/render/looks";
+import { allClipIds, ENEMY_LOOKS, KNIGHT_LOOK, MAGE_PLAYER_LOOK, PLAYER_LOOK, PLAYER_LOOKS, WEAPON_LOOKS, type LookKind } from "../src/render/looks";
 
 /** Nombres de los clips en `public/assets/mixamo/anims/` (solo las rutas: nada se carga). */
 const ANIM_FILES = Object.keys(import.meta.glob("../public/assets/mixamo/anims/*.glb")).map((f) =>
@@ -12,6 +12,7 @@ const ANIM_FILES = Object.keys(import.meta.glob("../public/assets/mixamo/anims/*
 function glbOf(asset: string): { clips: Set<string>; nodes: Set<string> } {
   const files: Record<string, string> = {
     knight: "characters/Knight.glb",
+    mageHero: "characters/Mage.glb",
     skeletonWarrior: "skeletons/Skeleton_Warrior.glb",
     skeletonMinion: "skeletons/Skeleton_Minion.glb",
     skeletonMage: "skeletons/Skeleton_Mage.glb",
@@ -106,6 +107,7 @@ describe("looks", () => {
 
   describe.each([
     ["warrior", KNIGHT_LOOK, "knight"],
+    ["mage", MAGE_PLAYER_LOOK, "mageHero"],
   ] as const)("héroe KayKit (%s)", (cls, look, asset) => {
     const { clips, nodes } = glbOf(asset);
 

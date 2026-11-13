@@ -12,14 +12,11 @@ import type { AnimLibrary } from "./animLibrary";
 import { chooseHeroAnim, heroBodyYaw, SpeedMeter, type ClipLengths, type HeroAnimInput } from "./animState";
 import type { Assets } from "./assets";
 import { CharacterView } from "./characterView";
-import { applyBodyGlow } from "./casterLooks";
 import { SetAuraFx } from "./bodyAura";
 import { flameTexture } from "./fxTextures";
 import { GearFxShared, GearLooks } from "./gearLooks";
 import { GearTint } from "./gearTint";
 import { PLAYER_LOOK, PLAYER_LOOKS } from "./looks";
-
-const MAGE_OVERLAY = { color: new Color3(0.42, 0.5, 1), alpha: 0.3 };
 
 const LABEL_W = 2;
 const LABEL_H = 0.5;
@@ -252,9 +249,6 @@ export class PlayerViews {
 
   private create(key: string, name: string, cls: ClassId): PlayerView {
     const character = new CharacterView(this.scene, this.assets, this.anims, PLAYER_LOOKS[cls]);
-    // El modelo del hechicero es muy oscuro: una capa azul violácea lo separa del suelo (y del hechicero enemigo,
-    // que va de verde). Antes del rótulo y el aro, que no la llevan.
-    if (cls === "mage") applyBodyGlow(character.root, { outline: null, overlay: MAGE_OVERLAY }, character.unitsPerMeter());
     const label = createLabel(this.scene, key, name, character.root);
     const marker = CreateTorus(`playerMarker-${key}`, { diameter: MARKER_RADIUS * 2, thickness: 0.05, tessellation: 40 }, this.scene);
     const markerMat = new StandardMaterial(`playerMarkerMat-${key}`, this.scene);

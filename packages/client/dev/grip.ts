@@ -13,7 +13,7 @@ import { AnimLibrary } from "../src/render/animLibrary";
 import { loadAssets } from "../src/render/assets";
 import { CharacterView } from "../src/render/characterView";
 import { createScene } from "../src/render/createScene";
-import { allClipIds, ENEMY_LOOKS, KNIGHT_LOOK, WEAPON_LOOKS, type CharacterLook } from "../src/render/looks";
+import { allClipIds, ENEMY_LOOKS, KNIGHT_LOOK, MAGE_PLAYER_LOOK, WEAPON_LOOKS, type CharacterLook } from "../src/render/looks";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("view");
@@ -39,6 +39,7 @@ camera.minZ = 0.01;
 
 const characters: Record<string, CharacterLook & { gripScale?: number }> = {
   knight: KNIGHT_LOOK,
+  mageHero: MAGE_PLAYER_LOOK,
   kingslayer: { asset: "kingslayer", height: 1.8 },
   brute: ENEMY_LOOKS.brute,
   minion: ENEMY_LOOKS.minion,
@@ -46,6 +47,7 @@ const characters: Record<string, CharacterLook & { gripScale?: number }> = {
 };
 const assets = await loadAssets(scene, [
   "knight",
+  "mageHero",
   "skeletonWarrior",
   "skeletonMinion",
   "skeletonMage",
@@ -84,7 +86,7 @@ let view: CharacterView | undefined;
 let clip = "";
 
 function clipsFor(weapon: WeaponId | ""): string[] {
-  if (!["kingslayer", "knight"].includes(characterSel.value)) return allClipIds();
+  if (!["kingslayer", "knight", "mageHero"].includes(characterSel.value)) return allClipIds();
   if (!weapon) return allClipIds();
   const m = MOVESETS[WEAPONS[weapon].movesetId];
   return [...new Set([m.locomotion.idle, ...m.combo.map((s) => s.clip), ...Object.values(m.locomotion), ...allClipIds()])];

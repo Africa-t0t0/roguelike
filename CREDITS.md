@@ -6,13 +6,13 @@ KayKit: Dungeon Remastered, Adventurers Character Pack y Skeletons Character Pac
 (www.kaylousberg.com), licencia CC0:
 
 - <https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0>: muro, suelo y pilar.
-- <https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0>: el caballero, con sus animaciones,
-  espadas y escudos.
+- <https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0>: el caballero y el mago, con sus
+  animaciones, espadas, escudos y bastón.
 - <https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0>: los esqueletos guerrero, esbirro y
   mago, con su hacha, hoja y bastón.
 
-Se obtienen con `node scripts/fetch-kaykit.mjs`. El retrato del caballero (`ui/portrait-knight.webp`) es una
-captura de ese modelo.
+Se obtienen con `node scripts/fetch-kaykit.mjs`. Los retratos del caballero y del mago (`ui/portrait-knight.webp`,
+`ui/portrait-mage-kaykit.webp`) son capturas de esos modelos.
 
 ## Personajes, animaciones y armas (`packages/client/public/assets/mixamo/`)
 

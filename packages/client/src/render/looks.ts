@@ -189,12 +189,45 @@ export const KNIGHT_LOOK: CharacterLook = {
   },
 };
 
+/**
+ * El mago KayKit (del mismo pack que el caballero) con sus animaciones de lanzar hechizos en lugar de las de Mixamo,
+ * y su bastón a dos manos como el Bastón del juego. El paquete de magia de Mixamo prestaba la carrera, el salto, el
+ * golpe y la muerte del caballero (`ss_*`): aquí suenan las suyas.
+ */
+export const MAGE_PLAYER_LOOK: CharacterLook = {
+  asset: "mageHero",
+  height: 1.8,
+  ownClips: {
+    mg_idle: { clip: "Idle" },
+    ss_run_2: kaykitRun("ss_run_2"),
+    ss_strafe_3: kaykitStrafe("Left", "ss_strafe_3"),
+    ss_strafe_4: kaykitStrafe("Right", "ss_strafe_4"),
+    ss_jump: { clip: "Jump_Idle" },
+    ss_impact: { clip: "Hit_A" },
+    ss_death: { clip: "Death_A" },
+    // combo del bastón
+    mg_attack_1h_1: { clip: "Spellcast_Shoot" },
+    mg_attack_1h_2: { clip: "2H_Ranged_Shoot" },
+    mg_attack_1h_3: { clip: "Spellcast_Long" },
+    // habilidades
+    mg_cast_1h: { clip: "Spellcast_Long" }, // Escarcha, Mina arcana
+    mg_area_1: { clip: "2H_Melee_Attack_Chop" }, // Nova: golpe del bastón al suelo
+    mg_attack_2h_1: { clip: "2H_Ranged_Shoot" }, // Rayo arcano
+    mg_attack_2h_2: { clip: "2H_Melee_Attack_Spin" }, // Remolino
+    mg_attack_2h_3: { clip: "Throw" }, // Esfera
+    mg_cast_2h: { clip: "Cheer" }, // Sanación
+    mg_area_2: { clip: "Spellcast_Raise" }, // Meteoros
+  },
+  hideMeshes: ["Spellbook", "Spellbook_open", "1H_Wand", "2H_Staff"],
+  ownWeapons: { staff: ["2H_Staff"] },
+};
+
 export const PLAYER_LOOK: CharacterLook = KNIGHT_LOOK;
 
-/** Cuerpo de cada rol: el mago usa el modelo del hechicero, a la altura del caballero. */
+/** Cuerpo de cada rol: el caballero y el mago KayKit, a la misma altura. */
 export const PLAYER_LOOKS: Record<ClassId, CharacterLook> = {
   warrior: PLAYER_LOOK,
-  mage: { asset: "mage", height: 1.8 },
+  mage: MAGE_PLAYER_LOOK,
 };
 
 /** Todos los clips que usa el juego (estilos de combate, habilidades y enemigos), sin repetir. */
