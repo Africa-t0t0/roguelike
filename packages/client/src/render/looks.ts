@@ -91,10 +91,81 @@ export const HERO_STRIDE_MPS: Record<string, number> = {
   gs_strafe_4: 3.6,
 };
 
-export const PLAYER_LOOK: { asset: AssetId; height: number } = { asset: "kingslayer", height: 1.8 };
+/** Clip propio del modelo que suena en lugar de un clip del juego; `rate` multiplica su velocidad. */
+export interface OwnClip {
+  clip: string;
+  rate?: number;
+}
+
+/**
+ * Cuerpo de un personaje. Los modelos de Mixamo usan los clips de `AnimLibrary`; los que traen sus propias
+ * animaciones (KayKit) dicen en `ownClips` cuál de las suyas suena por cada clip del juego, y en `ownWeapons` qué
+ * mallas suyas muestran por cada arma (la primera es el arma, que brilla con su tier; el resto, accesorios
+ * como el escudo). Sin arma propia se cuelga el modelo de `WEAPON_LOOKS`.
+ */
+export interface CharacterLook {
+  asset: AssetId;
+  /** m */
+  height: number;
+  ownClips?: Readonly<Record<string, OwnClip>>;
+  /** mallas del modelo que no se ven nunca (o solo con su arma de `ownWeapons`) */
+  hideMeshes?: readonly string[];
+  ownWeapons?: Partial<Record<WeaponId, readonly [string, ...string[]]>>;
+}
+
+/**
+ * Velocidad con la que un héroe KayKit de 1,8 m avanza con `Running_A` a velocidad 1 (m/s), ajustada a ojo:
+ * reescala el paso de los clips de Mixamo a los suyos para que los pies no patinen.
+ */
+const KAYKIT_RUN_MPS = 4.4;
+const kaykitRun = (mixamo: string): OwnClip => ({ clip: "Running_A", rate: HERO_STRIDE_MPS[mixamo]! / KAYKIT_RUN_MPS });
+const kaykitStrafe = (side: "Left" | "Right", mixamo: string): OwnClip => ({ clip: `Running_Strafe_${side}`, rate: HERO_STRIDE_MPS[mixamo]! / KAYKIT_RUN_MPS });
+
+/**
+ * El caballero KayKit con sus propias animaciones, en lugar de los clips de Mixamo del estilo de cada arma y de
+ * las habilidades. Espada y escudo redondo con la del Kingslayer, escudo de insignia con la de guardia y el
+ * mandoble a dos manos.
+ */
+export const KNIGHT_LOOK: CharacterLook = {
+  asset: "knight",
+  height: 1.8,
+  ownClips: {
+    ss_idle: { clip: "Idle" },
+    ss_run_2: kaykitRun("ss_run_2"),
+    ss_strafe_3: kaykitStrafe("Left", "ss_strafe_3"),
+    ss_strafe_4: kaykitStrafe("Right", "ss_strafe_4"),
+    ss_jump: { clip: "Jump_Idle" },
+    ss_impact: { clip: "Hit_A" },
+    ss_death: { clip: "Death_A" },
+    ss_slash: { clip: "1H_Melee_Attack_Slice_Diagonal" },
+    ss_slash_3: { clip: "1H_Melee_Attack_Slice_Horizontal" },
+    ss_attack_4: { clip: "1H_Melee_Attack_Chop" },
+    ss_power_up: { clip: "Cheer" },
+    gs_idle: { clip: "2H_Melee_Idle" },
+    gs_run_2: kaykitRun("gs_run_2"),
+    gs_run: kaykitRun("gs_run"),
+    gs_strafe_3: kaykitStrafe("Left", "gs_strafe_3"),
+    gs_strafe_4: kaykitStrafe("Right", "gs_strafe_4"),
+    gs_jump: { clip: "Jump_Idle" },
+    gs_impact: { clip: "Hit_B" },
+    gs_death: { clip: "Death_B" },
+    gs_slash: { clip: "2H_Melee_Attack_Slice" },
+    gs_high_spin_attack: { clip: "2H_Melee_Attack_Spin" },
+    gs_jump_attack: { clip: "2H_Melee_Attack_Chop" },
+    gs_slide_attack: { clip: "2H_Melee_Attack_Stab" },
+  },
+  hideMeshes: ["1H_Sword", "1H_Sword_Offhand", "2H_Sword", "Badge_Shield", "Rectangle_Shield", "Round_Shield", "Spike_Shield"],
+  ownWeapons: {
+    "kingslayer-sword": ["1H_Sword", "Round_Shield"],
+    "guard-sword": ["1H_Sword", "Badge_Shield"],
+    "great-sword": ["2H_Sword"],
+  },
+};
+
+export const PLAYER_LOOK: CharacterLook = KNIGHT_LOOK;
 
 /** Cuerpo de cada rol: el mago usa el modelo del hechicero, a la altura del caballero. */
-export const PLAYER_LOOKS: Record<ClassId, { asset: AssetId; height: number }> = {
+export const PLAYER_LOOKS: Record<ClassId, CharacterLook> = {
   warrior: PLAYER_LOOK,
   mage: { asset: "mage", height: 1.8 },
 };

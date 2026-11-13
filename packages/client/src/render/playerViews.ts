@@ -56,6 +56,8 @@ interface PlayerView {
   /** aura de llamas muy leve que crece con las piezas del mismo tier */
   setAura: SetAuraFx;
   speed: SpeedMeter;
+  /** duración de cada clip en su cuerpo (el caballero KayKit trae las suyas) */
+  clipLengths: ClipLengths;
   /** Swing anunciado por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
   swing?: { step: number; startMs: number; restart: boolean };
   /** Habilidad anunciada por evento (`startMs` en el reloj con el que se dibuja a este jugador). */
@@ -96,10 +98,9 @@ const SWING_RESTART_S = 0.05;
 const MARKER_RADIUS = 0.62; // m
 const MARKER_COLOR = new Color3(0.5, 0.85, 1);
 
-/** Un Kingslayer animado según el estilo de su arma, con el arma en la mano y su nombre encima. */
+/** Un caballero animado según el estilo de su arma, con el arma en la mano y su nombre encima. */
 export class PlayerViews {
   private readonly views = new Map<string, PlayerView>();
-  private readonly clipLengths: ClipLengths;
   private readonly gearFx: GearFxShared;
   private paused = false;
   private flame?: DynamicTexture;
@@ -117,7 +118,6 @@ export class PlayerViews {
     private readonly assets: Assets,
     private readonly anims: AnimLibrary,
   ) {
-    this.clipLengths = { get: (clip) => anims.length(clip) };
     this.gearFx = new GearFxShared(scene);
   }
 
@@ -220,7 +220,7 @@ export class PlayerViews {
       ability,
       attackSpeedMult: state.attackSpeedMult,
     };
-    const choice = chooseHeroAnim(input, this.clipLengths);
+    const choice = chooseHeroAnim(input, view.clipLengths);
     view.character.setBodyYaw(heroBodyYaw(input));
     view.character.play(choice, attackClip !== undefined && choice.clip === attackClip);
     // Después de `play`, que al soltarlo le devuelve su velocidad al clip.
@@ -280,6 +280,7 @@ export class PlayerViews {
       gearTint,
       setAura,
       speed: new SpeedMeter(),
+      clipLengths: { get: (clip) => character.clipLength(clip) },
       dispose() {
         label.material?.getActiveTextures().forEach((t) => t.dispose());
         label.material?.dispose();

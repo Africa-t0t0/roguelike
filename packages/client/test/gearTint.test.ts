@@ -45,6 +45,19 @@ describe("boneRegion", () => {
     ["mixamorig:RightLeg", "boots"],
     ["mixamorig:LeftFoot", "boots"],
     ["mixamorig:RightToeBase", "boots"],
+    // KayKit
+    ["head", "helmet"],
+    ["chest", "chest"],
+    ["spine", "belt"],
+    ["hips", "belt"],
+    ["upperarm.l", "chest"],
+    ["lowerarm.r", "gloves"],
+    ["wrist.l", "gloves"],
+    ["hand.r", "gloves"],
+    ["upperleg.l", "boots"],
+    ["lowerleg.r", "boots"],
+    ["foot.l", "boots"],
+    ["toes.r", "boots"],
   ])("%s → %s", (name, region) => expect(boneRegion(name)).toBe(region));
 });
 

@@ -1,5 +1,5 @@
 // Página de desarrollo (no entra al build): ajustar a ojo el agarre de cada arma en la mano del
-// Kingslayer (y su `gripScale` en brute y minion) y revisar los clips y el brillo por tier.
+// Kingslayer (y su `gripScale` en los enemigos), ver el caballero KayKit y revisar los clips y el brillo por tier.
 // `npm run dev` → http://localhost:5173/dev/grip.html
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
@@ -10,10 +10,10 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { MOVESETS, WEAPONS, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import { AnimLibrary } from "../src/render/animLibrary";
-import { loadAssets, type AssetId } from "../src/render/assets";
+import { loadAssets } from "../src/render/assets";
 import { CharacterView } from "../src/render/characterView";
 import { createScene } from "../src/render/createScene";
-import { allClipIds, ENEMY_LOOKS, PLAYER_LOOK, WEAPON_LOOKS } from "../src/render/looks";
+import { allClipIds, ENEMY_LOOKS, KNIGHT_LOOK, WEAPON_LOOKS, type CharacterLook } from "../src/render/looks";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("view");
@@ -37,13 +37,15 @@ camera.attachControl(canvas, true);
 camera.wheelPrecision = 60;
 camera.minZ = 0.01;
 
-const characters: Record<string, { asset: AssetId; height: number; gripScale?: number }> = {
-  kingslayer: PLAYER_LOOK,
+const characters: Record<string, CharacterLook & { gripScale?: number }> = {
+  knight: KNIGHT_LOOK,
+  kingslayer: { asset: "kingslayer", height: 1.8 },
   brute: ENEMY_LOOKS.brute,
   minion: ENEMY_LOOKS.minion,
   mage: ENEMY_LOOKS.mage,
 };
 const assets = await loadAssets(scene, [
+  "knight",
   "kingslayer",
   "brute",
   "minion",
@@ -76,7 +78,7 @@ let view: CharacterView | undefined;
 let clip = "";
 
 function clipsFor(weapon: WeaponId | ""): string[] {
-  if (characterSel.value !== "kingslayer") return allClipIds();
+  if (!["kingslayer", "knight"].includes(characterSel.value)) return allClipIds();
   if (!weapon) return allClipIds();
   const m = MOVESETS[WEAPONS[weapon].movesetId];
   return [...new Set([m.locomotion.idle, ...m.combo.map((s) => s.clip), ...Object.values(m.locomotion), ...allClipIds()])];

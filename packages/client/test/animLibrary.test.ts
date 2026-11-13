@@ -13,6 +13,18 @@ describe("boneKey", () => {
     expect(boneKey("mixamorig1:Hips")).toBe("hips");
     expect(boneKey("Spine")).toBe("spine");
   });
+
+  it("traduce los huesos KayKit a la clave de Mixamo", () => {
+    expect(boneKey("chest")).toBe("spine2");
+    expect(boneKey("upperarm.l")).toBe("leftarm");
+    expect(boneKey("lowerarm.r")).toBe("rightforearm");
+    expect(boneKey("hand.r")).toBe("righthand");
+    expect(boneKey("upperleg.r")).toBe("rightupleg");
+    expect(boneKey("lowerleg.l")).toBe("leftleg");
+    expect(boneKey("toes.l")).toBe("lefttoebase");
+    expect(boneKey("head")).toBe("head");
+    expect(boneKey("kneeIK.l")).toBe("kneeik.l");
+  });
 });
 
 function fakeClip(scene: Scene, clipId: string, bones: string[]): AnimationGroup {

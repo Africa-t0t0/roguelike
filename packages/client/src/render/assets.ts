@@ -5,6 +5,7 @@ import "@babylonjs/loaders/glTF/2.0"; // registra el cargador de .glb/.gltf
 
 export type AssetId =
   | "kingslayer"
+  | "knight"
   | "brute"
   | "minion"
   | "mage"
@@ -20,9 +21,10 @@ export interface Assets {
   container(id: AssetId): AssetContainer;
 }
 
-/** Rutas dentro de `public/assets/` (mazmorra KayKit y armas Quaternius CC0, Kingslayer CC BY 4.0, Mixamo, dragón CC BY; ver CREDITS.md). */
+/** Rutas dentro de `public/assets/` (caballero y mazmorra KayKit y armas Quaternius CC0, Kingslayer CC BY 4.0, Mixamo, dragón CC BY; ver CREDITS.md). */
 const PATHS: Record<AssetId, string> = {
   kingslayer: "mixamo/characters/kingslayer.glb",
+  knight: "kaykit/characters/Knight.glb",
   brute: "mixamo/characters/brute.glb",
   minion: "mixamo/characters/minion.glb",
   mage: "mixamo/characters/mage.glb",

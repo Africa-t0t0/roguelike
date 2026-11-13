@@ -10,7 +10,7 @@ import type { Nature, WeaponId, WeaponTier } from "@roguelike/shared";
 import { boneKey, type AnimLibrary } from "./animLibrary";
 import type { AnimChoice } from "./animState";
 import type { AssetId, Assets } from "./assets";
-import { WEAPON_LOOKS } from "./looks";
+import { WEAPON_LOOKS, type CharacterLook } from "./looks";
 import { buildStaff, type StaffMesh } from "./staffMesh";
 import { attachNatureFx, type NatureFx } from "./natureLooks";
 import { applyTierGlow } from "./tierGlow";
@@ -41,8 +41,9 @@ function worldScale(node: Node): number {
 }
 
 /**
- * Un personaje de Mixamo: esqueleto propio por instancia, escalado a `look.height`, con los clips de
- * `AnimLibrary` reasignados a sus huesos la primera vez que suenan y un cruce de ~0,15 s entre clips.
+ * Un personaje animado: esqueleto propio por instancia, escalado a `look.height`, con un cruce de ~0,15 s entre
+ * clips. Los de Mixamo usan los clips de `AnimLibrary`, reasignados a sus huesos la primera vez que suenan; los
+ * que traen sus animaciones (`look.ownClips`, KayKit) suenan las suyas en lugar de las del juego.
  * `root` lleva posición y orientación; se le pueden colgar más cosas.
  */
 export class CharacterView {
@@ -53,9 +54,25 @@ export class CharacterView {
   /** huesos (TransformNodes del esqueleto) por `boneKey` */
   private readonly nodes = new Map<string, TransformNode>();
   private readonly groups = new Map<string, AnimationGroup | null>();
+  /** animaciones propias del modelo por nombre (solo con `look.ownClips`) */
+  private readonly own = new Map<string, AnimationGroup>();
+  /** nodos del modelo (huesos y mallas) por su nombre original, para mostrar u ocultar sus mallas */
+  private readonly named = new Map<string, TransformNode>();
   private readonly fadingOut = new Set<AnimationGroup>();
   private current: { clip: string; group: AnimationGroup } | undefined;
-  private weapon: { id: WeaponId; tier: WeaponTier; nature: Nature; grip: TransformNode; glowRoot: TransformNode; staff?: StaffMesh; fx?: NatureFx } | undefined;
+  private weapon:
+    | {
+        id: WeaponId;
+        tier: WeaponTier;
+        nature: Nature;
+        grip: TransformNode;
+        glowRoot: TransformNode;
+        staff?: StaffMesh;
+        fx?: NatureFx;
+        /** mallas propias del modelo que se mostraron con esta arma (la primera, el arma, cuelga de `grip`) */
+        own?: { meshes: TransformNode[]; parent: Node | null };
+      }
+    | undefined;
   private paused = false;
   private readonly observer: Observer<Scene>;
   private readonly skeletons: Skeleton[];
@@ -71,7 +88,7 @@ export class CharacterView {
     private readonly scene: Scene,
     private readonly assets: Assets,
     private readonly anims: AnimLibrary,
-    look: { asset: AssetId; height: number },
+    private readonly look: CharacterLook,
   ) {
     this.suffix = `#${look.asset}${nextInstance++}`;
     const suffix = this.suffix;
@@ -87,16 +104,25 @@ export class CharacterView {
     });
     for (const node of entries.rootNodes) node.parent = body;
     this.skeletons = entries.skeletons;
-    // Los clips del propio archivo (p. ej. una pose T) no se usan: los clips vienen de AnimLibrary.
-    for (const g of entries.animationGroups) g.dispose();
+    // Los clips del propio archivo (p. ej. una pose T) no se usan salvo que el look los pida: los clips vienen de AnimLibrary.
+    for (const g of entries.animationGroups) {
+      if (look.ownClips) {
+        g.stop();
+        this.own.set(baseName(g, suffix), g);
+      } else g.dispose();
+    }
 
     for (const root of entries.rootNodes) {
       for (const n of [root, ...root.getDescendants(false)]) {
-        if (!(n instanceof TransformNode) || n instanceof AbstractMesh) continue;
-        const key = boneKey(baseName(n, suffix));
+        if (!(n instanceof TransformNode)) continue;
+        const name = baseName(n, suffix);
+        if (!this.named.has(name)) this.named.set(name, n);
+        if (n instanceof AbstractMesh) continue;
+        const key = boneKey(name);
         if (!this.nodes.has(key)) this.nodes.set(key, n);
       }
     }
+    for (const name of look.hideMeshes ?? []) this.named.get(name)?.setEnabled(false);
 
     // Unidades distintas por modelo: se mide el alto en reposo y se escala a `look.height`, con los
     // pies en y = 0.
@@ -170,9 +196,20 @@ export class CharacterView {
     }
     if (!this.weapon && weaponId === null) return;
     this.weapon?.fx?.dispose();
+    const own = this.weapon?.own;
+    if (own) {
+      // Las mallas propias vuelven a su sitio, ocultas (son del modelo: no se desechan con el agarre).
+      own.meshes[0]!.parent = own.parent;
+      for (const m of own.meshes) m.setEnabled(false);
+    }
     this.weapon?.grip.dispose(); // sin materiales: son del contenedor o clones por tier, compartidos
     this.weapon = undefined;
     if (weaponId === null) return;
+    const ownWeapon = this.look.ownWeapons?.[weaponId];
+    if (ownWeapon) {
+      this.setOwnWeapon(weaponId, ownWeapon, tier, nature);
+      return;
+    }
     const hand = this.nodes.get("righthand");
     if (!hand) return;
     const { asset, grip } = WEAPON_LOOKS[weaponId];
@@ -191,20 +228,53 @@ export class CharacterView {
       staff = buildStaff(this.scene, this.suffix, nature);
       staff.root.parent = node;
     } else {
-      const model = this.assets.container(asset).instantiateModelsToScene((n) => n + this.suffix, false, {
-        doNotInstantiate: true,
-      });
-      // Los hijos del __root__ del arma ya están en el espacio glTF, igual que la mano: se cuelgan
-      // directamente (con el __root__ se aplicaría dos veces el cambio de mano).
-      for (const wroot of model.rootNodes) {
-        for (const child of wroot.getChildren()) child.parent = node;
-        wroot.dispose();
-      }
+      this.attachModel(asset, node);
     }
     const glowRoot = staff?.shaft ?? node;
     if (tier !== 1 || nature !== "none") applyTierGlow(glowRoot, tier, nature);
     this.weapon = { id: weaponId, tier, nature, grip: node, glowRoot, staff };
     this.setNatureFx(this.weapon, nature);
+  }
+
+  /** Instancia el modelo `asset` colgado de `parent`. */
+  private attachModel(asset: AssetId, parent: TransformNode): void {
+    const model = this.assets.container(asset).instantiateModelsToScene((n) => n + this.suffix, false, {
+      doNotInstantiate: true,
+    });
+    // Los hijos del __root__ del arma ya están en el espacio glTF, igual que la mano: se cuelgan
+    // directamente (con el __root__ se aplicaría dos veces el cambio de mano).
+    for (const wroot of model.rootNodes) {
+      for (const child of wroot.getChildren()) child.parent = parent;
+      wroot.dispose();
+    }
+  }
+
+  /**
+   * Arma propia del modelo: muestra sus mallas (la primera es el arma, el resto accesorios como el escudo) y cuelga
+   * el arma de un agarre en su sitio, para que brille con el tier y lleve las partículas de la naturaleza.
+   */
+  private setOwnWeapon(weaponId: WeaponId, names: readonly string[], tier: WeaponTier, nature: Nature): void {
+    const meshes = names.map((n) => this.named.get(n)).filter((m): m is TransformNode => m !== undefined);
+    const blade = meshes[0];
+    if (!blade) return;
+    const parent = blade.parent;
+    const node = new TransformNode(`grip${this.suffix}`, this.scene);
+    node.parent = parent;
+    blade.parent = node;
+    for (const m of meshes) m.setEnabled(true);
+    if (tier !== 1 || nature !== "none") applyTierGlow(node, tier, nature);
+    this.weapon = { id: weaponId, tier, nature, grip: node, glowRoot: node, own: { meshes, parent } };
+    this.setNatureFx(this.weapon, nature);
+  }
+
+  /** Duración (s) con la que suena `clip` a velocidad 1 en este personaje; 0 si no la tiene. */
+  clipLength(clip: string): number {
+    if (!this.look.ownClips) return this.anims.length(clip);
+    const own = this.look.ownClips[clip];
+    const g = own && this.own.get(own.clip);
+    if (!own || !g) return 0;
+    const fps = g.targetedAnimations[0]?.animation.framePerSecond ?? 60;
+    return (g.to - g.from) / fps / (own.rate ?? 1);
   }
 
   /** Unidades locales del modelo por metro del mundo (inversa de la escala del cuerpo): para grosores en espacio de malla. */
@@ -228,7 +298,8 @@ export class CharacterView {
 
   /** Cambia de clip con un cruce; si `choice.clip` ya suena solo ajusta la velocidad (salvo `restart`). */
   play(requested: AnimChoice, restart = false): void {
-    const choice = this.frozen ? { ...requested, speed: 0 } : requested;
+    const rate = this.look.ownClips?.[requested.clip]?.rate ?? 1;
+    const choice = this.frozen ? { ...requested, speed: 0 } : { ...requested, speed: requested.speed * rate };
     const group = this.group(choice.clip);
     if (!group) return;
     const cur = this.current;
@@ -271,6 +342,8 @@ export class CharacterView {
     this.scene.onBeforeRenderObservable.remove(this.observer);
     for (const g of this.groups.values()) g?.dispose();
     this.groups.clear();
+    for (const g of this.own.values()) g.dispose();
+    this.own.clear();
     this.fadingOut.clear();
     this.current = undefined;
     this.weapon?.fx?.dispose();
@@ -281,6 +354,11 @@ export class CharacterView {
 
   /** Grupo del clip para este personaje; se crea la primera vez (null si el clip no le calza). */
   private group(clip: string): AnimationGroup | null {
+    // Con animaciones propias, los clips del juego sin equivalente no suenan (los de Mixamo no le calzan).
+    if (this.look.ownClips) {
+      const own = this.look.ownClips[clip];
+      return (own && this.own.get(own.clip)) ?? null;
+    }
     let g = this.groups.get(clip);
     if (g === undefined) {
       g = this.anims.bind(clip, this.nodes, clip + this.suffix);

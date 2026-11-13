@@ -7,9 +7,32 @@ import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF/2.0"; // registra el cargador de .glb/.gltf
 
-/** Clave de hueso sin el prefijo de Mixamo (`mixamorig:`, `mixamorig1:`…) y en minúsculas. */
+/** Huesos de los personajes KayKit con su nombre de Mixamo (`.l`/`.r` → left/right). */
+const KAYKIT_BONES: Record<string, string> = {
+  chest: "spine2",
+  upperarm: "arm",
+  lowerarm: "forearm",
+  wrist: "handwrist",
+  hand: "hand",
+  handslot: "handslot",
+  upperleg: "upleg",
+  lowerleg: "leg",
+  foot: "foot",
+  toes: "toebase",
+};
+
+/**
+ * Clave de hueso sin el prefijo de Mixamo (`mixamorig:`, `mixamorig1:`…) y en minúsculas. Los huesos KayKit
+ * (`upperarm.l`, `chest`…) se traducen a la clave de Mixamo equivalente (`leftarm`, `spine2`…).
+ */
 export function boneKey(name: string): string {
-  return name.replace(/^mixamorig\d*:/i, "").toLowerCase();
+  const k = name.replace(/^mixamorig\d*:/i, "").toLowerCase();
+  const side = /^([a-z]+)\.([lr])$/.exec(k);
+  if (side) {
+    const base = KAYKIT_BONES[side[1]!];
+    return base ? `${side[2] === "l" ? "left" : "right"}${base}` : k;
+  }
+  return KAYKIT_BONES[k] ?? k;
 }
 
 /**

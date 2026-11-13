@@ -1,10 +1,15 @@
 # Créditos
 
-## Mazmorra (`packages/client/public/assets/kaykit/dungeon/`)
+## Mazmorra y caballero (`packages/client/public/assets/kaykit/`)
 
-KayKit: Dungeon Remastered, de Kay Lousberg (www.kaylousberg.com), licencia CC0:
-<https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0>. Muro, suelo y pilar; se obtienen con
-`node scripts/fetch-kaykit.mjs`.
+KayKit: Dungeon Remastered y Adventurers Character Pack, de Kay Lousberg (www.kaylousberg.com), licencia CC0:
+
+- <https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0>: muro, suelo y pilar.
+- <https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0>: el caballero, con sus animaciones,
+  espadas y escudos.
+
+Se obtienen con `node scripts/fetch-kaykit.mjs`. El retrato del caballero (`ui/portrait-knight.webp`) es una
+captura de ese modelo.
 
 ## Personajes, animaciones y armas (`packages/client/public/assets/mixamo/`)
 
