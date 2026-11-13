@@ -375,6 +375,9 @@ interface Piece {
   onStart?(): void;
   /** `t`: fracción transcurrida de la pieza, en [0, 1] */
   apply?(t: number): void;
+  /** Efectos que acompañan a quien los lanza (el Torbellino largo): dónde está ahora y dónde se dibujó por última vez. */
+  follow?: () => { x: number; z: number } | undefined;
+  followAt?: { x: number; z: number };
 }
 
 /** Grietas desde el centro: líneas oscuras con borde naranja (o del color de la naturaleza). Pseudoaleatorias con semilla (siempre iguales). */
@@ -458,9 +461,13 @@ export class AbilityFx {
     };
   }
 
-  /** Arranca el efecto de `id` en `at` (pose dibujada del jugador al empezar), con `startMs` en el reloj de juego. */
-  play(id: AbilityId, at: Pose, rank: number, startMs: number, nature: Nature = "none"): void {
-    this.spawn(abilityTimeline(id, rank, nature), at, startMs);
+  /**
+   * Arranca el efecto de `id` en `at` (pose dibujada del jugador al empezar), con `startMs` en el reloj de juego.
+   * `follow`: dónde está ahora quien lo lanzó; con él, el efecto se mueve con el jugador (las partículas ya
+   * soltadas se quedan donde cayeron).
+   */
+  play(id: AbilityId, at: Pose, rank: number, startMs: number, nature: Nature = "none", follow?: () => { x: number; z: number } | undefined): void {
+    this.spawn(abilityTimeline(id, rank, nature), at, startMs, follow);
   }
 
   /**
@@ -525,9 +532,13 @@ export class AbilityFx {
     );
   }
 
-  private spawn(steps: FxStep[], at: Pose, startMs: number): void {
+  private spawn(steps: FxStep[], at: Pose, startMs: number, follow?: () => { x: number; z: number } | undefined): void {
     for (const step of steps) {
       const piece = this.build(step, at);
+      if (follow) {
+        piece.follow = follow;
+        piece.followAt = { x: at.x, z: at.z };
+      }
       piece.startMs = startMs + step.startS * 1000;
       piece.endMs = piece.startMs + step.durS * 1000;
       // Los sistemas de partículas dejan de emitir tras `emitS`; sus partículas viven hasta `endMs`.
@@ -559,7 +570,26 @@ export class AbilityFx {
         p.onStart?.();
       }
       if (p.ps && p.emitEndMs !== undefined && nowMs >= p.emitEndMs && p.ps.isStarted()) p.ps.stop();
+      this.track(p);
       p.apply?.(Math.min(1, (nowMs - p.startMs) / (p.endMs - p.startMs)));
+    }
+  }
+
+  /** Mueve la pieza (malla y emisor) lo que se movió quien la lanzó desde el último cuadro. */
+  private track(p: Piece): void {
+    const now = p.follow?.();
+    if (!now || !p.followAt) return;
+    const dx = now.x - p.followAt.x;
+    const dz = now.z - p.followAt.z;
+    if (dx === 0 && dz === 0) return;
+    p.followAt = { x: now.x, z: now.z };
+    if (p.mesh) {
+      p.mesh.position.x += dx;
+      p.mesh.position.z += dz;
+    }
+    if (p.ps && p.ps.emitter instanceof Vector3) {
+      p.ps.emitter.x += dx;
+      p.ps.emitter.z += dz;
     }
   }
 

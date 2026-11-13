@@ -8,7 +8,7 @@ import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import type { Nature } from "@roguelike/shared";
+import { THRUST_TRAIL_TICK_S, type Nature } from "@roguelike/shared";
 import type { WorldSnapshot, ZoneKind, ZoneSnapshot } from "../net/connection";
 import { generated, radial, rockTexture, swirlTexture, telegraphTexture } from "./fxTextures";
 import { NATURE_COLORS } from "./natureLooks";
@@ -53,7 +53,7 @@ interface ZoneView {
 export class SpellZoneViews {
   private readonly views = new Map<string, ZoneView>();
   private readonly tex: Record<"ring" | "frost" | "disc" | "rock" | "rune", DynamicTexture>;
-  private readonly mats: Record<"frost" | "frostRing" | "mine" | "mineGlow" | "mineOrb" | "meteors" | "warn" | "warnFill" | "frostFill" | "scar" | "trail" | "rock" | "tail", StandardMaterial>;
+  private readonly mats: Record<"frost" | "frostRing" | "mine" | "mineGlow" | "mineOrb" | "meteors" | "warn" | "warnFill" | "frostFill" | "scar" | "scarCore" | "trail" | "rock" | "tail", StandardMaterial>;
 
   private readonly tinted = new Map<string, StandardMaterial>();
 
@@ -126,7 +126,9 @@ export class SpellZoneViews {
       rock,
       tail: glow("spellTail", new Color3(1, 0.38, 0.08), this.tex.disc, 0.55),
       frostFill: glow("spellFrostFill", ICE, this.tex.disc, 0.3),
-      scar: glow("spellScar", new Color3(1, 0.62, 0.3), this.tex.disc, 0.5),
+      // Rastro del Tajo: brasa roja intensa con un núcleo casi blanco, para que se lea como suelo que quema.
+      scar: glow("spellScar", new Color3(1, 0.28, 0.04), this.tex.disc, 0.95),
+      scarCore: glow("spellScarCore", new Color3(1, 0.8, 0.45), this.tex.disc, 0.8),
     };
   }
 
@@ -204,10 +206,13 @@ export class SpellZoneViews {
         case "ice":
           view.floor.visibility = Math.max(0, Math.min(1, left / view.totalS + 0.1));
           break;
-        case "scar":
-          // Tajo en el suelo que se apaga: late como brasa y se desvanece al final.
-          view.floor.visibility = Math.max(0, Math.min(1, left / FADE_S)) * (0.6 + 0.25 * Math.sin(t * 7 + view.bornMs));
+        case "scar": {
+          // Brasa que se aviva en cada pulso de daño y se apaga al final.
+          const flash = Math.exp(-((age % THRUST_TRAIL_TICK_S) / THRUST_TRAIL_TICK_S) * 5);
+          view.floor.visibility = fade * (0.7 + 0.3 * flash);
+          if (view.inner) view.inner.visibility = fade * (0.45 + 0.55 * flash);
           break;
+        }
         case "fire":
           view.floor.visibility = Math.max(0, Math.min(1, left / FADE_S)) * (0.7 + 0.3 * Math.sin(t * 9 + view.bornMs));
           break;
@@ -289,7 +294,11 @@ export class SpellZoneViews {
       case "fire":
         return { ...base, floor: this.quad(`fire-${id}`, root, this.tint("warnFill", z.nature), z.radius) };
       case "scar":
-        return { ...base, floor: this.quad(`scar-${id}`, root, this.tint("scar", z.nature), z.radius) };
+        return {
+          ...base,
+          floor: this.quad(`scar-${id}`, root, this.tint("scar", z.nature), z.radius),
+          inner: this.quad(`scarCore-${id}`, root, this.mats.scarCore, z.radius * 0.5, FLOOR_Y + 0.01),
+        };
       case "ice":
         return { ...base, floor: this.quad(`ice-${id}`, root, this.mats.frostFill, z.radius) };
       default:

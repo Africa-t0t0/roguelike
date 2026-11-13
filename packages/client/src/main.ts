@@ -279,7 +279,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       id === "slam" ? { ...pose, ...leapLanding(dungeon, pose.x, pose.z, pose.facing, aimed) }
       : AIMED_SPELLS.includes(id) ? { ...pose, x: pose.x + Math.sin(pose.facing) * aimed, z: pose.z + Math.cos(pose.facing) * aimed }
       : pose;
-    abilityFx.play(id, at, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none");
+    // El Torbellino gira mientras el jugador camina: su efecto va con él.
+    const follow = id === "whirlwind" ? () => drawnPoses.get(key) : undefined;
+    abilityFx.play(id, at, rank, frameNow - elapsedS * 1000, lastPlayers.get(key)?.weaponNature ?? "none", follow);
     if (key === conn.myKey) sfx.cast();
   };
   // El golpe pega hacia donde se apunta en su impacto, no hacia donde empezó: su efecto (el tajo, el destello del

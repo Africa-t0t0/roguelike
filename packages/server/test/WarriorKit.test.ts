@@ -14,7 +14,7 @@ import {
   type PlayerInput,
 } from "@roguelike/shared";
 import { AbilitySystem, abilityCharges } from "../src/sim/AbilitySystem";
-import { attackSpeedOf, CombatSystem, damageMultOf, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
+import { attackSpeedOf, CombatSystem, damageMultOf, guardMult, moveSpeedMult, newCombatState, type CombatState } from "../src/sim/CombatSystem";
 import { EnemySystem, type Enemy } from "../src/sim/EnemySystem";
 import { PositionHistory } from "../src/sim/PositionHistory";
 
@@ -87,20 +87,21 @@ describe("Torbellino", () => {
     expect(env.c.abilityCd.whirlwind).toBeLessThan(7);
   });
 
-  it("rango 3: gira 4 s golpeando una y otra vez, aparta a los enemigos y frena al caballero mientras gira", () => {
+  it("rango 3: gira 4 s golpeando una y otra vez, saca a los enemigos de su alcance y recibe menos daño sin frenarse", () => {
     const env = setup([{ id: "whirlwind", rank: 3 }]);
     const [e] = spawn(env.sys, [{ x: 20, z: 21.5 }]);
     feed(env, { abilities: 1 });
     run(env, 0.3);
-    expect(moveSpeedMult(env.c)).toBeLessThan(1);
+    expect(moveSpeedMult(env.c)).toBe(1);
+    expect(guardMult(env.c)).toBeCloseTo(0.7);
     run(env, 3.9);
-    // Lo aparta un poco a cada golpe hasta sacarlo del radio (en partida vuelven a entrar caminando).
-    expect(env.hits.length).toBeGreaterThanOrEqual(5);
-    expect(env.hits.every((h) => h.enemyId === e!.id)).toBe(true);
-    expect(e!.z).toBeGreaterThan(22);
+    // Cada golpe lo aparta 1,2 m: al segundo ya está fuera del radio (en partida vuelven a entrar caminando).
+    expect(env.hits.length).toBeGreaterThanOrEqual(2);
+    expect(env.hits.every((h) => h.enemyId === e!.id && h.amount === Math.round(BASE * 1.1))).toBe(true);
+    expect(e!.z).toBeGreaterThan(23);
     run(env, 0.3);
     expect(env.c.abilityAnim).toBeNull();
-    expect(moveSpeedMult(env.c)).toBe(1);
+    expect(guardMult(env.c)).toBe(1);
   });
 });
 

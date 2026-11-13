@@ -16,10 +16,13 @@ export const MIN_DAMAGE_TAKEN_MULT = 0.4;
 // Constantes de las habilidades que no dependen del rango.
 /** impacto del Torbellino, como fracción de su animación */
 export const WHIRLWIND_IMPACT_AT = 0.5;
-/** Torbellino de rango 3: segundos entre golpes mientras gira, metros que aparta a cada golpe y velocidad al girar */
+/**
+ * Torbellino de rango 3: segundos entre golpes mientras gira, metros que aparta a cada golpe (los saca de su
+ * alcance cuerpo a cuerpo) y multiplicador del daño que recibe mientras gira.
+ */
 export const WHIRL_TICK_S = 0.4;
-export const WHIRL_PUSH_M = 0.4;
-export const WHIRL_MOVE_MULT = 0.6;
+export const WHIRL_PUSH_M = 1.2;
+export const WHIRL_GUARD_MULT = 0.7;
 /** segundos desde el inicio del Golpe sísmico hasta que aterriza del salto (el impacto llega ahí o, en rango 3, tras canalizar) */
 export const SLAM_IMPACT_S = 0.5;
 /** el Golpe sísmico salta hacia donde se apunta, como mucho estos metros */
@@ -165,12 +168,12 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
       { damageMult: 1.2, radius: 3 },
       { damageMult: 1.6, radius: 3, cooldownS: 7 },
       // Gira 4 s: golpea cada WHIRL_TICK_S y aparta un poco.
-      { damageMult: 0.7, radius: 3.2, cooldownS: 10, animS: 4 },
+      { damageMult: 1.1, radius: 3.2, cooldownS: 10, animS: 4 },
     ],
     text: (r) => {
       const k = ABILITIES.whirlwind.ranks[r - 1]!;
       return r === 3
-        ? `Giras durante ${secs(k.animS!)}: cada ${secs(WHIRL_TICK_S)} golpeas a todos a ${String(k.radius).replace(".", ",")} m con ${pct(k.damageMult!)} de daño y los apartas`
+        ? `Giras durante ${secs(k.animS!)}: cada ${secs(WHIRL_TICK_S)} golpeas a todos a ${String(k.radius).replace(".", ",")} m con ${pct(k.damageMult!)} de daño y los apartas, y recibes un ${pct(1 - WHIRL_GUARD_MULT)} menos de daño`
         : `Giras 360° y golpeas a todos a ${k.radius} m con ${pct(k.damageMult!)} de daño`;
     },
   },

@@ -24,7 +24,7 @@ import {
   tryStartSwing,
   WARCRY_GUARD_MULT,
   BANNER_GUARD_MULT,
-  WHIRL_MOVE_MULT,
+  WHIRL_GUARD_MULT,
   xpToNext,
   type AbilityId,
   type ClassId,
@@ -183,7 +183,8 @@ export function guardMult(c: CombatState): number {
   // `novaGuard`: mientras la Nova carga (aún no estalló), la mitad de daño.
   const nova = a?.id === "nova" && a.impacts.length > 0 && c.fx.legendaries.includes("novaGuard") ? MAGE_LEGENDARY.novaGuardMult : 1;
   const banner = c.bannerLeft > 0 && c.bannerGuard ? BANNER_GUARD_MULT : 1;
-  return (c.buffGuard && c.buffLeft > 0 ? WARCRY_GUARD_MULT : 1) * nova * banner;
+  const spin = spinning(c) ? WHIRL_GUARD_MULT : 1;
+  return (c.buffGuard && c.buffLeft > 0 ? WARCRY_GUARD_MULT : 1) * nova * banner * spin;
 }
 
 /** Efecto de sus estados en la velocidad: 0,7 ralentizado, 0 aturdido. */
@@ -197,15 +198,15 @@ export function chargingNova(c: CombatState): boolean {
   return a?.id === "nova" && a.rank >= 3 && a.impacts.length > 0;
 }
 
-/** ¿Está girando con el Torbellino largo (rango 3)? Mientras tanto se mueve más despacio. */
+/** ¿Está girando con el Torbellino largo (rango 3)? Mientras tanto recibe menos daño. */
 export function spinning(c: CombatState): boolean {
   const a = c.abilityAnim;
   return a?.id === "whirlwind" && a.rank >= 3 && a.impacts.length > 0;
 }
 
-/** Lo que frenan las habilidades en curso: la Nova larga cargando y el Torbellino largo girando. */
+/** Lo que frenan las habilidades en curso: la Nova larga cargando. */
 export function channelSpeedMult(c: CombatState): number {
-  return (chargingNova(c) ? NOVA_CHARGE_MOVE_MULT : 1) * (spinning(c) ? WHIRL_MOVE_MULT : 1);
+  return chargingNova(c) ? NOVA_CHARGE_MOVE_MULT : 1;
 }
 
 /** Velocidad de movimiento efectiva: la de sus cartas, lo que frenen sus habilidades en curso y sus estados. */
