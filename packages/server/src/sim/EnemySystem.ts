@@ -1,5 +1,6 @@
 import {
   ARMED_CHANCE,
+  DRAGON,
   ELEMENTS,
   ELITE,
   ENEMY_BUFF,
@@ -41,6 +42,7 @@ import {
   type CasterTier,
 } from "@roguelike/shared";
 import { beamLength, inBeam, inZone, type Hazard } from "./hazards";
+import { newBossState, stepDragon, stripHits, type BossState, type DragonHit } from "./dragon";
 
 export type EnemyAi = "idle" | "chase" | "telegraph" | "recover" | "dead";
 
@@ -94,6 +96,8 @@ export interface Enemy {
   iceHits: number[];
   /** multiplicador de daño de sus golpes y proyectiles, fijado al crearlo (escalado) */
   damageMult: number;
+  /** el jefe: su ataque en curso y su furia; null en los demás */
+  boss: BossState | null;
 }
 
 export interface Projectile {
@@ -216,6 +220,7 @@ export class EnemySystem {
   private statusDamage: { key: string; result: StrikeResult }[] = [];
   private chains: { points: [number, number][] }[] = [];
   private events: CombatEvent[] = [];
+  private pushes: { targetKey: string; fromX: number; fromZ: number; m: number }[] = [];
 
   constructor(
     private readonly dungeon: Dungeon,
@@ -322,10 +327,30 @@ export class EnemySystem {
       id: `e${this.nextEnemy++}`, kind, roomId, x, z, facing: 0,
       hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
       loadout, spellTier, stunned: 0, frozen: 0, freezeImmune: 0, elite: isElite, nature, casts: 0, spell: kind, burn: null, slow: null, marked: 0, bladeMark: 0, buffLeft: 0, buffCd: ENEMY_BUFF.everyS / 2, support: null, iceHits: [],
-      damageMult,
+      damageMult, boss: null,
     };
     this.list.push(e);
     return e;
+  }
+
+  /**
+   * El jefe del piso en (x, z), con la vida y el multiplicador de daño dados (`dragonHp`, `dragonDamageMult`).
+   * Sin sala ni sorteos: no consume RNG.
+   */
+  spawnBoss(x: number, z: number, hp: number, damageMult: number, scale?: { tempo: number; armor: number }): Enemy {
+    const e: Enemy = {
+      id: `e${this.nextEnemy++}`, kind: "dragon", roomId: -1, x, z, facing: 0,
+      hp, maxHp: hp, ai: "chase", aiTime: 0, targetKey: null, cooldown: 0,
+      loadout: null, spellTier: 0, stunned: 0, frozen: 0, freezeImmune: 0, elite: false, nature: "none", casts: 0, spell: "dragon", burn: null, slow: null, marked: 0, bladeMark: 0, buffLeft: 0, buffCd: 0, support: null, iceHits: [],
+      damageMult, boss: newBossState(scale),
+    };
+    this.list.push(e);
+    return e;
+  }
+
+  /** El jefe vivo, si hay. */
+  boss(): Enemy | undefined {
+    return this.list.find((e) => e.boss !== null && e.ai !== "dead");
   }
 
   /** Sortea si va armado (`ARMED_CHANCE`) y, si lo va, el tier según el reloj del piso. */
@@ -425,6 +450,11 @@ export class EnemySystem {
         e.stunned = e.stunned - dt > STUN_EPS ? e.stunned - dt : 0;
         continue;
       }
+      if (e.boss) {
+        if (this.frozen && e.boss.move === null) continue;
+        this.stepBoss(e, alive, dt, hits);
+        continue;
+      }
       if (this.frozen && e.ai !== "telegraph") continue;
       this.stepEnemy(e, alive, dt, hits);
     }
@@ -433,6 +463,57 @@ export class EnemySystem {
     this.stepProjectiles(alive, dt, hits);
     this.stepHazards(alive, dt, hits);
     return hits;
+  }
+
+  /** El jefe: su cerebro (dragon.ts) con el jugador vivo más cercano como objetivo; sus golpes de fuego queman. */
+  private stepBoss(e: Enemy, alive: readonly SimPlayer[], dt: number, hits: EnemyHit[]): void {
+    const boss = e.boss!;
+    const target = this.nearest(e, alive);
+    e.targetKey = target?.key ?? null;
+    const body = {
+      id: e.id, x: e.x, z: e.z, facing: e.facing, hp: e.hp, maxHp: e.maxHp, damageMult: e.damageMult,
+      slowFrac: e.slow?.frac ?? 0, cooldown: e.cooldown, boss,
+    };
+    const radius = ENEMY_DEFS[e.kind].radius;
+    const dragonHits = stepDragon(body, alive, target, dt, {
+      dungeon: this.dungeon,
+      addHazard: (h) => {
+        const id = `h${this.nextHazard++}`;
+        this.hazardList.push({ id, ...h });
+        return id;
+      },
+      removeHazard: (id) => {
+        this.hazardList = this.hazardList.filter((h) => h.id !== id);
+      },
+      hazard: (id) => this.hazardList.find((h) => h.id === id),
+      move: (dx, dz, len) => {
+        this.moveEnemy(e, dx, dz, len, radius);
+        body.x = e.x;
+        body.z = e.z;
+      },
+      place: (x, z) => {
+        e.x = body.x = x;
+        e.z = body.z = z;
+      },
+      setAnim: (ai) => this.setAi(e, ai),
+      enraged: () => this.events.push({ type: "boss", phase: "enraged", x: e.x, z: e.z }),
+    });
+    e.facing = body.facing;
+    e.cooldown = body.cooldown;
+    for (const h of dragonHits) hits.push(this.bossHit(e, h));
+  }
+
+  /** Golpe del dragón como golpe de enemigo: lo de fuego quema (elemento fuego) y el pisotón aparta. */
+  private bossHit(e: Enemy, h: DragonHit): EnemyHit {
+    const hit: EnemyHit = { targetKey: h.targetKey, damage: h.damage, sourceId: e.id, sourceX: h.sourceX, sourceZ: h.sourceZ };
+    if (h.burnDps !== undefined) Object.assign(hit, { nature: "fire", burnDps: h.burnDps, element: "fire" });
+    if (h.push) this.pushes.push({ targetKey: h.targetKey, fromX: e.x, fromZ: e.z, m: h.push });
+    return hit;
+  }
+
+  /** Empujones a jugadores (el pisotón del dragón) desde la última llamada: alejan a `targetKey` de (fromX, fromZ). */
+  takePushes(): { targetKey: string; fromX: number; fromZ: number; m: number }[] {
+    return this.pushes.splice(0);
   }
 
   /** Avanza la quemadura (daño por tick), la ralentización y la inmunidad al congelamiento. */
@@ -453,7 +534,7 @@ export class EnemySystem {
     if (burn.left <= STATUS_EPS) e.burn = null;
     const amount = burn.dps * span;
     const r = this.damage(e.id, amount);
-    this.statusDamage.push({ key: burn.ownerKey, result: { ...r, enemyId: e.id, amount } });
+    this.statusDamage.push({ key: burn.ownerKey, result: { ...r, enemyId: e.id, amount: this.taken(e, amount) } });
   }
 
   /** Recalcula el flujo solo si cambió el conjunto de casillas de los jugadores vivos. */
@@ -613,6 +694,25 @@ export class EnemySystem {
     const keep: Hazard[] = [];
     for (const h of this.hazardList) {
       const owner = this.list.find((e) => e.id === h.sourceId);
+      if (h.kind === "arc" || h.kind === "cone" || h.kind === "ring" || (h.kind === "strip" && h.phase === "warn")) {
+        // Los avisos y el lanzallamas del dragón: los quita él al terminar el ataque; sin él (muerto), se van.
+        if (!owner || owner.ai === "dead") continue;
+        h.left = Math.max(0, h.left - dt);
+        keep.push(h);
+        continue;
+      }
+      if (h.kind === "strip") {
+        // Franja de fuego: arde a pulsos sobre el tramo ya quemado hasta que se apaga (aunque el dragón muera).
+        h.left -= dt;
+        h.tickLeft = (h.tickLeft ?? 0) - dt;
+        if (h.tickLeft <= 0) {
+          h.tickLeft += DRAGON.flyby.tickS;
+          const owner2 = owner ?? this.list.find((e) => e.kind === "dragon");
+          for (const dh of stripHits(h, alive)) hits.push(owner2 ? this.bossHit(owner2, dh) : { targetKey: dh.targetKey, damage: dh.damage, sourceId: h.sourceId, sourceX: dh.sourceX, sourceZ: dh.sourceZ, element: "fire" });
+        }
+        if (h.left > 0) keep.push(h);
+        continue;
+      }
       if (h.kind === "beam" && h.phase === "warn") {
         // Aviso huérfano (aturdido, muerto o fuera de telegrafía sin disparar): se quita.
         if (!owner || owner.ai !== "telegraph") continue;
@@ -797,9 +897,10 @@ export class EnemySystem {
         const d = Math.hypot(dx, dz);
         const nx = d > 0 ? dx / d : 1;
         const nz = d > 0 ? dz / d : 0;
-        const push = (ra + rb - d) / 2 + SEPARATION_EPS;
-        this.moveEnemy(a, -nx, -nz, push, ra);
-        this.moveEnemy(b, nx, nz, push, rb);
+        // El jefe no cede: el otro se aparta todo.
+        const push = (ra + rb - d) / (a.boss || b.boss ? 1 : 2) + SEPARATION_EPS;
+        if (!a.boss) this.moveEnemy(a, -nx, -nz, push, ra);
+        if (!b.boss) this.moveEnemy(b, nx, nz, push, rb);
       }
     }
   }
@@ -897,6 +998,8 @@ export class EnemySystem {
    */
   strike(enemyId: string, amount: number, src: StrikeSource): StrikeResult[] {
     const e = this.list.find((x) => x.id === enemyId);
+    // En vuelo, el dragón no recibe el golpe ni sus efectos (y no se muestra un 0).
+    if (e?.boss?.airborne) return [{ ...this.damage(enemyId, 0), enemyId, amount: 0 }];
     // Con las tres naturalezas, cada efecto es el de la suya (quema como fuego, frena como hielo, salta como rayo).
     const fx = src.allNatures
       ? ELEMENTS.map((n) => natureEffects(n, src.affinity)).reduce((a, b) => ({
@@ -906,7 +1009,7 @@ export class EnemySystem {
     // Se sortea antes del daño para que el orden de la RNG no dependa de si hay arma que soltar.
     const chain = fx.chainChance > 0 && this.rng.next() < fx.chainChance;
     const r = this.damage(enemyId, amount);
-    const out: StrikeResult[] = [{ ...r, enemyId, amount }];
+    const out: StrikeResult[] = [{ ...r, enemyId, amount: e?.boss ? Math.round(this.taken(e, amount)) : amount }];
     if (!e) return out;
     if (e.ai !== "dead") {
       if (fx.burnFrac > 0) {
@@ -957,15 +1060,22 @@ export class EnemySystem {
   knockback(enemyId: string, dirX: number, dirZ: number, m: number): void {
     const e = this.list.find((x) => x.id === enemyId);
     const len = Math.hypot(dirX, dirZ);
-    if (!e || e.ai === "dead" || len === 0) return;
+    // El jefe no se deja empujar ni atraer.
+    if (!e || e.ai === "dead" || len === 0 || e.boss) return;
     this.moveEnemy(e, dirX / len, dirZ / len, m, ENEMY_DEFS[e.kind].radius);
+  }
+
+  /** Daño que de verdad recibe: el jefe ignora la fracción `armor` de su piso. */
+  private taken(e: Enemy, amount: number): number {
+    return e.boss ? amount * (1 - e.boss.armor) : amount;
   }
 
   /** Si el id no existe devuelve x: 0, z: 0: el llamador solo debe usar la posición cuando `killed`. */
   damage(enemyId: string, amount: number): EnemyDamageResult {
     const e = this.list.find((x) => x.id === enemyId);
-    if (!e || e.ai === "dead") return { killed: false, xp: 0, x: e?.x ?? 0, z: e?.z ?? 0, drop: null, gear: null, relic: false };
-    e.hp = Math.max(0, e.hp - amount);
+    // El dragón en vuelo no recibe daño.
+    if (!e || e.ai === "dead" || e.boss?.airborne) return { killed: false, xp: 0, x: e?.x ?? 0, z: e?.z ?? 0, drop: null, gear: null, relic: false };
+    e.hp = Math.max(0, e.hp - this.taken(e, amount));
     if (e.hp > 0) return { killed: false, xp: 0, x: e.x, z: e.z, drop: null, gear: null, relic: false };
     this.setAi(e, "dead");
     e.burn = null;

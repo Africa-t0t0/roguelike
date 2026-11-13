@@ -117,6 +117,11 @@ export const EnemyState = schema(
     /** élite, con su naturaleza ("none" si no lo es) */
     elite: t.boolean(),
     nature: t.string(),
+    /** el jefe: ataque en curso ("" entre ataques), su tramo ("warn" | "act" | "land"), si vuela y si está furioso */
+    bossMove: t.string(),
+    bossStage: t.string(),
+    airborne: t.boolean(),
+    enraged: t.boolean(),
   },
   "EnemyState",
 );
@@ -135,7 +140,7 @@ export type PlayerShotState = SchemaType<typeof PlayerShotState>;
 /** Peligro de un hechicero: zona (círculo) o rayo, en aviso o ya activo. */
 export const HazardState = schema(
   {
-    /** "zone" | "beam" */
+    /** "zone" | "beam" | "arc" | "cone" | "ring" | "strip" (ver `Hazard`) */
     kind: t.string(),
     x: t.number(),
     z: t.number(),
@@ -196,8 +201,12 @@ export const RunState = schema(
     playerZones: t.map(PlayerZoneState),
     /** el grupo está eligiendo cartas: la simulación no avanza */
     paused: t.boolean(),
-    /** La partida ya empezó (un jugador cruzó los sellos de la sala inicial). Una vez true no vuelve a false. */
+    /** El piso ya empezó (un jugador cruzó los sellos de su sala inicial); vuelve a false al bajar de piso. */
     started: t.boolean(),
+    /** tótem de la sala del jefe: dónde está y su fase (`TotemPhase`: "idle" | "fight" | "open") */
+    totemX: t.number(),
+    totemZ: t.number(),
+    totemPhase: t.string(),
     /** segundos que quedan de la elección en curso de la pausa */
     pauseLeft: t.number(),
   },

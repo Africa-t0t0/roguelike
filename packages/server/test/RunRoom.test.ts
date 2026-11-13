@@ -2125,3 +2125,77 @@ describe("RunRoom: sandbox", () => {
     await ticksUntil(() => room.state.hazards.size === 0, Math.ceil(left * 30) + 10);
   });
 });
+
+describe("RunRoom: tótem, jefe y pisos", () => {
+  const press = (seq: number) => ({ ...attackInput(seq, 0, room.state.tick), attack: false, interact: true });
+
+  it("el tótem está dormido en el centro de la sala del jefe", () => {
+    const d = generateDungeon(SEED, 1);
+    const b = d.rooms[d.bossRoomId]!;
+    const { totemX, totemZ, totemPhase } = room.state;
+    expect(totemPhase).toBe("idle");
+    expect(tileOf(totemX)).toBeGreaterThanOrEqual(b.x);
+    expect(tileOf(totemX)).toBeLessThan(b.x + b.w);
+    expect(tileOf(totemZ)).toBeGreaterThanOrEqual(b.z);
+    expect(tileOf(totemZ)).toBeLessThan(b.z + b.h);
+  });
+
+  it("con el jefe muerto ya no salen oleadas en ese piso", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const { totemX, totemZ } = room.state;
+    teleport("ana", { x: totemX, z: totemZ - 1 });
+    ana.client.send(MSG.input, press(1));
+    await ticksUntil(() => room.state.totemPhase === "fight", 10);
+    const boss = room["enemySystem"].boss()!;
+    room["enemySystem"].damage(boss.id, boss.hp);
+    await ticksUntil(() => room.state.totemPhase === "open", 5);
+    room["floorTime"] = 600;
+    for (let i = 0; i < 20; i++) await room.waitForNextTimestep();
+    expect(room["enemySystem"].enemies.filter((e) => e.ai !== "dead")).toHaveLength(0);
+  });
+
+  it("activarlo invoca al dragón; al matarlo se abre y deja un cofre; usarlo abierto baja al piso 2", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const events = collect(ana.client);
+    const { totemX, totemZ } = room.state;
+    teleport("ana", { x: totemX, z: totemZ - 1 });
+    ana.client.send(MSG.input, press(1));
+    await ticksUntil(() => room.state.totemPhase === "fight", 10);
+    const boss = room["enemySystem"].boss()!;
+    expect(boss.kind).toBe("dragon");
+    // Del lado opuesto a Ana: más allá del tótem.
+    expect(boss.z).toBeGreaterThan(totemZ);
+    const chests = room.state.chests.size;
+    room["enemySystem"].damage(boss.id, boss.hp);
+    await ticksUntil(() => room.state.totemPhase === "open", 5);
+    expect(room.state.chests.size).toBe(chests + 1);
+    await ticksUntil(() => events.some((e) => e.type === "boss" && e.phase === "down"), 10);
+    room["floorTime"] = 200;
+    ana.client.send(MSG.input, press(2));
+    await ticksUntil(() => room.state.floor === 2, 10);
+    const d2 = generateDungeon(SEED, 2);
+    const start = d2.rooms[d2.startRoomId]!;
+    // El reloj sigue: la dificultad no vuelve a la del principio.
+    expect(room.state).toMatchObject({ totemPhase: "idle", started: false });
+    expect(room.state.floorTime).toBeGreaterThanOrEqual(200);
+    expect(tileOf(record("ana").kinematic.x)).toBeGreaterThanOrEqual(start.x);
+    expect(tileOf(record("ana").kinematic.x)).toBeLessThan(start.x + start.w);
+    expect(room["enemySystem"].enemies).toHaveLength(0);
+    expect(record("ana").floorWeapons).toHaveLength(0);
+  });
+
+  it("con el tótem en pelea, interactuar no hace nada", async () => {
+    const ana = await join("Ana", "t-ana");
+    await ana.welcome;
+    const { totemX, totemZ } = room.state;
+    teleport("ana", { x: totemX, z: totemZ - 1 });
+    ana.client.send(MSG.input, press(1));
+    await ticksUntil(() => room.state.totemPhase === "fight", 10);
+    ana.client.send(MSG.input, press(2));
+    for (let i = 0; i < 5; i++) await room.waitForNextTimestep();
+    expect(room["enemySystem"].enemies.filter((e) => e.kind === "dragon")).toHaveLength(1);
+    expect(room.state.floor).toBe(1);
+  });
+});

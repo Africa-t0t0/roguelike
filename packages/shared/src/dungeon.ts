@@ -30,6 +30,8 @@ const MAX_SIZE = 9;
 const MIN_GAP = 2;
 const MAX_ATTEMPTS = 500;
 const GROW_STEP = 8;
+/** La sala del jefe crece hasta este lado (casillas) para que el dragón tenga espacio. */
+export const BOSS_ROOM_MIN = 11;
 
 type Rect = { x: number; z: number; w: number; h: number };
 
@@ -174,8 +176,46 @@ export function generateDungeon(seed: number, floor: number): Dungeon {
   }
   rooms[0]!.kind = "start";
   rooms[bossRoomId]!.kind = "boss";
+  growBossRoom(tiles, size, rooms[bossRoomId]!, rooms);
 
   return { seed, floor, width: size, height: size, tiles, rooms, startRoomId: 0, bossRoomId };
+}
+
+/**
+ * Agranda la sala del jefe hacia `BOSS_ROOM_MIN` de lado, una casilla por lado y vuelta, mientras siga dentro del
+ * mapa (con su borde de muro) y a `MIN_GAP` de las demás salas. Queda tan grande como quepa.
+ */
+function growBossRoom(tiles: Uint8Array, size: number, boss: DungeonRoom, rooms: readonly DungeonRoom[]): void {
+  const others = rooms.filter((r) => r !== boss);
+  const fits = (r: Rect) => r.x >= 1 && r.z >= 1 && r.x + r.w <= size - 1 && r.z + r.h <= size - 1 && others.every((o) => !tooClose(o, r));
+  const steps: ((r: Rect) => Rect)[] = [
+    (r) => ({ ...r, x: r.x - 1, w: r.w + 1 }),
+    (r) => ({ ...r, w: r.w + 1 }),
+    (r) => ({ ...r, z: r.z - 1, h: r.h + 1 }),
+    (r) => ({ ...r, h: r.h + 1 }),
+  ];
+  let cur: Rect = { x: boss.x, z: boss.z, w: boss.w, h: boss.h };
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [i, step] of steps.entries()) {
+      if ((i < 2 ? cur.w : cur.h) >= BOSS_ROOM_MIN) continue;
+      const next = step(cur);
+      if (!fits(next)) continue;
+      cur = next;
+      grew = true;
+    }
+  }
+  carveRoom(tiles, size, cur);
+  Object.assign(boss, cur);
+}
+
+/** Centro (m) de una sala: el de su casilla central. */
+export function roomCenterPoint(d: Dungeon, roomId: number): { x: number; z: number } {
+  const room = d.rooms[roomId];
+  if (!room) throw new Error(`roomCenterPoint: sala ${roomId} inexistente`);
+  const c = center(room);
+  return tileCenter(c.x, c.z);
 }
 
 export function isWalkableTile(d: Dungeon, tx: number, tz: number): boolean {

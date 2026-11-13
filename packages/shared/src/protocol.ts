@@ -4,7 +4,7 @@ import type { Nature } from "./natures";
 import { NAME_MAX_LEN } from "./constants";
 
 /** Sube cuando cambia el protocolo; el servidor rechaza versiones distintas. */
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 export interface JoinOptions {
   name: string;
@@ -74,4 +74,6 @@ export type CombatEvent =
   /** Sanación: a quiénes curó */
   | { type: "heal"; keys: string[] }
   /** salto del rayo: puntos [x, z] de la cadena, del golpeado a los siguientes blancos */
-  | { type: "chain"; points: [number, number][] };
+  | { type: "chain"; points: [number, number][] }
+  /** el jefe aparece (`awake`), se enfurece (`enraged`) o cae (`down`) en (x, z) */
+  | { type: "boss"; phase: "awake" | "enraged" | "down"; x: number; z: number };

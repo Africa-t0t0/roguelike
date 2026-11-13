@@ -13,13 +13,14 @@ export type AssetId =
   | "great-sword"
   | "wall"
   | "floor"
-  | "pillar";
+  | "pillar"
+  | "dragon";
 
 export interface Assets {
   container(id: AssetId): AssetContainer;
 }
 
-/** Rutas dentro de `public/assets/` (mazmorra KayKit y armas Quaternius CC0, Kingslayer CC BY 4.0, Mixamo; ver CREDITS.md). */
+/** Rutas dentro de `public/assets/` (mazmorra KayKit y armas Quaternius CC0, Kingslayer CC BY 4.0, Mixamo, dragón CC BY; ver CREDITS.md). */
 const PATHS: Record<AssetId, string> = {
   kingslayer: "mixamo/characters/kingslayer.glb",
   brute: "mixamo/characters/brute.glb",
@@ -31,6 +32,7 @@ const PATHS: Record<AssetId, string> = {
   wall: "kaykit/dungeon/wall.glb",
   floor: "kaykit/dungeon/floor_tile_large.glb",
   pillar: "kaykit/dungeon/pillar.glb",
+  dragon: "bosses/dragon.glb",
 };
 
 /** Carga todos los modelos una vez en contenedores de `scene`; se liberan al desechar la escena. */

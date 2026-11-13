@@ -34,6 +34,8 @@ export const SANDBOX_COOLDOWN_MULT = 0.01;
  * - `relic`: equipa esa reliquia.
  * - `class`: cambia de rol: arma de partida de ese rol y sin habilidades (las cartas de stat se conservan).
  * - `weapon`: equipa el arma con su tier y naturaleza (`"none"` si no se indica).
+ * - `boss`: invoca al dragón delante del jugador (como si activara el tótem: el tótem pasa a pelea).
+ * - `nextFloor`: baja al piso siguiente sin pelear.
  */
 export type DevCommand =
   | { cmd: "levelUp"; count: number; choose: boolean }
@@ -53,7 +55,9 @@ export type DevCommand =
   | { cmd: "weapon"; weaponId: WeaponId; tier: WeaponTier; nature: Nature }
   | { cmd: "gear"; slot: GearSlot; tier: WeaponTier; action: "equip" | "drop" }
   | { cmd: "relic"; id: RelicId }
-  | { cmd: "class"; cls: ClassId };
+  | { cmd: "class"; cls: ClassId }
+  | { cmd: "boss" }
+  | { cmd: "nextFloor" };
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -91,9 +95,12 @@ export function parseDevCommand(raw: unknown): DevCommand | null {
     case "killAll":
     case "castNow":
     case "chest":
+    case "boss":
+    case "nextFloor":
       return { cmd: m.cmd };
     case "spawn": {
-      if (!has(ENEMY_DEFS, m.kind) || !isInt(m.count, 1, SANDBOX_MAX_SPAWN) || !isInt(m.tier, 0, 3)) return null;
+      // El dragón no se crea suelto: tiene su comando (`boss`).
+      if (!has(ENEMY_DEFS, m.kind) || m.kind === "dragon" || !isInt(m.count, 1, SANDBOX_MAX_SPAWN) || !isInt(m.tier, 0, 3)) return null;
       const spawn: DevCommand = { cmd: "spawn", kind: m.kind as EnemyKind, count: m.count, tier: m.tier as 0 | CasterTier };
       if (m.elite !== undefined) {
         if (typeof m.elite !== "boolean") return null;

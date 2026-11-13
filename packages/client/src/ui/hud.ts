@@ -193,6 +193,11 @@ const TIP_KEY = "Tab";
  * muerte con la cuenta regresiva. Bajo las barras, 5 iconos de equipo (casco, pechera, guantes, botas y reliquia) con el borde
  * del color del tier: los vacíos tenues; el tooltip (nombre, stats y efecto) sale al pasar el mouse o con Tab mantenido. El reloj del piso lo muestra la brújula (`Compass`).
  */
+/** Nombre del jefe en su barra: el dragón del piso y, con furia, enfurecido. */
+export function bossTitle(floor: number, enraged: boolean): string {
+  return `${enraged ? "Dragón enfurecido" : "Dragón"} · piso ${floor}`;
+}
+
 export class Hud {
   private readonly root = document.createElement("div");
   private readonly weapon: HTMLDivElement;
@@ -207,6 +212,9 @@ export class Hud {
   private readonly xpText: HTMLDivElement;
   private readonly level: HTMLDivElement;
   private readonly banner: HTMLDivElement;
+  private readonly bossBar: HTMLDivElement;
+  private readonly bossFill: HTMLDivElement;
+  private readonly bossName: HTMLDivElement;
   private readonly death: HTMLDivElement;
   private readonly card: HTMLDivElement;
   private bannerTimer: ReturnType<typeof setTimeout> | undefined;
@@ -264,6 +272,11 @@ export class Hud {
     window.addEventListener("blur", this.onBlur);
     this.banner = div("hud-banner", this.root);
     this.banner.hidden = true;
+    this.bossBar = div("boss-bar", this.root);
+    this.bossName = div("boss-name", this.bossBar);
+    const bossTrack = div("boss-track", this.bossBar);
+    this.bossFill = div("boss-fill", bossTrack);
+    this.bossBar.hidden = true;
     this.death = div("hud-death", this.root);
     this.death.hidden = true;
     parent.append(this.root);
@@ -387,10 +400,25 @@ export class Hud {
   }
 
   levelUp(level: number): void {
-    this.banner.textContent = `¡Nivel ${level}!`;
+    this.announce(`¡Nivel ${level}!`);
+  }
+
+  /** Aviso grande en el centro, unos segundos (subir de nivel, el jefe, el piso nuevo). */
+  announce(text: string, ms = LEVEL_BANNER_MS): void {
+    this.banner.textContent = text;
     this.banner.hidden = false;
     clearTimeout(this.bannerTimer);
-    this.bannerTimer = setTimeout(() => (this.banner.hidden = true), LEVEL_BANNER_MS);
+    this.bannerTimer = setTimeout(() => (this.banner.hidden = true), ms);
+  }
+
+  /** Barra del jefe arriba de la pantalla, con su nombre; sin jefe vivo, oculta. */
+  setBoss(b: { hp: number; maxHp: number; enraged: boolean; floor: number } | null): void {
+    this.bossBar.hidden = !b;
+    if (!b) return;
+    this.bossFill.style.width = `${clamp01(b.hp / b.maxHp) * 100}%`;
+    const name = bossTitle(b.floor, b.enraged);
+    if (this.bossName.textContent !== name) this.bossName.textContent = name;
+    this.bossBar.classList.toggle("boss-enraged", b.enraged);
   }
 
   /** Con el panel de cartas a la vista, el aviso "¡Nivel N!" no se le encima (ni asoma detrás). */

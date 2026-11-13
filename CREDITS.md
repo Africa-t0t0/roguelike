@@ -22,3 +22,9 @@ que usa el juego; los FBX y los packs completos de Mixamo no se redistribuyen.
 - **Medieval Weapons Pack**, de Quaternius (<https://quaternius.com/packs/medievalweapons.html>), licencia CC0:
   `Sword.glb` → `weapons/guard-sword.glb` y `Claymore.glb` → `weapons/great-sword.glb`, recentrados y orientados.
   Descargados de <https://github.com/trebeljahr/quaternius-showcase>.
+
+## Jefe (`packages/client/public/assets/bosses/`)
+
+- **Low Poly Dragon**, de bocdagla (<https://bocdagla.itch.io/low-poly-dragon>), licencia Creative Commons
+  Attribution (el autor pide solo dar crédito): `Dragon2.glb` → `dragon.glb` y sus cuatro paletas →
+  `dragon-palette-0..3.png` (una por piso, en ciclo). Sin modificar.

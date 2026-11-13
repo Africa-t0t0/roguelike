@@ -28,6 +28,7 @@ const KIND_NAMES: Record<EnemyKind, string> = {
   pyromancer: "Piromante",
   stormcaller: "Invocador del rayo",
   healer: "Curandero",
+  dragon: "Dragón",
 };
 
 /** Nombre del élite: "Bruto de hielo", "Piromante del rayo"… */

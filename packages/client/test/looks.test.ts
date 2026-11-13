@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ABILITIES, ARMED_CHANCE, MOVESETS, WEAPONS, type EnemyKind, type WeaponId } from "@roguelike/shared";
 import { chooseEnemyAnim } from "../src/render/animState";
-import { allClipIds, ENEMY_LOOKS, PLAYER_LOOK, WEAPON_LOOKS } from "../src/render/looks";
+import { allClipIds, ENEMY_LOOKS, PLAYER_LOOK, WEAPON_LOOKS, type LookKind } from "../src/render/looks";
 
 /** Nombres de los clips en `public/assets/mixamo/anims/` (solo las rutas: nada se carga). */
 const ANIM_FILES = Object.keys(import.meta.glob("../public/assets/mixamo/anims/*.glb")).map((f) =>
@@ -37,7 +37,7 @@ describe("looks", () => {
 
   it("alturas y clips de los enemigos según el plan", () => {
     expect(PLAYER_LOOK).toEqual({ asset: "kingslayer", height: 1.8 });
-    const expected: Record<EnemyKind, [string, number, string[]]> = {
+    const expected: Record<LookKind, [string, number, string[]]> = {
       brute: ["brute", 2.4, ["cr_idle", "cr_run", "cr_swiping", "gs_impact", "cr_dying"]],
       minion: ["minion", 1.7, ["cr_idle_2", "cr_run", "cr_punch", "gs_impact_4", "cr_dying"]],
       mage: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
@@ -46,7 +46,7 @@ describe("looks", () => {
       healer: ["mage", 2.2, ["mg_idle", "cr_walking", "mg_attack", "gs_impact_2", "gs_death"]],
     };
     for (const [kind, [asset, height, clips]] of Object.entries(expected)) {
-      const look = ENEMY_LOOKS[kind as EnemyKind];
+      const look = ENEMY_LOOKS[kind as LookKind];
       expect(look.asset).toBe(asset);
       expect(look.height).toBe(height);
       const c = look.clips;
@@ -57,7 +57,7 @@ describe("looks", () => {
   it("todo clip que puede elegir chooseEnemyAnim, armado o no, está en allClipIds y en public/", () => {
     const ids = allClipIds();
     const ais = ["idle", "chase", "telegraph", "recover", "dead"];
-    for (const kind of Object.keys(ENEMY_LOOKS) as EnemyKind[]) {
+    for (const kind of Object.keys(ENEMY_LOOKS) as LookKind[]) {
       const weapons: (WeaponId | null)[] = [null];
       const armed = ARMED_CHANCE[kind];
       if (armed) weapons.push(armed.weaponId);

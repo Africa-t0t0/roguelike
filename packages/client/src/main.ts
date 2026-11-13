@@ -34,6 +34,8 @@ import {
   type GearSlot,
   type KinematicState,
   type LegendaryId,
+  roomCenterPoint,
+  type TotemPhase,
 } from "@roguelike/shared";
 import { InputState } from "./input/InputState";
 import { Sfx } from "./audio/sfx";
@@ -60,7 +62,10 @@ import { createScene } from "./render/createScene";
 import { damageTiming } from "./render/damageTiming";
 import { buildDungeonMeshes } from "./render/dungeonMeshes";
 import { ENEMY_BUFF_COLOR, EnemyViews } from "./render/enemyViews";
-import { FloorWeaponViews } from "./render/floorWeaponViews";
+import { descendPrompt, FloorWeaponViews, WAKE_TOTEM_PROMPT } from "./render/floorWeaponViews";
+import { BossHazardViews } from "./render/bossHazardViews";
+import { DragonViews } from "./render/dragonViews";
+import { TotemView } from "./render/totemView";
 import { DamageNumbers, HurtFlash } from "./render/fx";
 import { CorrectionSmoother, lerpAngle, lerpSnapshot } from "./render/interpolation";
 import { createTorches } from "./render/lighting";
@@ -101,6 +106,8 @@ const HIT_STOP_MS = { min: 30, max: 85 } as const;
 const HIT_SHAKE = { durationS: 0.1, min: 0.01, max: 0.06 } as const;
 /** Con mando o táctil y el stick derecho suelto, el Golpe sísmico salta esta fracción de su alcance. */
 const STICK_LEAP_FRAC = 0.6;
+/** Avisos del jefe (despierta, se enfurece, cae): más largos que el de subir de nivel. */
+const BOSS_BANNER_MS = 2600;
 /** El chispazo del golpe sale a esta fracción del alto del enemigo. */
 const HIT_SPARK_HEIGHT = 0.6;
 
@@ -146,36 +153,47 @@ async function join(opts: { name: string; code?: string; cls: ClassId }): Promis
     else lobby.showConnectionLost();
   });
 
-  const scene = createScene(engine);
-  let assets: Assets;
-  const anims = new AnimLibrary(scene);
-  loading.hidden = false;
-  try {
-    [assets] = await Promise.all([loadAssets(scene), anims.load(allClipIds())]);
-  } catch (err) {
-    console.error(err);
-    scene.dispose();
-    if (!gone) {
-      gone = true;
-      conn.leave();
-      loading.hidden = true;
-      lobby.showLobby("No se pudieron cargar los modelos. Recarga la página.");
+  // Carga la escena y arranca la sesión; al bajar de piso se rehace entera con la mazmorra nueva.
+  const boot = async (): Promise<void> => {
+    const scene = createScene(engine);
+    let assets: Assets;
+    const anims = new AnimLibrary(scene);
+    loading.hidden = false;
+    try {
+      [assets] = await Promise.all([loadAssets(scene), anims.load(allClipIds())]);
+    } catch (err) {
+      console.error(err);
+      scene.dispose();
+      if (!gone) {
+        gone = true;
+        conn.leave();
+        loading.hidden = true;
+        lobby.showLobby("No se pudieron cargar los modelos. Recarga la página.");
+      }
+      return;
     }
-    return;
-  }
-  if (gone) {
-    scene.dispose();
-    return;
-  }
-  loading.hidden = true;
-  stop = startSession(conn, scene, assets, anims);
+    if (gone) {
+      scene.dispose();
+      return;
+    }
+    loading.hidden = true;
+    loading.textContent = "Cargando…";
+    stop = startSession(conn, scene, assets, anims, (floor) => {
+      stop?.();
+      stop = undefined;
+      conn.detach();
+      loading.textContent = `Bajando al piso ${floor}…`;
+      void boot();
+    });
+  };
+  await boot();
 }
 
 /**
  * Mazmorra, vistas y bucle de tiempo fijo para una conexión, sobre una escena con los modelos y
  * las animaciones ya cargados. Devuelve la función que lo desarma todo.
  */
-function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims: AnimLibrary): () => void {
+function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims: AnimLibrary, onFloor: (floor: number) => void): () => void {
   const dungeon = generateDungeon(conn.seed, conn.floor);
   const dungeonMeshes = buildDungeonMeshes(scene, dungeon, assets);
   const torches = createTorches(scene, dungeon);
@@ -183,6 +201,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   const enemies = new EnemyViews(scene, assets, anims);
   const projectiles = new ProjectileViews(scene);
   const hazards = new HazardViews(scene);
+  const bossHazards = new BossHazardViews(scene);
+  const dragons = new DragonViews(scene, assets, dungeon.floor);
+  const totemAt = roomCenterPoint(dungeon, dungeon.bossRoomId);
+  const totem = new TotemView(scene, totemAt.x, totemAt.z);
+  let totemPhase: TotemPhase = "idle";
   const banners = new BannerViews(scene);
   const spellZones = new SpellZoneViews(scene);
   const seals = new SealViews(scene, startSeals(dungeon));
@@ -225,6 +248,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
   window.addEventListener("pointerdown", onGesture);
   window.addEventListener("keydown", onGesture);
   const hud = new Hud();
+  if (dungeon.floor > 1) hud.announce(`Piso ${dungeon.floor}`, BOSS_BANNER_MS);
   const abilityBar = new AbilityBar();
   const compass = new Compass();
   const minimap = new Minimap(dungeon);
@@ -376,7 +400,16 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
 
   conn.onFloorWeapons((items) => floorWeapons.set(items, clock.now(performance.now())));
 
+  let floorChanged = false;
   conn.onWorld((world, receivedAt) => {
+    // Bajaron de piso: la sesión se rehace con la mazmorra nueva.
+    if (world.floor !== dungeon.floor) {
+      if (!floorChanged) {
+        floorChanged = true;
+        onFloor(world.floor);
+      }
+      return;
+    }
     // El parche que abre la pausa trae el último tick simulado: ese sí se interpola. Los siguientes, no.
     const wasPaused = clock.paused;
     clock.setPaused(world.paused, receivedAt);
@@ -392,8 +425,14 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     const at = clock.now(receivedAt);
     tickClock.push(at, world.tick);
     enemies.push(world, at);
+    dragons.push(world, at);
     projectiles.push(world, at);
     hazards.push(world, at);
+    bossHazards.push(world);
+    if (world.totem.phase !== totemPhase) {
+      totemPhase = world.totem.phase;
+      totem.setPhase(totemPhase);
+    }
     banners.push(world);
     spellZones.push(world, at);
     chests.push(world, at);
@@ -420,7 +459,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     } else if (event.type === "damage") {
       const t = damageTiming(event, conn.myKey, now);
       hits.hit(`${event.targetKind}:${event.targetId}`, t.hitAt);
-      const height = event.targetKind === "enemy" ? enemies.heightOf(event.targetId) : undefined;
+      const height = event.targetKind === "enemy" ? (enemies.heightOf(event.targetId) ?? dragons.heightOf(event.targetId)) : undefined;
       const weight = event.targetKind === "enemy" ? hitScale.weigh(event.amount) : 0;
       damageNumbers.spawn(event.amount, event.x, event.z, event.targetKind, t.numberAt, height, weight);
       if (t.hurtMe) {
@@ -433,6 +472,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
         const from = mineHit ? predictor?.current : event.sourceKey ? lastPlayers.get(event.sourceKey) : undefined;
         const dir = from ? Math.atan2(event.x - from.x, event.z - from.z) : undefined;
         enemies.flinch(event.targetId, t.hitAt, event.amount, dir);
+        dragons.flinch(event.targetId);
         const nature = (event.sourceKey ? lastPlayers.get(event.sourceKey)?.weaponNature : undefined) ?? "none";
         abilityFx.impact(event.x, event.z, (height ?? PLAYER_LOOK.height) * HIT_SPARK_HEIGHT, dir ?? 0, weight, t.numberAt, nature);
         // Al conectar uno mismo: el clip se clava un instante y la cámara acusa el golpe, más cuanto más pesa.
@@ -465,6 +505,19 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       for (const key of event.keys) {
         const p = key === conn.myKey ? predictor?.current : lastPlayers.get(key);
         if (p) abilityFx.healed(p.x, p.z, now);
+      }
+    } else if (event.type === "boss") {
+      if (event.phase === "awake") {
+        hud.announce("¡El dragón despierta!", BOSS_BANNER_MS);
+        camera.shake(SLAM_SHAKE.durationS * 2, SLAM_SHAKE.intensity * 1.4);
+        sfx.boom();
+      } else if (event.phase === "enraged") {
+        hud.announce("¡El dragón se enfurece!", BOSS_BANNER_MS);
+        sfx.boom();
+      } else {
+        hud.announce("¡Dragón derrotado! El tótem se abrió", BOSS_BANNER_MS);
+        camera.shake(SLAM_SHAKE.durationS * 1.5, SLAM_SHAKE.intensity);
+        sfx.levelUp();
       }
     } else if (event.type === "levelUp") {
       hud.levelUp(event.level);
@@ -573,7 +626,8 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
       torches.update(x, z, now);
       // El aviso sale con la posición predicha (la que ve el jugador); el servidor decide igual.
       const canPickUp = !(mine?.dead ?? true) && swing.swingTimer <= 0 && !heroAbility;
-      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp, gear: myGear, abilities: myAbilityIds }, now, chestList);
+      const totemPrompt = totemPhase === "idle" ? WAKE_TOTEM_PROMPT : totemPhase === "open" ? descendPrompt(dungeon.floor) : null;
+      floorWeapons.render(dt, { x: cur.x, z: cur.z, canPickUp, gear: myGear, abilities: myAbilityIds }, now, chestList, { ...totemAt, prompt: totemPrompt });
     }
 
     const renderAt = now - INTERP_DELAY_MS;
@@ -591,6 +645,11 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     compass.render(camera.yaw);
     if (predictor) minimap.render(predictor.current, camera.yaw, allies, chestList);
     enemies.render(renderAt, dt, (id) => hits.recently(`enemy:${id}`, renderAt));
+    dragons.render(renderAt, dt);
+    const boss = dragons.boss();
+    hud.setBoss(boss && boss.ai !== "dead" ? { hp: boss.hp, maxHp: boss.maxHp, enraged: boss.enraged, floor: dungeon.floor } : null);
+    bossHazards.render(now);
+    totem.render(now);
     projectiles.render(renderAt);
     hazards.render(renderAt);
     banners.render(now);
@@ -599,7 +658,7 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     chests.render(renderAt);
     chainFx.render(renderAt);
     playerShots.render(renderAt);
-    playerShots.renderLocal(now, (x, z) => !isWalkableTile(dungeon, Math.floor(x / TILE_SIZE), Math.floor(z / TILE_SIZE)), enemies.liveBodies());
+    playerShots.renderLocal(now, (x, z) => !isWalkableTile(dungeon, Math.floor(x / TILE_SIZE), Math.floor(z / TILE_SIZE)), [...enemies.liveBodies(), ...dragons.liveBodies()]);
     // Enfriamientos con el reloj de juego (quietos en la pausa); el local manda al apretar la tecla.
     abilityBar.render(
       abilityBarModel(mine?.abilities ?? [], (id) => ability.cooldownLeft(id, now), mine?.cooldownMult ?? 1, (id) => ability.chargesOf(id, now)),
@@ -609,6 +668,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     abilityFx.setPaused(paused);
     views.setPaused(paused);
     enemies.setPaused(paused);
+    dragons.setPaused(paused);
+    bossHazards.setPaused(paused);
+    totem.setPaused(paused);
     floorWeapons.setPaused(paused);
     projectiles.setPaused(paused);
     hazards.setPaused(paused);
@@ -639,6 +701,9 @@ function startSession(conn: GameConnection, scene: Scene, assets: Assets, anims:
     sfx.dispose();
     views.dispose();
     enemies.dispose();
+    dragons.dispose();
+    bossHazards.dispose();
+    totem.dispose();
     projectiles.dispose();
     hazards.dispose();
     banners.dispose();

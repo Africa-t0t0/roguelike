@@ -52,7 +52,10 @@ const MAGE_LOOK: EnemyLook = {
   clips: { idle: "mg_idle", run: "cr_walking", attack: "mg_attack", hit: "gs_impact_2", death: "gs_death" },
 };
 
-export const ENEMY_LOOKS: Record<EnemyKind, EnemyLook> = {
+/** El dragón tiene su propia vista (`DragonViews`), con su modelo y sus animaciones. */
+export type LookKind = Exclude<EnemyKind, "dragon">;
+
+export const ENEMY_LOOKS: Record<LookKind, EnemyLook> = {
   brute: {
     asset: "brute",
     height: 2.4,

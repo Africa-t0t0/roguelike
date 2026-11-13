@@ -141,6 +141,8 @@ export class HazardViews {
   push(world: WorldSnapshot, receivedAtMs: number): void {
     this.pushCracks(world);
     for (const [id, h] of world.hazards) {
+      // Los del dragón tienen su vista (`BossHazardViews`).
+      if (h.kind !== "zone" && h.kind !== "beam") continue;
       let view = this.views.get(id);
       if (view && view.data.phase !== h.phase) {
         this.disposeView(view);

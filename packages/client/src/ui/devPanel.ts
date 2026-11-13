@@ -49,7 +49,8 @@ export function devRelicOptions(): { id: RelicId; label: string }[] {
   return (Object.keys(RELICS) as RelicId[]).map((id) => ({ id, label: RELICS[id].name }));
 }
 
-const ENEMY_LABELS: Record<EnemyKind, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo", healer: "Curandero" };
+/** El dragón no se crea suelto: tiene su sección («Jefe»). */
+const ENEMY_LABELS: Record<Exclude<EnemyKind, "dragon">, string> = { minion: "Esbirro", brute: "Bruto", mage: "Mago", pyromancer: "Piromante", stormcaller: "Invocador del rayo", healer: "Curandero" };
 const TIER_LABELS = ["Desarmado", "Tier 1", "Tier 2", "Tier 3"];
 /** Etiquetas del selector "Naturaleza" y el valor que cada una manda (la primera es "ninguna"). */
 export const NATURE_LABELS = ["Sin naturaleza", "Fuego", "Hielo", "Rayo"];
@@ -120,7 +121,7 @@ export class DevPanel {
     for (const s of STATUS_BUTTONS) this.button(me, s.label, () => ({ cmd: "status", kind: s.kind }));
 
     const enemies = this.section("Enemigos");
-    const kinds = Object.keys(ENEMY_LABELS) as EnemyKind[];
+    const kinds = Object.keys(ENEMY_LABELS) as Exclude<EnemyKind, "dragon">[];
     const kindSel = this.select(enemies, kinds.map((k) => ENEMY_LABELS[k]));
     const countSel = this.select(enemies, ["1", "3", "5", "10", "20"]);
     const tierSel = this.select(enemies, TIER_LABELS);
@@ -172,6 +173,10 @@ export class DevPanel {
     const relics = devRelicOptions();
     const relicSel = this.select(gear, relics.map((r) => r.label));
     this.button(gear, "Equipar reliquia", () => ({ cmd: "relic", id: relics[relicSel.selectedIndex]!.id }));
+
+    const boss = this.section("Jefe");
+    this.button(boss, "Invocar dragón", () => ({ cmd: "boss" }));
+    this.button(boss, "Piso siguiente", () => ({ cmd: "nextFloor" }));
 
     const chest = this.section("Cofres");
     this.button(chest, "Cofre delante", () => ({ cmd: "chest" }));

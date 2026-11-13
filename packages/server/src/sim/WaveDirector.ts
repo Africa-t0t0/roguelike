@@ -26,13 +26,17 @@ interface Candidate {
 
 /** Director de oleadas: cada cierto tiempo crea un grupo de enemigos en chase, lejos de los jugadores vivos. */
 export class WaveDirector {
-  /** segundo del piso en que toca el siguiente grupo */
-  private nextAt = WAVE_FIRST_AT_S;
+  /** segundo del reloj en que toca el siguiente grupo */
+  private nextAt: number;
 
+  /** `startAt`: reloj al empezar el piso (no vuelve a 0 al bajar); el primer grupo sale `WAVE_FIRST_AT_S` después. */
   constructor(
     private readonly dungeon: Dungeon,
     private readonly rng: Rng,
-  ) {}
+    startAt = 0,
+  ) {
+    this.nextAt = startAt + WAVE_FIRST_AT_S;
+  }
 
   /** Devuelve los enemigos creados en este tick. Sin jugadores vivos no hace nada. */
   step(floorTime: number, alive: readonly SimPlayer[], playerCount: number, enemies: EnemySystem): Enemy[] {

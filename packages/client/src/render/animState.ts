@@ -1,5 +1,5 @@
-import { ABILITIES, abilityAnimS, casterTelegraphS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type EnemyKind, type WeaponId } from "@roguelike/shared";
-import { ENEMY_LOOKS, HERO_STRIDE_MPS } from "./looks";
+import { ABILITIES, abilityAnimS, casterTelegraphS, MOVESETS, WEAPONS, strikeOf, type AbilityId, type WeaponId } from "@roguelike/shared";
+import { ENEMY_LOOKS, HERO_STRIDE_MPS, type LookKind } from "./looks";
 
 /** Qué clip de animación suena, si se repite y a qué velocidad. */
 export interface AnimChoice {
@@ -32,7 +32,7 @@ export interface HeroAnimInput {
 }
 
 export interface EnemyAnimInput {
-  kind: EnemyKind;
+  kind: LookKind;
   ai: string;
   speed: number;
   hurtRecently: boolean;

@@ -14,3 +14,4 @@ export * from "./natures";
 export * from "./chests";
 export * from "./start";
 export * from "./gear";
+export * from "./boss";

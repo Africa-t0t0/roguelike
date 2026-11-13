@@ -32,7 +32,7 @@ import { eliteName, NATURE_COLORS } from "./natureLooks";
 import { CharacterView } from "./characterView";
 import { Flinches, flinchStrength } from "./flinch";
 import { lerpAngle } from "./interpolation";
-import { ENEMY_LOOKS } from "./looks";
+import { ENEMY_LOOKS, type LookKind } from "./looks";
 
 /** La barra de vida flota a esta altura sobre la cabeza de cada modelo. */
 const BAR_ABOVE_HEAD = 0.25; // m
@@ -91,7 +91,7 @@ function flatMaterial(scene: Scene, name: string, color: Color3, alpha = 1): Sta
 }
 
 interface EnemyView {
-  kind: EnemyKind;
+  kind: LookKind;
   /** estado con que se dibujó en el último cuadro */
   drawn?: EnemySnapshot;
   /** el arma no cambia en la vida del enemigo; si cambiara, la vista se rehace */
@@ -269,10 +269,12 @@ export class EnemyViews {
 
   push(world: WorldSnapshot, receivedAtMs: number): void {
     for (const [id, e] of world.enemies) {
+      // El dragón lo dibuja `DragonViews`.
+      if (e.kind === "dragon") continue;
       let view = this.views.get(id);
       if (!view || view.kind !== e.kind || view.weaponId !== e.weaponId || (isCaster(e.kind) && view.spellTier !== e.spellTier) || view.elite !== e.elite || view.nature !== e.nature) {
         if (view) this.disposeView(view);
-        view = this.create(id, e);
+        view = this.create(id, { ...e, kind: e.kind });
         this.views.set(id, view);
       }
       view.goneAtMs = undefined;
@@ -330,12 +332,12 @@ export class EnemyViews {
       // Encima del clip que sea (también la telegrafía, que sigue su curso); muerto, nada.
       const flinch = e.ai === "dead" ? undefined : this.flinches.sample(id, renderAtMs);
       view.character.setLean(flinch && !Number.isNaN(flinch.dir) ? flinch.dir : e.facing + Math.PI, flinch?.lean ?? 0);
-      view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, nature: e.weaponNature, gripScale: ENEMY_LOOKS[e.kind].gripScale });
+      view.character.setWeapon(e.weaponId, { tier: e.weaponTier ?? 1, nature: e.weaponNature, gripScale: ENEMY_LOOKS[view.kind].gripScale });
       view.character.setFrozen(e.frozen && e.ai !== "dead");
       view.character.play(
         chooseEnemyAnim(
           {
-            kind: e.kind,
+            kind: view.kind,
             ai: e.ai,
             speed: view.speed.sample(e.x, e.z, dtS),
             hurtRecently: hurt(id),
@@ -451,7 +453,7 @@ export class EnemyViews {
     applyCasterTint(character.root, kind);
   }
 
-  private create(id: string, e: EnemySnapshot): EnemyView {
+  private create(id: string, e: EnemySnapshot & { kind: LookKind }): EnemyView {
     const { kind, weaponId } = e;
     const scene = this.scene;
     const look = ENEMY_LOOKS[kind];

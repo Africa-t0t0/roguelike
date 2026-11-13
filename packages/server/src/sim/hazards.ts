@@ -1,9 +1,13 @@
 import { TILE_SIZE, isWalkableTile, type Dungeon, type Nature } from "@roguelike/shared";
 
-/** Peligro de un hechicero: zona del pirómano o rayo del tormentoso. */
+/**
+ * Peligro en el suelo: zona del pirómano o rayo del tormentoso; y los del dragón: zarpazo (`arc`: `length` de
+ * alcance y `size` grados), lanzallamas (`cone`, igual), pisotón (`ring`: `size` de radio) y franja de fuego de la
+ * pasada (`strip`: como el rayo, de `size` de ancho; en fuego se quema a medida que pasa el dragón).
+ */
 export interface Hazard {
   id: string;
-  kind: "zone" | "beam";
+  kind: "zone" | "beam" | "arc" | "cone" | "ring" | "strip";
   sourceId: string;
   /** centro de la zona u origen del rayo */
   x: number;
@@ -24,6 +28,8 @@ export interface Hazard {
   /** naturaleza del hechicero élite que lo creó y daño por segundo de la quemadura que deja */
   nature?: Nature;
   burnDps?: number;
+  /** franja de fuego: segundos hasta su siguiente pulso de daño */
+  tickLeft?: number;
 }
 
 const BEAM_SAMPLE_M = TILE_SIZE / 8;

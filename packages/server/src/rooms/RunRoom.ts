@@ -8,7 +8,15 @@ import {
   combinedMods,
   chestSpots,
   createRng,
+  dragonDamageMult,
+  dragonFloorScale,
+  dragonHp,
   ELEMENTS,
+  moveCircle,
+  PLAYER_RADIUS,
+  roomCenterPoint,
+  TOTEM_RANGE,
+  type TotemPhase,
   EMPTY_ROOM_TTL_MS,
   FLOOR_WEAPON_TTL_S,
   GEAR_SLOTS,
@@ -87,6 +95,12 @@ const LOOT_RNG_SALT = 0x10a7;
 const SANDBOX_GEAR_DROP_M = 2.5;
 /** lo que cura la carta Vitalidad al aplicarse */
 const VITALITY_HEAL = 20;
+/** El dragón aparece a esta distancia del tótem, del lado opuesto a quien lo activa. */
+const BOSS_SPAWN_M = 5;
+/** Con el comando `boss` del sandbox, a esta distancia delante del jugador. */
+const SANDBOX_BOSS_AHEAD_M = 7;
+/** Semilla de cada piso para sus sistemas: el piso 1 conserva la de siempre. */
+const floorSalt = (salt: number, floor: number): number => salt ^ Math.imul(floor - 1, 0x9e3779b1);
 /** ticks entre números de daño de la quemadura de un mismo enemigo (1 s) */
 const BURN_EVENT_TICKS = SIM_HZ;
 
@@ -137,6 +151,13 @@ export class RunRoom extends Room<{ state: RunState }> {
   private wavesOn = true;
   /** Interruptores del panel de pruebas por jugador. */
   private readonly devFlags = new Map<string, { god: boolean; noCooldown: boolean }>();
+  private seed = 0;
+  /** id del jefe vivo invocado por el tótem (o el sandbox) */
+  private bossId: string | null = null;
+  /** el jefe del piso cayó: no salen más enemigos en este piso */
+  private cleared = false;
+  /** alguien pidió bajar de piso: se hace al final del tick */
+  private descend = false;
 
   async onCreate(options: RunRoomCreateOptions = {}): Promise<void> {
     const rng = createRng(randomInt(2 ** 32));
@@ -149,22 +170,17 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.emptyRoomTtlMs = emptyRoomTtlMs;
     this.sandbox = sandbox;
     this.wavesOn = !sandbox;
-    this.dungeon = generateDungeon(seed, 1);
-    this.enemySystem = new EnemySystem(this.dungeon, createRng(seed ^ ENEMY_RNG_SALT));
-    this.director = new WaveDirector(this.dungeon, createRng(seed ^ WAVE_RNG_SALT));
-    this.orbs = new OrbSystem(createRng(seed ^ ORB_RNG_SALT));
+    this.seed = seed;
     this.levelUp = new LevelUpSystem(createRng(seed ^ CARD_RNG_SALT));
     this.chestRng = createRng(seed ^ CHEST_RNG_SALT);
     this.lootRng = createRng(seed ^ LOOT_RNG_SALT);
-    this.abilities = new AbilitySystem(this.dungeon, this.combat);
     this.floorTime = floorTimeStart;
     this.state = new RunState({
       seed, floor: 1, tick: 0, level: 1, xp: 0, xpToNext: 0, floorTime: floorTimeStart, paused: false, pauseLeft: 0,
       // El sandbox empieza ya abierto; una sala normal espera a que alguien cruce los sellos.
-      started: sandbox,
+      started: sandbox, totemX: 0, totemZ: 0, totemPhase: "idle",
     });
-    syncWorld(this.state, [], [], this.combat, []);
-    for (const spot of chestSpots(this.dungeon)) this.addChest(spot.x, spot.z);
+    this.buildFloor(1);
 
     this.autoDispose = false;
     this.setPatchRate(PATCH_RATE_MS);
@@ -419,6 +435,17 @@ export class RunRoom extends Room<{ state: RunState }> {
         this.refreshMods(record);
         c.hp = c.maxHp;
         break;
+      case "boss": {
+        if (this.enemySystem.boss()) break;
+        const k = record.kinematic;
+        const at = { x: k.x + Math.sin(k.facing) * SANDBOX_BOSS_AHEAD_M, z: k.z + Math.cos(k.facing) * SANDBOX_BOSS_AHEAD_M };
+        const m = moveCircle(this.dungeon, k.x, k.z, at.x - k.x, at.z - k.z, 1.5);
+        this.summonBoss({ x: m.x, z: m.z });
+        break;
+      }
+      case "nextFloor":
+        this.descend = true;
+        break;
       case "weapon":
         // Solo armas de su rol.
         if (WEAPONS[cmd.weaponId].cls !== c.cls) break;
@@ -427,6 +454,130 @@ export class RunRoom extends Room<{ state: RunState }> {
         c.weaponNature = cmd.nature;
         Object.assign(c, newComboTimers());
         break;
+    }
+  }
+
+  /**
+   * Mazmorra del piso `floor` y todo lo que vive en ella: enemigos, oleadas, orbes, habilidades en el suelo,
+   * cofres y el tótem dormido en el centro de la sala del jefe. Lo del grupo (nivel, cartas, equipo) no se toca.
+   */
+  private buildFloor(floor: number): void {
+    const seed = this.seed;
+    this.dungeon = generateDungeon(seed, floor);
+    this.enemySystem = new EnemySystem(this.dungeon, createRng(floorSalt(seed ^ ENEMY_RNG_SALT, floor)));
+    this.director = new WaveDirector(
+      this.dungeon,
+      createRng(floorSalt(seed ^ WAVE_RNG_SALT, floor)),
+      // En el primer piso las oleadas siguen al reloj tal cual; al bajar, el primer grupo da el respiro de siempre.
+      floor === 1 ? 0 : this.floorTime,
+    );
+    this.orbs = new OrbSystem(createRng(floorSalt(seed ^ ORB_RNG_SALT, floor)));
+    this.abilities = new AbilitySystem(this.dungeon, this.combat);
+    this.history.clear();
+    this.burnAcc.clear();
+    this.bossId = null;
+    this.cleared = false;
+    this.state.floor = floor;
+    this.state.chests.clear();
+    syncWorld(this.state, [], [], this.combat, []);
+    for (const spot of chestSpots(this.dungeon)) this.addChest(spot.x, spot.z);
+    const totem = roomCenterPoint(this.dungeon, this.dungeon.bossRoomId);
+    this.state.totemX = totem.x;
+    this.state.totemZ = totem.z;
+    this.setTotem("idle");
+  }
+
+  private setTotem(phase: TotemPhase): void {
+    this.state.totemPhase = phase;
+  }
+
+  /**
+   * Baja todo el grupo al piso siguiente: mazmorra nueva y sellos de nuevo en la sala de inicio; el reloj sigue
+   * (la dificultad no vuelve a la del principio). Los
+   * caídos vuelven con la vida que tenían al caer (se reaparece como siempre); las armas del suelo se pierden.
+   */
+  private nextFloor(): void {
+    this.buildFloor(this.state.floor + 1);
+    this.state.started = this.sandbox;
+    for (const r of this.registry.all()) {
+      r.floorWeapons = [];
+      r.combat.pendingHits = [];
+      r.combat.abilityAnim = null;
+      r.inputQueue = [];
+    }
+    // Cada uno a la sala de inicio, en orden (spawnFor mira a los aliados ya colocados).
+    for (const r of this.registry.all()) r.kinematic = this.startSpot(r.key);
+    for (const r of this.registry.connected()) {
+      const client = this.clients.find((c) => c.sessionId === r.sessionId);
+      if (client) this.sendFloorWeapons(client, r);
+    }
+  }
+
+  /** Un punto libre de la sala de inicio para `key` (no pisa a los ya colocados). */
+  private startSpot(key: string): KinematicState {
+    const others = this.registry.all().filter((r) => r.key !== key);
+    const taken = new Set(others.map((r) => `${tileOf(r.kinematic.x)},${tileOf(r.kinematic.z)}`));
+    const points = roomSpawnPoints(this.dungeon, this.dungeon.startRoomId, MAX_PLAYERS + 1);
+    return still(points.find((p) => !taken.has(`${tileOf(p.x)},${tileOf(p.z)}`)) ?? points[0]!);
+  }
+
+  /**
+   * Interactuar junto al tótem: dormido, invoca al dragón; abierto, baja el grupo al piso siguiente (al final del
+   * tick). Devuelve si lo usó (ese `interact` ya no abre cofres ni recoge).
+   */
+  private tryTotem(record: PlayerRecord): boolean {
+    const { x, z } = record.kinematic;
+    const { totemX, totemZ, totemPhase } = this.state;
+    if (Math.hypot(x - totemX, z - totemZ) > TOTEM_RANGE || totemPhase === "fight") return false;
+    if (totemPhase === "open") {
+      this.descend = true;
+      return true;
+    }
+    // Del lado opuesto a quien lo activa, si ahí hay suelo; si no, sobre el tótem.
+    const d = Math.hypot(totemX - x, totemZ - z);
+    const at = { x: totemX + (d > 0 ? (totemX - x) / d : 0) * BOSS_SPAWN_M, z: totemZ + (d > 0 ? (totemZ - z) / d : 1) * BOSS_SPAWN_M };
+    this.summonBoss(isWalkableTile(this.dungeon, tileOf(at.x), tileOf(at.z)) ? at : { x: totemX, z: totemZ });
+    return true;
+  }
+
+  /** El dragón en (x, z), escalado al grupo y al piso; el tótem pasa a pelea. */
+  private summonBoss(at: { x: number; z: number }): void {
+    const players = Math.max(1, this.registry.connected().length);
+    const floor = this.state.floor;
+    const e = this.enemySystem.spawnBoss(
+      at.x, at.z, dragonHp(players, floor, this.floorTime, this.combat.level), dragonDamageMult(floor, this.floorTime, this.combat.level),
+      dragonFloorScale(floor),
+    );
+    this.bossId = e.id;
+    this.setTotem("fight");
+    this.emit({ type: "boss", phase: "awake", x: e.x, z: e.z });
+  }
+
+  /** Tras el paso de enemigos: si el jefe cayó, el tótem se abre y deja un cofre donde murió. */
+  private checkBoss(): void {
+    if (!this.bossId) return;
+    const e = this.enemySystem.enemies.find((x) => x.id === this.bossId);
+    if (e && e.ai !== "dead") return;
+    this.bossId = null;
+    // Piso limpio: ya no salen enemigos (ni oleadas ni salas nuevas) hasta bajar.
+    this.cleared = true;
+    if (e) {
+      this.addChest(e.x, e.z);
+      this.emit({ type: "boss", phase: "down", x: e.x, z: e.z });
+    }
+    this.setTotem("open");
+  }
+
+  /** El pisotón del dragón: aparta a cada golpeado lejos de él, contra los muros. */
+  private applyPushes(): void {
+    for (const p of this.enemySystem.takePushes()) {
+      const r = this.registry.connected().find((x) => x.key === p.targetKey);
+      if (!r || r.combat.dead) continue;
+      const k = r.kinematic;
+      const d = Math.hypot(k.x - p.fromX, k.z - p.fromZ);
+      const [dx, dz] = d > 1e-6 ? [(k.x - p.fromX) / d, (k.z - p.fromZ) / d] : [Math.sin(k.facing), Math.cos(k.facing)];
+      const m = moveCircle(this.dungeon, k.x, k.z, dx * p.m, dz * p.m, PLAYER_RADIUS);
+      r.kinematic = { ...k, x: m.x, z: m.z };
     }
   }
 
@@ -497,7 +648,7 @@ export class RunRoom extends Room<{ state: RunState }> {
         for (const e of this.abilities.takeEvents()) this.emit(e);
         // Antes del ataque de este input: con un swing o una habilidad en curso no se cambia de arma.
         if (input.interact && !c.dead && c.swingTimer === 0 && !c.abilityAnim) {
-          if (!this.tryOpenChest(record)) this.tryPickup(record);
+          if (!this.tryTotem(record) && !this.tryOpenChest(record)) this.tryPickup(record);
         }
         if (input.attack) {
           const swing = this.combat.attack(record.combat, input);
@@ -519,10 +670,12 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (connected.length > 0 && started) this.floorTime += SIM_DT;
     this.enemySystem.setFloorClock(this.floorTime, this.dungeon.floor, this.combat.level);
     this.pruneFloorWeapons();
-    if (started && this.wavesOn) this.enemySystem.activateRooms(alive, this.registry.size());
-    if (connected.length > 0 && started && this.wavesOn) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
+    const spawning = started && this.wavesOn && !this.cleared;
+    if (spawning) this.enemySystem.activateRooms(alive, this.registry.size());
+    if (connected.length > 0 && spawning) this.director.step(this.floorTime, alive, this.registry.size(), this.enemySystem);
     const states = new Map<string, CombatState>(connected.map((r) => [r.key, r.combat]));
     this.combat.queueEnemyHits(states, this.enemySystem.step(alive, SIM_DT), this.state.tick);
+    this.applyPushes();
     for (const e of this.enemySystem.takeEvents()) this.emit(e);
     this.burnTick();
     // Enfriamientos, Grito y ondas (por tick: se congelan en la pausa).
@@ -547,6 +700,11 @@ export class RunRoom extends Room<{ state: RunState }> {
 
     // 6.
     this.history.record(this.state.tick, this.enemySystem.enemies);
+    this.checkBoss();
+    if (this.descend) {
+      this.descend = false;
+      this.nextFloor();
+    }
 
     // 7. Schema.
     this.syncPlayers(connected);
@@ -587,6 +745,8 @@ export class RunRoom extends Room<{ state: RunState }> {
    */
   private impact(key: string, res: Pick<ImpactResult, "hits" | "kills">): void {
     for (const h of res.hits) {
+      // Un golpe que no hizo nada (el dragón en vuelo) no deja número.
+      if (h.amount <= 0) continue;
       this.emit({
         type: "damage",
         targetKind: "enemy",

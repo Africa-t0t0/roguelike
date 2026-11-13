@@ -76,7 +76,7 @@ describe("Aprendizaje, Celeridad y Tajo frontal", () => {
     expect(t.ranks[2]!.count).toBe(3);
     expect(THRUST_WIDTH).toBe(1.4);
     expect(ABILITIES.slam.clip).toBe("gs_jump_attack");
-    expect(PROTOCOL_VERSION).toBe(18);
+    expect(PROTOCOL_VERSION).toBe(19);
   });
   it("cardText del Tajo menciona 10 m y, en rango 3, sus cargas", () => {
     expect(cardText({ kind: "ability", id: "thrust", rank: 2 })).toContain("10 m");

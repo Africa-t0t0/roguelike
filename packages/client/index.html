@@ -96,6 +96,15 @@
       .hud-tip-inactive { color: #8a8478; font-style: italic; }
       .hud-banner { position: absolute; left: 0; right: 0; top: 20%; text-align: center; font: 700 2.8rem var(--caps);
         letter-spacing: 0.08em; color: var(--gold-hi); text-shadow: 0 2px 10px #000, 0 0 24px rgba(201, 163, 92, 0.45); }
+      /* Barra del jefe: arriba al centro, con su nombre encima. */
+      .boss-bar { position: absolute; top: 6.4rem; left: 50%; transform: translateX(-50%); width: min(46rem, 60vw); text-align: center; }
+      .boss-name { font: 700 1.25rem var(--caps); letter-spacing: 0.1em; color: #f3d9b0; text-shadow: 0 2px 6px #000; margin-bottom: 0.3rem; }
+      .boss-track { position: relative; height: 1.1rem; background: rgba(12, 8, 6, 0.85); border: 2px solid var(--gold-dim);
+        box-shadow: 0 0 0 2px rgba(9, 8, 7, 0.85), 0 0.3rem 0.9rem rgba(0, 0, 0, 0.7); overflow: hidden; }
+      .boss-fill { position: absolute; inset: 0 auto 0 0; width: 100%; transition: width 0.25s ease-out;
+        background: linear-gradient(#d4562a, #922a14 60%, #6a1a0b); box-shadow: inset 0 1px 0 rgba(255, 190, 150, 0.4); }
+      .boss-enraged .boss-name { color: #ff7a52; }
+      .boss-enraged .boss-track { border-color: #d0422a; box-shadow: 0 0 0 2px rgba(9, 8, 7, 0.85), 0 0 1rem rgba(230, 70, 30, 0.75); }
       .hud-death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         background: radial-gradient(rgba(40, 0, 0, 0.25), rgba(30, 0, 0, 0.7)); font: 700 2rem var(--caps);
         letter-spacing: 0.06em; color: #e7c9b0; text-shadow: 0 2px 8px #000; }

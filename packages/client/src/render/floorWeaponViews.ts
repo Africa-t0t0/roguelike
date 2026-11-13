@@ -8,7 +8,7 @@ import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, type AbilityId, type GearItem, type GearSlot, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
+import { FLOOR_WEAPON_BLINK_S, PICKUP_RANGE, TIERS, TOTEM_RANGE, type AbilityId, type GearItem, type GearSlot, type Nature, type WeaponId, type WeaponTier } from "@roguelike/shared";
 import type { FloorItem, FloorWeapon } from "../net/connection";
 import { formatWeapon, pickupInfo, tierColor, type PickupInfo } from "../ui/hud";
 import { buildStaff } from "./staffMesh";
@@ -31,6 +31,10 @@ const BASE_GLOW: readonly [number, number, number] = [1, 0.8, 0.35]; // aro de l
 const PROMPT_HEIGHT_M = 0.7; // el aviso se ancla un poco por encima del arma
 const CHEST_PROMPT_HEIGHT_M = 0.9; // ...y del cofre (mide ~0,6 m)
 export const OPEN_CHEST_PROMPT = "Abrir cofre";
+/** Avisos del tótem: dormido invoca al jefe; abierto baja al piso siguiente. */
+export const WAKE_TOTEM_PROMPT = "Despertar al dragón";
+export const descendPrompt = (floor: number): string => `Bajar al piso ${floor + 1}`;
+const TOTEM_PROMPT_HEIGHT_M = 3.6;
 
 /** Parpadeo de vencimiento: siempre visible con ttl > 5 s; con ttl ≤ 5 s alterna a 6 Hz según el reloj de juego. */
 export function floorWeaponBlink(ttl: number, nowS: number): boolean {
@@ -142,6 +146,7 @@ export class FloorWeaponViews {
     me: { x: number; z: number; canPickUp: boolean; gear?: Partial<Record<GearSlot, GearItem>>; abilities?: readonly AbilityId[] } | undefined,
     nowMs: number,
     chests: Iterable<{ x: number; z: number; open: boolean }> = [],
+    totem?: { x: number; z: number; prompt: string | null },
   ): void {
     const nowS = nowMs / 1000;
     const elapsedS = Math.max(0, (nowMs - this.setAtMs) / 1000);
@@ -150,16 +155,19 @@ export class FloorWeaponViews {
       n.weapon.position.y = BOB_AMPLITUDE_M * Math.sin(2 * Math.PI * BOB_HZ * nowS + i);
       n.pivot.setEnabled(floorWeaponBlink(this.ttls[i]! - elapsedS, nowS));
     });
-    const chest = me?.canPickUp ? nearestClosedChest(chests, me.x, me.z) : undefined;
-    if (chest) {
-      const cat = this.project(chest.x, chest.z, CHEST_PROMPT_HEIGHT_M);
+    // Como el servidor: el tótem antes que los cofres, y los cofres antes que las armas.
+    const atTotem = me?.canPickUp && totem?.prompt && Math.hypot(totem.x - me.x, totem.z - me.z) <= TOTEM_RANGE ? totem : undefined;
+    const chest = me?.canPickUp && !atTotem ? nearestClosedChest(chests, me.x, me.z) : undefined;
+    const fixed = atTotem ? { x: atTotem.x, z: atTotem.z, text: atTotem.prompt!, height: TOTEM_PROMPT_HEIGHT_M } : chest && { x: chest.x, z: chest.z, text: OPEN_CHEST_PROMPT, height: CHEST_PROMPT_HEIGHT_M };
+    if (fixed) {
+      const cat = this.project(fixed.x, fixed.z, fixed.height);
       this.hint.hidden = !cat;
       if (!cat) return;
-      this.hintVerb.textContent = OPEN_CHEST_PROMPT;
+      this.hintVerb.textContent = fixed.text;
       this.hintName.textContent = "";
       this.hintLines.replaceChildren();
       this.shownKey = "";
-      this.hint.setAttribute("aria-label", OPEN_CHEST_PROMPT);
+      this.hint.setAttribute("aria-label", fixed.text);
       this.hint.style.transform = `translate(${cat.x}px, ${cat.y}px)`;
       return;
     }

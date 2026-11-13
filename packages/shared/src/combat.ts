@@ -14,7 +14,7 @@ export interface ClassDef {
   damagePerLevel: number;
 }
 
-export type EnemyKind = "minion" | "brute" | "mage" | "pyromancer" | "stormcaller" | "healer";
+export type EnemyKind = "minion" | "brute" | "mage" | "pyromancer" | "stormcaller" | "healer" | "dragon";
 
 export interface EnemyDef {
   hp: number;
@@ -99,6 +99,8 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     xp: 10,
     ranged: { preferredMin: 7, preferredMax: 11, losRadius: 0.3 },
   },
+  // El jefe: su vida y sus ataques salen de `DRAGON` (boss.ts); aquí, lo que leen los sistemas comunes.
+  dragon: { hp: 1000, speed: 4.2, radius: 1.5, damage: 20, attackRange: 4, telegraphS: 0.7, cooldownS: 1.4, xp: 150, stunImmune: true },
 };
 
 export function xpToNext(level: number): number {

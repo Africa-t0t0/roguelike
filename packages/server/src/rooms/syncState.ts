@@ -139,6 +139,10 @@ export function syncWorld(
     es.bladeMarked = e.bladeMark > 0;
     es.buffed = e.buffLeft > 0;
     es.spellTier = e.spellTier;
+    es.bossMove = e.boss?.move ?? "";
+    es.bossStage = e.boss?.move ? e.boss.stage : "";
+    es.airborne = e.boss?.airborne ?? false;
+    es.enraged = e.boss?.enraged ?? false;
   }
   for (const id of [...state.enemies.keys()]) if (!liveEnemies.has(id)) state.enemies.delete(id);
 

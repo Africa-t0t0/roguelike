@@ -16,6 +16,11 @@ export class PositionHistory {
     while (this.snaps.length > HISTORY_TICKS) this.snaps.shift();
   }
 
+  /** Olvida todo (al cambiar de piso los ids de enemigos vuelven a empezar). */
+  clear(): void {
+    this.snaps = [];
+  }
+
   at(tick: number, id: string): { x: number; z: number } | undefined {
     const t = Math.round(tick);
     for (let i = this.snaps.length - 1; i >= 0; i--) {

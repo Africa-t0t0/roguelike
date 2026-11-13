@@ -28,6 +28,9 @@ import {
   type RelicId,
   type ClassId,
   isClassId,
+  DRAGON_MOVES,
+  type DragonMove,
+  type TotemPhase,
   type WeaponId,
   type WeaponTier,
 } from "@roguelike/shared";
@@ -114,11 +117,20 @@ export interface EnemySnapshot {
   stunned: number;
   /** tier del hechizo (0 si no es hechicero) */
   spellTier: number;
+  /** el jefe: ataque en curso (null entre ataques) y su tramo, si vuela y si está furioso */
+  bossMove: DragonMove | null;
+  bossStage: "warn" | "act" | "land" | null;
+  airborne: boolean;
+  enraged: boolean;
 }
 
-/** Peligro en el suelo: zona circular o rayo, con aviso ("warn") y luego daño ("fire"). */
+/** Tipos de peligro: zona y rayo de los hechiceros; zarpazo, lanzallamas, pisotón y franja de fuego del dragón. */
+export type HazardKind = "zone" | "beam" | "arc" | "cone" | "ring" | "strip";
+const HAZARD_KINDS: readonly HazardKind[] = ["zone", "beam", "arc", "cone", "ring", "strip"];
+
+/** Peligro en el suelo con aviso ("warn") y luego daño ("fire"). */
 export interface HazardSnapshot {
-  kind: "zone" | "beam";
+  kind: HazardKind;
   x: number;
   z: number;
   dirX: number;
@@ -136,11 +148,11 @@ const HAZARD_NUMBERS = ["x", "z", "dirX", "dirZ", "length", "size", "left", "tot
 export function parseHazard(raw: unknown): HazardSnapshot | null {
   if (typeof raw !== "object" || raw === null) return null;
   const h = raw as Record<string, unknown>;
-  if (h.kind !== "zone" && h.kind !== "beam") return null;
+  if (!(HAZARD_KINDS as readonly unknown[]).includes(h.kind)) return null;
   if (h.phase !== "warn" && h.phase !== "fire") return null;
   for (const k of HAZARD_NUMBERS) if (typeof h[k] !== "number" || !Number.isFinite(h[k])) return null;
   return {
-    kind: h.kind,
+    kind: h.kind as HazardKind,
     x: h.x as number,
     z: h.z as number,
     dirX: h.dirX as number,
@@ -270,6 +282,10 @@ export interface WorldSnapshot {
   started: boolean;
   /** segundos que quedan de la elección en curso de la pausa */
   pauseLeft: number;
+  /** piso actual (al cambiar, el cliente reconstruye la mazmorra) */
+  floor: number;
+  /** tótem de la sala del jefe */
+  totem: { x: number; z: number; phase: TotemPhase };
 }
 
 export type { CombatEvent };
@@ -443,6 +459,8 @@ export interface GameConnection {
   /** Comando del panel de pruebas (solo hace algo en una sala sandbox). */
   sendDev(cmd: DevCommand): void;
   onDisconnect(cb: (reason: DisconnectReason) => void): void;
+  /** Suelta los manejadores de la sesión de juego (al rehacerla tras bajar de piso); el de desconexión queda. */
+  detach(): void;
   leave(): void;
 }
 
@@ -544,11 +562,13 @@ function snapshotPlayers(room: Room): PlayerSnapshots {
 
 function snapshotWorld(room: Room): WorldSnapshot {
   const enemies = new Map<string, EnemySnapshot>();
-  type RawEnemy = Omit<EnemySnapshot, "weaponId" | "weaponTier" | "weaponNature" | "nature"> & {
+  type RawEnemy = Omit<EnemySnapshot, "weaponId" | "weaponTier" | "weaponNature" | "nature" | "bossMove" | "bossStage"> & {
     weaponId: string;
     weaponTier: number;
     weaponNature: string;
     nature: string;
+    bossMove?: string;
+    bossStage?: string;
   };
   room.state.enemies.forEach((e: RawEnemy, id: string) => {
     // Desarmado: el servidor manda "" y 0.
@@ -575,6 +595,10 @@ function snapshotWorld(room: Room): WorldSnapshot {
       buffed: e.buffed ?? false,
       stunned: e.stunned ?? 0,
       spellTier: e.spellTier ?? 0,
+      bossMove: (DRAGON_MOVES as readonly unknown[]).includes(e.bossMove) ? (e.bossMove as DragonMove) : null,
+      bossStage: e.bossStage === "warn" || e.bossStage === "act" || e.bossStage === "land" ? e.bossStage : null,
+      airborne: e.airborne ?? false,
+      enraged: e.enraged ?? false,
     });
   });
   const projectiles = new Map<string, ProjectileSnapshot>();
@@ -624,6 +648,12 @@ function snapshotWorld(room: Room): WorldSnapshot {
     paused: st.paused ?? false,
     started: st.started ?? false,
     pauseLeft: st.pauseLeft ?? 0,
+    floor: st.floor ?? 1,
+    totem: {
+      x: st.totemX ?? 0,
+      z: st.totemZ ?? 0,
+      phase: st.totemPhase === "fight" || st.totemPhase === "open" ? st.totemPhase : "idle",
+    },
   };
 }
 
@@ -739,7 +769,9 @@ export async function connect(opts: {
     myKey,
     sandbox,
     seed: room.state.seed,
-    floor: room.state.floor,
+    get floor() {
+      return room.state.floor as number;
+    },
     sendInput(input) {
       lag.outbound(() => {
         if (!closed) room.send(MSG.input, input);
@@ -783,6 +815,12 @@ export async function connect(opts: {
     },
     onDisconnect(cb) {
       disconnectCb = cb;
+    },
+    detach() {
+      playersCb = worldCb = undefined;
+      combatCb = undefined;
+      floorCb = undefined;
+      choiceCb = undefined;
     },
     leave() {
       if (closed) return;

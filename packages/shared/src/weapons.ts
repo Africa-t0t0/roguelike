@@ -205,6 +205,7 @@ export const ARMED_CHANCE: Record<EnemyKind, { chance: number; weaponId: WeaponI
   pyromancer: null,
   stormcaller: null,
   healer: null,
+  dragon: null,
 };
 
 /** Daño y alcance del ataque de un enemigo, con o sin arma. */

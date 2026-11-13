@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CORRIDOR_WIDTHS } from "../src/constants";
-import { generateDungeon, isWalkableTile, roomSpawnPoints, type Dungeon } from "../src/dungeon";
+import { BOSS_ROOM_MIN, generateDungeon, isWalkableTile, roomSpawnPoints, type Dungeon } from "../src/dungeon";
 
 function roomCenter(d: Dungeon, id: number) {
   const r = d.rooms[id]!;
@@ -99,11 +99,13 @@ describe("generateDungeon", () => {
         }
 
         // tamaño de salas y separación
+        // La del jefe puede crecer hasta BOSS_ROOM_MIN.
         for (const r of d.rooms) {
+          const max = r.kind === "boss" ? BOSS_ROOM_MIN : 9;
           expect(r.w).toBeGreaterThanOrEqual(5);
-          expect(r.w).toBeLessThanOrEqual(9);
+          expect(r.w).toBeLessThanOrEqual(max);
           expect(r.h).toBeGreaterThanOrEqual(5);
-          expect(r.h).toBeLessThanOrEqual(9);
+          expect(r.h).toBeLessThanOrEqual(max);
         }
         for (const a of d.rooms) {
           for (const b of d.rooms) {
@@ -168,5 +170,15 @@ describe("isWalkableTile", () => {
     const d = generateDungeon(1, 1);
     expect(isWalkableTile(d, -1, 0)).toBe(false);
     expect(isWalkableTile(d, 0, d.height)).toBe(false);
+  });
+  it("la sala del jefe crece: en la mayoría de las semillas llega a BOSS_ROOM_MIN de lado", () => {
+    let full = 0;
+    for (let seed = 1; seed <= 50; seed++) {
+      const d = generateDungeon(seed, 1);
+      const b = d.rooms[d.bossRoomId]!;
+      if (b.w >= BOSS_ROOM_MIN && b.h >= BOSS_ROOM_MIN) full++;
+      expect(Math.min(b.w, b.h)).toBeGreaterThanOrEqual(5);
+    }
+    expect(full).toBeGreaterThan(25);
   });
 });
